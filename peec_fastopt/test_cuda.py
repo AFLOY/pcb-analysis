@@ -30,12 +30,15 @@ class CudaConfigurationTests(unittest.TestCase):
             "device_id": 2,
             "precision": "complex128",
             "memory_reserve_fraction": 0.2,
+            "release_pool_after_solve": False,
         })
         self.assertEqual(config.device_id, 2)
         self.assertEqual(config.precision, "complex128")
         self.assertEqual(config.memory_reserve_fraction, 0.2)
         self.assertTrue(config.cache_voxel)
         self.assertEqual(config.voxel_cache_entries, 8)
+        self.assertFalse(config.release_pool_after_solve)
+        self.assertTrue(CudaPeecConfig.from_mapping({}).release_pool_after_solve)
         with self.assertRaises(ValueError):
             CudaPeecConfig.from_mapping({"precision": "float16"})
         with self.assertRaises(ValueError):

@@ -35,6 +35,9 @@ class CudaPeecConfig:
     memory_reserve_fraction: float = 0.10
     cache_voxel: bool = True
     voxel_cache_entries: int = 8
+    # Return unused CuPy blocks to the driver after each solve.  Keeps free
+    # VRAM higher across multi-case epochs at a small allocator cost.
+    release_pool_after_solve: bool = True
 
     @classmethod
     def from_mapping(cls, settings: dict[str, Any] | None) -> "CudaPeecConfig":
@@ -57,6 +60,9 @@ class CudaPeecConfig:
             memory_reserve_fraction=reserve,
             cache_voxel=bool(values.get("cache_voxel", True)),
             voxel_cache_entries=cache_entries,
+            release_pool_after_solve=bool(
+                values.get("release_pool_after_solve", True)
+            ),
         )
 
 
@@ -102,15 +108,6 @@ def _geometry_key(geometry: dict[str, Any], device_id: int = 0) -> str:
         geometry, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest() + f":{device_id}"
-
-def _to_device(obj: Any, cp: Any) -> Any:
-    if isinstance(obj, dict):
-        return {k: _to_device(v, cp) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_to_device(v, cp) for v in obj]
-    if hasattr(obj, "shape") and hasattr(obj, "dtype") and not isinstance(obj, cp.ndarray):
-        return cp.asarray(obj)
-    return obj
 
 
 def clear_cuda_caches() -> None:
@@ -226,7 +223,7 @@ class CudaPyPeecExecutor:
                 "PyPEEC 5.8 FFT backend reset hook is unavailable"
             ) from exc
         pool = cp.get_default_memory_pool()
-        baseline_free = int(telemetry.free_bytes)
+        pinned_pool = cp.get_default_pinned_memory_pool()
         total_start = time.perf_counter()
         with self._device():
             # CuPy memory-pool limits are per device.  Read, apply, and restore
@@ -240,25 +237,32 @@ class CudaPyPeecExecutor:
                 cache_hit = False
                 if self.config.cache_voxel:
                     with _VOXEL_CACHE_LOCK:
-                        voxel = _VOXEL_CACHE.get(cache_key)
-                        cache_hit = voxel is not None
+                        cached = _VOXEL_CACHE.get(cache_key)
+                        cache_hit = cached is not None
                         if cache_hit:
+                            # Defensive copy: PyPEEC may mutate geometry views.
+                            voxel = copy.deepcopy(cached)
                             _VOXEL_CACHE.move_to_end(cache_key)
                 if cache_hit:
                     mesher_ms = 0.0
                 else:
                     mesher_start = time.perf_counter()
+                    # Keep mesher output on the host.  PyPEEC 5.8 indexes
+                    # domain_def with NumPy and only moves FFT products to
+                    # CuPy; pushing the whole voxel tree to the device breaks
+                    # material indexing and wastes VRAM.
                     voxel = self.pypeec.run_mesher_data(geometry)
-                    voxel = _to_device(voxel, cp)
                     mesher_ms = (time.perf_counter() - mesher_start) * 1000.0
                     if self.config.cache_voxel:
                         with _VOXEL_CACHE_LOCK:
-                            _VOXEL_CACHE[cache_key] = voxel
+                            _VOXEL_CACHE[cache_key] = copy.deepcopy(voxel)
                             _VOXEL_CACHE.move_to_end(cache_key)
                             while len(_VOXEL_CACHE) > self.config.voxel_cache_entries:
                                 _VOXEL_CACHE.popitem(last=False)
 
                 cp.cuda.Stream.null.synchronize()
+                free_before_solve, _ = cp.cuda.runtime.memGetInfo()
+                pool_before_solve = int(pool.total_bytes())
                 solver_start = time.perf_counter()
                 solution = self.pypeec.run_solver_data(
                     voxel, problem, configured_tolerance
@@ -266,8 +270,17 @@ class CudaPyPeecExecutor:
                 cp.cuda.Stream.null.synchronize()
                 solver_ms = (time.perf_counter() - solver_start) * 1000.0
                 free_after, _ = cp.cuda.runtime.memGetInfo()
-                device_growth = max(0, baseline_free - int(free_after))
-                peak_bytes = max(int(pool.total_bytes()), device_growth, 1)
+                pool_after = int(pool.total_bytes())
+                device_growth = max(0, int(free_before_solve) - int(free_after))
+                pool_growth = max(0, pool_after - pool_before_solve)
+                # Prefer the larger of pool growth and free-memory drop for the
+                # solve window; still incomplete vs cuFFT workspaces outside pool.
+                peak_bytes = max(
+                    pool_growth,
+                    device_growth,
+                    int(pool.used_bytes()),
+                    1,
+                )
             except Exception as exc:
                 oom_type = getattr(cp.cuda.memory, "OutOfMemoryError", ())
                 if oom_type and isinstance(exc, oom_type):
@@ -287,6 +300,11 @@ class CudaPyPeecExecutor:
             finally:
                 # A zero limit means unlimited; restore the caller's policy.
                 pool.set_limit(size=old_limit)
+                if self.config.release_pool_after_solve:
+                    # Drop orphan blocks held by the pool so multi-case
+                    # optimizer epochs do not accumulate free-but-reserved VRAM.
+                    pool.free_all_blocks()
+                    pinned_pool.free_all_blocks()
 
         total_ms = (time.perf_counter() - total_start) * 1000.0
         sweep = solution.get("data_sweep", {}).get("target", {})

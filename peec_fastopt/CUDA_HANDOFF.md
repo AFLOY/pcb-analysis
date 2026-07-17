@@ -63,6 +63,27 @@ The validated GTX 1650 run completed all nine scenarios at 624.697 ms CPU
 median versus 309.441 ms CUDA median, or 2.019x.  Its maximum physical-metric
 difference was 1.60e-11 and every gate passed.
 
+## Memory-ops findings (GTX 1650, 2026-07-17)
+
+Probe script: `peec_fastopt/optimization_experiments/memory_ops_probe.py`.
+
+- Mesher voxel data must stay on the **host**.  PyPEEC 5.8 indexes `domain_def`
+  with NumPy; pushing the whole voxel tree to CuPy breaks material indexing.
+  FFT work still runs on the GPU via the CuPy library selection.
+- Host geometry-keyed voxel cache: same-geometry re-solve cold ≈ 695 ms → warm
+  median ≈ 160 ms (~4.3x).  Distinct electrical scenarios produce distinct
+  geometry keys (terminals differ), so a one-pass 9-scenario sweep mostly
+  misses; optimizer re-evaluation of one layout hits.
+- `release_pool_after_solve` (default true) returns unused CuPy/pinned blocks
+  after each solve.  Versus keep-pool: about +8 MiB free VRAM at epoch end and
+  no median slowdown on a 4-case board probe.
+- `memory_reserve_fraction` 0.05 / 0.10 / 0.25 all solved this board; 0.999
+  correctly raises `CudaPeecSolveError` with `oom=True` (no silent CPU fallback).
+- Controller plans for the synthetic 1024² / 4-layer / 2e6-unknown profile all
+  fit the live ~2.4 GiB Linux safe budget on this 4 GB card.
+- Reported `peak_device_bytes` remains incomplete (pool window only); device
+  used stays near ~0.6 GiB with CUDA context resident.
+
 ## Known limits and next optimization targets
 
 - PyPEEC 5.8 controls the physical solver dtype, so `complex64` is accepted as
