@@ -1,4 +1,4 @@
-# DICE-PEEC design and prototype results
+# DICE-PEEC design and CUDA results
 
 ## Conclusion
 
@@ -11,6 +11,40 @@ candidates.
 This differs from merely moving a dense PEEC solver to CUDA. CUDA accelerates
 the remaining FFT and Krylov work, while sparse-delta evaluation removes most
 of that work from the candidate loop.
+
+## Physical CUDA solver acceptance result
+
+The first production MVP now runs the same PyPEEC 5.8 physical formulation
+used by `plane_opt`, switching its matrix-free FFT products from SciPy to CuPy
+and cuFFT.  It also caches the geometry-keyed PyPEEC voxelization across the
+repeated scenarios used by the optimizer.  CPU and CUDA result conversion is
+shared, so both paths expose identical current-field metrics.
+
+The real-board acceptance run on 2026-07-17 used the 0.2 mm `plane_opt` grid,
+all nine configured electrical scenarios, one warmup, and three measured
+solves per scenario.  The candidate geometry came from
+`pgnd_board_left_expanded_0p4`.  These are warm, same-process measurements,
+including a warm voxel cache on the CUDA path.
+
+| Item | Result |
+|---|---:|
+| GPU | NVIDIA GeForce GTX 1650, 4 GB |
+| Driver / toolkit | 610.43.02 / CUDA 13.3 |
+| CuPy / PyPEEC | 14.1.1 / 5.8.0 |
+| CPU PyPEEC global median | 624.697 ms |
+| CUDA PEEC global median | 309.441 ms |
+| End-to-end median speedup | **2.019x** |
+| Per-case speedup range | 1.322x to 2.315x |
+| Maximum metric relative difference | 1.60e-11 |
+
+All acceptance gates passed: at least 2x global median speedup, no case more
+than 10% slower than CPU, four reported physical metrics within 1%, current
+closure within 1e-6 A, and consistent rankings.  The machine-readable report
+is `benchmark-results/all-cases-final.json`.
+
+The physical solve currently remains complex128 because PyPEEC owns its solver
+dtype.  Reported device-memory peaks are deliberately marked incomplete because
+cuFFT may allocate workspaces outside CuPy's memory pool.
 
 ## Measured prototype result
 
@@ -97,11 +131,11 @@ PEEC for finalists, and full-wave/sign-off analysis only at milestones.
 
 ## Scope warning
 
-The prototype does not yet solve the complete PEEC MNA system and does not
-establish the correction fraction obtainable on a real KiCad board. Its result
-establishes only that local quadratic interaction terms can be updated exactly
-and extremely cheaply. Real-board validation must measure top-candidate recall,
-not just scalar score error.
+The CUDA backend above solves the physical PEEC system used by the existing
+single-layer `plane_opt` integration.  The separate delta-ranking prototype in
+this document is still a scalar interaction model: it does not yet establish
+the correction fraction obtainable on a real KiCad board.  Real-board delta
+validation must measure top-candidate recall, not just scalar score error.
 
 ## Low-memory near/far calibration
 
@@ -149,5 +183,6 @@ the complete operator model.
 For the default synthetic 1024 x 1024, four-layer, two-million-unknown profile,
 all fidelity stages fit the emulated Windows 4 GB safe allocation budget. This
 is a controller/model check, not proof that a complete physical PEEC operator
-has that footprint. The next measurement must replace estimates with actual
-peak VRAM from the integrated CUDA executor.
+has that footprint.  The integrated executor now reports CuPy-pool and free
+device-memory deltas, but CUPTI or NVML sampling is still required for a
+complete peak that includes cuFFT workspaces.

@@ -426,7 +426,7 @@ class DynamicController:
                 else min(64, self.policy.fine_near_radius * 2)
             ),
             far_block_width=2 if stage == FidelityStage.CORRECTION else 1,
-            field_precision="complex128" if precision_bad else "complex64",
+            field_precision="complex128" if precision_bad and stage == FidelityStage.CORRECTION else "complex64",
             solver=solver,
             restart=restart,
             tolerance=1e-4 if stage == FidelityStage.CORRECTION else 1e-6,

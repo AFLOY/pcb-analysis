@@ -1,4 +1,49 @@
-# Delta-Cascade PEEC prototype
+# PEEC-CUDA and Delta-Cascade PEEC
+
+The package now contains a production integration path for the single-layer,
+multi-terminal PyPEEC problems used by `plane_opt`.  The `cuda_peec` backend
+keeps PyPEEC's physical formulation and iterative solver but selects its CuPy
+/ cuFFT operator, applies a device-memory reserve, and returns measured runtime
+metadata through the existing `SolveResult` contract.  Sparse quadratic delta
+scores also have a batched CuPy/RawKernel implementation.
+
+Install the CPU development package with:
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -e .
+```
+
+After the NVIDIA driver is healthy, install the CUDA extras and both sibling
+projects.  The CUDA 13 wheel uses NumPy 2 in the CUDA environment, while the
+base package remains compatible with NumPy 1.26 for CPU-only workflows:
+
+```sh
+.venv/bin/pip install -e '.[cuda]' -e ../plane_opt
+```
+
+Verify the device with `nvidia-smi`.  If Linux has loaded the NVIDIA modules
+but the `/dev/nvidia*` nodes are absent, run `sudo nvidia-modprobe -u -c=0` and
+probe again.
+
+Select `"backend": "cuda_peec"` in `current_field_solver`; CPU fallback is
+disabled by default and is enabled only with `"fallback_backend": "pypeec"`.
+
+Run the real-board acceptance benchmark with:
+
+```sh
+.venv/bin/peec-cuda-benchmark \
+  --extract ../plane_opt/topology_variants/pgnd_board_left_expanded_0p4/analysis/extract.json \
+  --candidate ../plane_opt/topology_variants/pgnd_board_left_expanded_0p4/analysis/search.json \
+  --config ../plane_opt/topology_refinement_config.json \
+  --output benchmark-results/cuda-vs-cpu.json
+```
+
+The command requires at least 2x median end-to-end speedup, metrics within 1%,
+current closure within 1e-6 A, stable rankings, and no case slower by more than
+10%.  It exits nonzero when any gate fails.
+
+## Research prototype
 
 This prototype tests one component of an optimization-oriented PEEC workflow:
 exact incremental evaluation of a quadratic electromagnetic interaction metric.
