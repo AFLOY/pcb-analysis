@@ -218,3 +218,39 @@ The analytic memory estimator is deliberately conservative until complete
 operator telemetry is available. Partial cuFFT calibration reports are marked
 `memory_complete=False`, so they update timing but cannot incorrectly scale the
 whole PEEC memory model.
+
+## Multilayer implementation status (peec-cuda)
+
+plane_opt will own multilayer pathfinding and via insertion.  peec-cuda owns
+the fixed-grid 2.5D interaction model and sparse candidate scoring that those
+edits feed.
+
+| Component | Module | Status |
+|---|---|---|
+| Stackup / layer z | `stackup.py` | implemented |
+| Sparse multilayer delta | `multilayer_peec.SparseDeltaML` | implemented |
+| 2.5D FFT + interlayer kernel matrix | `multilayer_peec.FFTInteraction25D` | implemented |
+| Exact delta quadratic identity | `multilayer_peec.MultilayerDeltaScorer` | implemented |
+| Lumped via energy (R + jωL proxy) | `multilayer_peec.ViaSpec` / `ViaSet` | implemented |
+| Router ops → delta | `layout_ops` (`add`/`remove` segment & via) | implemented |
+| Near/far 2.5D cascade | `lowmem_25d.py` | implemented |
+| Dynamic memory controller `layers` | `controller.py` | already parameterized |
+| Full PEEC-MNA / adjoint / residual gates | — | not yet |
+| plane_opt multilayer geometry mapping | plane_opt | external |
+| Physical CUDA PyPEEC path | `cuda_pypeec.py` | layer-agnostic executor; mapping-dependent |
+
+### Integration contract for plane_opt
+
+1. Build a `Stackup` (layer names + z centers in mm) for the board.
+2. Represent the accepted layout as occupancy `x0` with shape
+   `(n_layers, ny, nx)` and a base `ViaSet`.
+3. For each candidate, emit `CandidateEdit` with `SegmentOp` / `ViaOp`, or
+   construct `SparseDeltaML` + `ViaSet` directly.
+4. Score with `MultilayerDeltaScorer` (Gate 1).  Use `high_risk_topology` from
+   `compile_candidate` when vias or layer transitions are present (feeds Gate 3
+   promotion policy in `controller.select_for_promotion`).
+5. Keep full PyPEEC/CUDA correction solves for promoted candidates only.
+
+Cell coordinates are in the fixed routing grid.  Vertical distances use
+`stackup.z_mm` converted by `cell_size_m` so interlayer kernels stay consistent
+with the planar FFT grid.

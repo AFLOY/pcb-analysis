@@ -43,6 +43,47 @@ The command requires at least 2x median end-to-end speedup, metrics within 1%,
 current closure within 1e-6 A, stable rankings, and no case slower by more than
 10%.  It exits nonzero when any gate fails.
 
+## Multilayer 2.5D scoring (DICE scaffolding)
+
+While `plane_opt` implements multilayer routing and via connectivity, this
+package provides the document-aligned 2.5D interaction model:
+
+- `Stackup` — layer names and z centers
+- `FFTInteraction25D` — planar FFT with interlayer kernel matrix
+- `SparseDeltaML` / `MultilayerDeltaScorer` — exact sparse delta energy
+- `ViaSpec` / `ViaSet` — frequency-dependent lumped vias
+- `layout_ops` — `add_segment` / `remove_segment` / `add_via` / `remove_via`
+- `lowmem_25d` — near/far cascade on multilayer occupancy
+
+```python
+from peec_fastopt import (
+    Stackup,
+    FFTInteraction25D,
+    MultilayerDeltaScorer,
+    CandidateEdit,
+    SegmentOp,
+    ViaOp,
+    compile_candidate,
+)
+import numpy as np
+
+stack = Stackup.dual_sided(board_thickness_mm=1.6)
+shape = (64, 64)
+base = np.zeros((stack.n_layers, *shape))
+base[0, 10:20, 10:30] = 1.0
+op = FFTInteraction25D(shape, stack, cell_size_m=0.2e-3)
+scorer = MultilayerDeltaScorer(op, base, frequency_hz=3e5)
+edit = CandidateEdit(
+    segments=[SegmentOp("add", "B.Cu", ((12, 12), (12, 13), (12, 14)))],
+    vias=[ViaOp("add", 12, 14, "F.Cu", "B.Cu", important=True)],
+)
+compiled = compile_candidate(edit, stack)
+score = scorer.energy(compiled.occupancy_delta, vias=compiled.vias)
+```
+
+Single-layer physical CUDA solves remain the production path through
+`cuda_peec` until plane_opt supplies multilayer PyPEEC mappings.
+
 ## Research prototype
 
 This prototype tests one component of an optimization-oriented PEEC workflow:

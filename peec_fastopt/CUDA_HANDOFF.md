@@ -84,12 +84,25 @@ Probe script: `peec_fastopt/optimization_experiments/memory_ops_probe.py`.
 - Reported `peak_device_bytes` remains incomplete (pool window only); device
   used stays near ~0.6 GiB with CUDA context resident.
 
+## Multilayer DICE scaffolding (independent of plane_opt mapping)
+
+peec-cuda now implements the design-doc 2.5D multilayer **scoring** path
+(`stackup`, `multilayer_peec`, `layout_ops`, `lowmem_25d`).  It does not replace
+PyPEEC.  plane_opt should:
+
+1. keep building multilayer route/via geometry on its side;
+2. feed occupancy + via edits into `compile_candidate` / `MultilayerDeltaScorer`
+   for candidate screening;
+3. extend `build_pypeec_inputs` when full multilayer physical solves are ready;
+4. continue calling `CudaPyPeecExecutor` unchanged for physical correction.
+
 ## Known limits and next optimization targets
 
 - PyPEEC 5.8 controls the physical solver dtype, so `complex64` is accepted as
   requested policy metadata but the effective solve remains complex128.
 - The current `plane_opt` physical mapping is single-layer; multilayer/via
-  coupling requires extending that mapping and its validation fixtures.
+  coupling requires extending that mapping and its validation fixtures.  The
+  2.5D scorer is ready to accept multilayer edits before that mapping lands.
 - Memory telemetry includes the CuPy pool and observed free-memory delta, but
   not a guaranteed complete cuFFT workspace peak.  It therefore reports
   `memory_measurement_complete=false`.

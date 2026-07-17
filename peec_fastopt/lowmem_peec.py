@@ -35,12 +35,16 @@ def exact_energy(
 def build_blocks(
     points: np.ndarray, values: np.ndarray, block_size: int
 ) -> FarFieldBlocks:
+    points = np.asarray(points, dtype=np.float64)
+    if points.ndim != 2:
+        raise ValueError("points must have shape (n_sources, n_dim)")
+    n_dim = points.shape[1]
     block_index = np.floor_divide(points, block_size).astype(np.int32)
     unique, source_block = np.unique(block_index, axis=0, return_inverse=True)
     centers = (unique.astype(np.float64) + 0.5) * block_size - 0.5
     charge = np.bincount(source_block, weights=values, minlength=len(unique))
     offsets = points - centers[source_block]
-    dipole = np.zeros((len(unique), 2), dtype=np.float64)
+    dipole = np.zeros((len(unique), n_dim), dtype=np.float64)
     np.add.at(dipole, source_block, values[:, None] * offsets)
     return FarFieldBlocks(centers, charge, dipole, source_block)
 
