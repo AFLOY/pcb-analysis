@@ -5,8 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "peec-fastopt"
 version = "0.1.0"
-description = "CUDA acceleration and adaptive execution for PCB PEEC optimization"
+description = "CUDA-accelerated PEEC solver for PCB PDN optimization"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
+authors = [
+  { name = "Hiroyuki Yamada", email = "H44bcda@gmail.com" },
+]
 dependencies = [
   "numpy>=1.26,<2.4",
   "scipy>=1.11,<1.18",
@@ -19,9 +24,17 @@ cuda = [
 ]
 test = ["pytest>=8,<9"]
 
+[project.urls]
+Homepage = "https://github.com/AFLOY/peec-cuda"
+Repository = "https://github.com/AFLOY/peec-cuda"
+Issues = "https://github.com/AFLOY/peec-cuda/issues"
+
 [project.scripts]
-peec-cuda-calibrate = "peec_fastopt.cuda_calibrate:main"
-peec-cuda-benchmark = "peec_fastopt.plane_opt_benchmark:main"
+peec-cuda-calibrate = "examples.cuda_calibrate:main"
+peec-cuda-benchmark = "examples.plane_opt_benchmark:main"
 
 [tool.setuptools.packages.find]
 include = ["peec_fastopt*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

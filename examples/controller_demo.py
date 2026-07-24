@@ -6,8 +6,8 @@ import argparse
 import json
 from dataclasses import asdict
 
-from .backends import SyntheticBackend
-from .controller import DynamicController, FidelityStage, GIB, ProblemProfile
+from peec_fastopt.backends import SyntheticBackend
+from peec_fastopt.controller import DynamicController, FidelityStage, GIB, ProblemProfile
 
 
 def main() -> None:

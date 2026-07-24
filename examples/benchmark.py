@@ -9,10 +9,7 @@ import time
 import numpy as np
 from scipy.stats import rankdata
 
-try:
-    from .delta_peec import DeltaQuadraticScorer, FFTInteraction2D, SparseDelta
-except ImportError:  # Direct script execution.
-    from delta_peec import DeltaQuadraticScorer, FFTInteraction2D, SparseDelta
+from peec_fastopt.delta_peec import DeltaQuadraticScorer, FFTInteraction2D, SparseDelta
 
 
 def make_base(grid: int) -> np.ndarray:

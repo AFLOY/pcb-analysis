@@ -9,12 +9,14 @@ import time
 import numpy as np
 from scipy.stats import rankdata
 
-try:
-    from .benchmark import make_base, make_candidates
-    from .lowmem_peec import approximate_energy, exact_energy
-except ImportError:
-    from benchmark import make_base, make_candidates
-    from lowmem_peec import approximate_energy, exact_energy
+from peec_fastopt.lowmem_peec import approximate_energy, exact_energy
+
+# benchmark.py is co-located in examples/; add examples/ to path if needed.
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from benchmark import make_base, make_candidates  # noqa: E402
 
 
 def candidate_points(base: np.ndarray, delta) -> tuple[np.ndarray, np.ndarray]:

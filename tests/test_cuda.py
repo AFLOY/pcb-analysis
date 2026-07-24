@@ -12,7 +12,7 @@ from peec_fastopt.cuda_pypeec import (
     cupy_tolerance,
 )
 from peec_fastopt.delta_peec import SparseDelta
-from peec_fastopt.plane_opt_benchmark import (
+from peec_fastopt._bench_utils import (
     _select_candidate,
     ranking_consistent,
     relative_difference,

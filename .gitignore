@@ -8,3 +8,4 @@ dist/
 .env
 .venv/
 benchmark-results/
+experiments/output/

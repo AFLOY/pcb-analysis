@@ -6,8 +6,8 @@ import argparse
 import json
 from dataclasses import asdict
 
-from .controller import DynamicController, FidelityStage, ProblemProfile
-from .cupy_calibrator import CuPyCalibrationBackend
+from peec_fastopt.controller import DynamicController, FidelityStage, ProblemProfile
+from peec_fastopt.cupy_calibrator import CuPyCalibrationBackend
 
 
 def main() -> None:
