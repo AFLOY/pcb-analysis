@@ -31,7 +31,9 @@ void score_delta(
     double linear = 0.0;
     double quadratic = 0.0;
     for (long long i = start; i < stop; ++i) {
-        linear += 2.0 * values[i] * (double)base_field[rows[i] * ncols + cols[i]];
+        const long long base_index =
+            (long long)rows[i] * (long long)ncols + (long long)cols[i];
+        linear += 2.0 * values[i] * (double)base_field[base_index];
         for (long long j = start; j < stop; ++j) {
             const double dr = (double)(rows[i] - rows[j]);
             const double dc = (double)(cols[i] - cols[j]);
@@ -53,6 +55,19 @@ class CudaDeltaQuadraticScorer:
         *,
         cupy_module: Any | None = None,
     ) -> None:
+        with np.errstate(over="ignore", invalid="ignore"):
+            self.base = np.array(base, dtype=np.float32, copy=True)
+        if self.base.ndim != 2:
+            raise ValueError("base must be a two-dimensional array")
+        if any(size <= 0 for size in self.base.shape):
+            raise ValueError("base dimensions must be positive")
+        if not np.all(np.isfinite(self.base)):
+            raise ValueError("base must contain only finite float32 values")
+        self.shape = self.base.shape
+        self.softening = float(softening)
+        if not np.isfinite(self.softening) or self.softening <= 0.0:
+            raise ValueError("softening must be finite and positive")
+
         if cupy_module is None:
             try:
                 import cupy as cp
@@ -61,11 +76,6 @@ class CudaDeltaQuadraticScorer:
         else:
             cp = cupy_module
         self.cp = cp
-        self.base = np.asarray(base, dtype=np.float32)
-        if self.base.ndim != 2:
-            raise ValueError("base must be a two-dimensional array")
-        self.shape = self.base.shape
-        self.softening = float(softening)
         self.fft_shape = tuple(next_fast_len(3 * n - 2) for n in self.shape)
 
         base_gpu = cp.asarray(self.base)
@@ -101,31 +111,82 @@ class CudaDeltaQuadraticScorer:
         candidates: Iterable[SparseDelta],
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
         items = list(candidates)
+        normalized: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+        int32 = np.iinfo(np.int32)
+        for item in items:
+            rows = np.asarray(item.rows)
+            cols = np.asarray(item.cols)
+            values = np.asarray(item.values, dtype=np.float64)
+            if rows.ndim != 1 or cols.ndim != 1 or values.ndim != 1:
+                raise ValueError(
+                    "candidate rows, cols, and values must be one-dimensional"
+                )
+            if not (rows.size == cols.size == values.size):
+                raise ValueError(
+                    "candidate rows, cols, and values must have equal lengths"
+                )
+            if rows.size and not np.issubdtype(rows.dtype, np.integer):
+                raise TypeError("candidate rows must use an integer dtype")
+            if cols.size and not np.issubdtype(cols.dtype, np.integer):
+                raise TypeError("candidate cols must use an integer dtype")
+            if rows.size and (
+                np.any(rows < int32.min) or np.any(rows > int32.max)
+            ):
+                raise OverflowError("candidate row does not fit CUDA int32 indexing")
+            if cols.size and (
+                np.any(cols < int32.min) or np.any(cols > int32.max)
+            ):
+                raise OverflowError("candidate col does not fit CUDA int32 indexing")
+            if not np.all(np.isfinite(values)):
+                raise ValueError("candidate values must be finite")
+            normalized.append(
+                (
+                    rows.astype(np.int32, copy=False),
+                    cols.astype(np.int32, copy=False),
+                    values,
+                )
+            )
+
         offsets = np.zeros(len(items) + 1, dtype=np.int64)
         if items:
-            offsets[1:] = np.cumsum([item.size for item in items], dtype=np.int64)
+            offsets[1:] = np.cumsum(
+                [values.size for _, _, values in normalized], dtype=np.int64
+            )
         rows = (
-            np.concatenate([item.rows for item in items])
+            np.concatenate([rows for rows, _, _ in normalized], dtype=np.int32)
             if offsets[-1]
             else np.empty(0, np.int32)
         )
         cols = (
-            np.concatenate([item.cols for item in items])
+            np.concatenate([cols for _, cols, _ in normalized], dtype=np.int32)
             if offsets[-1]
             else np.empty(0, np.int32)
         )
         values = (
-            np.concatenate([item.values for item in items]).astype(np.float64, copy=False)
+            np.concatenate([values for _, _, values in normalized], dtype=np.float64)
             if offsets[-1]
             else np.empty(0, np.float64)
         )
         return rows, cols, values, offsets, len(items)
+
+    @staticmethod
+    def _validate_indices(
+        rows: np.ndarray, cols: np.ndarray, shape: tuple[int, int]
+    ) -> None:
+        if (
+            np.any(rows < 0)
+            or np.any(rows >= shape[0])
+            or np.any(cols < 0)
+            or np.any(cols >= shape[1])
+        ):
+            raise IndexError(f"candidate coordinate is outside base shape {shape}")
 
     def energy_many(self, candidates: Iterable[SparseDelta]) -> np.ndarray:
         cp = self.cp
         rows, cols, values, offsets, count = self._pack(candidates)
         if count == 0:
             return np.empty(0, dtype=np.float64)
+        self._validate_indices(rows, cols, self.shape)
         rows_gpu = cp.asarray(rows)
         cols_gpu = cp.asarray(cols)
         values_gpu = cp.asarray(values)

@@ -8,7 +8,7 @@ separate backend.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import IntEnum
 from math import ceil
 from typing import Iterable
@@ -120,6 +120,7 @@ class PolicyState:
     audits: int = 0
     misses: int = 0
     stable_audits: int = 0
+    precision_promoted: bool = False
 
     @property
     def observed_recall(self) -> float:
@@ -309,6 +310,8 @@ class DynamicController:
             self.runtime.update_memory(plan.estimated_bytes, report.peak_bytes)
         if not report.oom:
             self.runtime.update_time(plan, report.elapsed_ms)
+        if report.precision_gap > 1e-5:
+            self.policy.precision_promoted = True
 
     def record_accuracy_audit(
         self,
@@ -415,6 +418,8 @@ class DynamicController:
 
         stagnated = bool(report and (report.stagnated or not report.converged))
         precision_bad = bool(report and report.precision_gap > 1e-5)
+        if precision_bad:
+            self.policy.precision_promoted = True
         if stage == FidelityStage.CORRECTION and not stagnated:
             solver, restart = "bicgstab2", 0
         else:
@@ -426,7 +431,12 @@ class DynamicController:
                 else min(64, self.policy.fine_near_radius * 2)
             ),
             far_block_width=2 if stage == FidelityStage.CORRECTION else 1,
-            field_precision="complex128" if precision_bad and stage == FidelityStage.CORRECTION else "complex64",
+            # Once a replay exposes a precision gap, every subsequent physical
+            # stage must retain the promoted storage precision.  In particular,
+            # REFINED must not silently drop back to complex64.
+            field_precision=(
+                "complex128" if self.policy.precision_promoted else "complex64"
+            ),
             solver=solver,
             restart=restart,
             tolerance=1e-4 if stage == FidelityStage.CORRECTION else 1e-6,

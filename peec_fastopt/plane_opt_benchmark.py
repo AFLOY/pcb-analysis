@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import math
 import statistics
 import time
 from pathlib import Path
@@ -20,6 +21,10 @@ METRIC_FIELDS = (
 
 
 def relative_difference(reference: float, observed: float) -> float:
+    reference = float(reference)
+    observed = float(observed)
+    if not math.isfinite(reference) or not math.isfinite(observed):
+        return math.inf
     scale = max(abs(reference), 1e-30)
     return abs(observed - reference) / scale
 
@@ -32,17 +37,31 @@ def ranking_consistent(
     separation: float = 0.01,
 ) -> bool:
     """Check every meaningfully separated CPU pair retains its order."""
+    if not math.isfinite(separation) or separation < 0.0:
+        raise ValueError("separation must be finite and non-negative")
+    if set(cpu) != set(cuda):
+        return False
     names = sorted(cpu)
     for left_index, left in enumerate(names):
         for right in names[left_index + 1 :]:
             cpu_left = float(cpu[left][metric])
             cpu_right = float(cpu[right][metric])
+            cuda_left = float(cuda[left][metric])
+            cuda_right = float(cuda[right][metric])
+            if not all(
+                math.isfinite(value)
+                for value in (cpu_left, cpu_right, cuda_left, cuda_right)
+            ):
+                return False
             scale = max(abs(cpu_left), abs(cpu_right), 1e-30)
             if abs(cpu_left - cpu_right) / scale <= separation:
                 continue
-            cuda_left = float(cuda[left][metric])
-            cuda_right = float(cuda[right][metric])
-            if (cpu_left < cpu_right) != (cuda_left < cuda_right):
+            # A tie in the observed result does not retain a meaningful CPU
+            # ordering.  Comparing the signed differences also avoids making
+            # the answer depend on the lexical order of the case names.
+            cpu_delta = cpu_left - cpu_right
+            cuda_delta = cuda_left - cuda_right
+            if cuda_delta == 0.0 or (cpu_delta < 0.0) != (cuda_delta < 0.0):
                 return False
     return True
 
@@ -99,6 +118,8 @@ def benchmark(
     repeats: int = 10,
     case_names: set[str] | None = None,
 ) -> dict[str, Any]:
+    if warmups < 0 or repeats < 1:
+        raise ValueError("warmups must be non-negative and repeats must be positive")
     from plane_opt.current_field_backend import solve_current_field_case
     from plane_opt.geometry_metrics import CopperGrid
     from plane_opt.topology_holes import apply_mask_runs
@@ -178,7 +199,7 @@ def benchmark(
         for difference in fields.values()
     )
     closure_ok = all(
-        float(metrics["current_closure_error_a"]) <= 1e-6
+        abs(float(metrics["current_closure_error_a"])) <= 1e-6
         for metrics in cuda_metrics.values()
     )
     rankings = {

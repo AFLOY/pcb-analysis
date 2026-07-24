@@ -54,8 +54,11 @@ class CudaPeecConfig:
         cache_entries = int(values.get("voxel_cache_entries", 8))
         if cache_entries < 1:
             raise ValueError("voxel_cache_entries must be positive")
+        device_id = int(values.get("device_id", 0))
+        if device_id < 0:
+            raise ValueError("device_id must be non-negative")
         return cls(
-            device_id=int(values.get("device_id", 0)),
+            device_id=device_id,
             precision=precision,
             memory_reserve_fraction=reserve,
             cache_voxel=bool(values.get("cache_voxel", True)),
@@ -101,6 +104,43 @@ class CudaPeecResult:
 
 _VOXEL_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _VOXEL_CACHE_LOCK = threading.RLock()
+
+
+def _pool_limit_for_solve(
+    *,
+    total_bytes: int,
+    free_bytes: int,
+    pool_total_bytes: int,
+    reserve_bytes: int,
+    existing_limit: int,
+) -> int:
+    """Return an absolute CuPy-pool cap while preserving free VRAM reserve.
+
+    ``memGetInfo().free`` excludes blocks already acquired by CuPy's pool, so
+    using it directly as the pool's absolute limit can place an active pool
+    below its current size.  Add those blocks back, subtract allocations owned
+    outside the pool and the requested reserve, then honor a stricter limit set
+    by the caller.
+    """
+
+    values = (
+        total_bytes,
+        free_bytes,
+        pool_total_bytes,
+        reserve_bytes,
+        existing_limit,
+    )
+    if any(int(value) < 0 for value in values):
+        raise ValueError("CUDA memory counters and limits must be non-negative")
+    total = int(total_bytes)
+    free = min(int(free_bytes), total)
+    pool_total = min(int(pool_total_bytes), total)
+    reserve = min(int(reserve_bytes), total)
+    non_pool = max(0, total - free - pool_total)
+    policy_limit = max(0, total - reserve - non_pool)
+    if existing_limit:
+        policy_limit = min(policy_limit, int(existing_limit))
+    return int(policy_limit)
 
 
 def _geometry_key(geometry: dict[str, Any], device_id: int = 0) -> str:
@@ -150,8 +190,11 @@ class CudaPyPeecExecutor:
         pypeec_module: Any | None = None,
     ) -> None:
         self.config = CudaPeecConfig.from_mapping(settings)
-        self.cp = cupy_module or self._import_cupy()
-        self.pypeec = pypeec_module or self._import_pypeec()
+        self.cp = cupy_module if cupy_module is not None else self._import_cupy()
+        self.pypeec = (
+            pypeec_module if pypeec_module is not None else self._import_pypeec()
+        )
+        self._multiply_fft = getattr(self.pypeec, "multiply_fft", None)
 
     @staticmethod
     def _import_cupy() -> Any:
@@ -202,11 +245,6 @@ class CudaPyPeecExecutor:
         cp = self.cp
         telemetry = self.probe()
         reserve = int(telemetry.total_bytes * self.config.memory_reserve_fraction)
-        usable = min(telemetry.free_bytes, telemetry.total_bytes - reserve)
-        if usable <= 0:
-            raise CudaUnavailableError(
-                "CUDA memory reserve leaves no usable device allocation"
-            )
 
         configured_tolerance = cupy_tolerance(
             tolerance, precision=self.config.precision
@@ -215,7 +253,9 @@ class CudaPyPeecExecutor:
         # the first solve. Reset the flag so a prior SciPy reference solve
         # cannot silently make this CUDA request execute on the CPU.
         try:
-            from pypeec.lib_matrix import multiply_fft
+            multiply_fft = self._multiply_fft
+            if multiply_fft is None:
+                from pypeec.lib_matrix import multiply_fft
 
             multiply_fft.SET = False
         except (ImportError, AttributeError) as exc:
@@ -231,7 +271,18 @@ class CudaPyPeecExecutor:
             # cannot leak policy onto another GPU.
             old_limit = int(pool.get_limit())
             try:
-                pool.set_limit(size=int(usable))
+                pool_limit = _pool_limit_for_solve(
+                    total_bytes=telemetry.total_bytes,
+                    free_bytes=telemetry.free_bytes,
+                    pool_total_bytes=int(pool.total_bytes()),
+                    reserve_bytes=reserve,
+                    existing_limit=old_limit,
+                )
+                if pool_limit <= int(pool.used_bytes()):
+                    raise CudaUnavailableError(
+                        "CUDA memory reserve leaves no pool headroom for the solve"
+                    )
+                pool.set_limit(size=pool_limit)
                 cache_key = _geometry_key(geometry, self.config.device_id)
                 voxel = None
                 cache_hit = False
@@ -281,6 +332,8 @@ class CudaPyPeecExecutor:
                     int(pool.used_bytes()),
                     1,
                 )
+            except CudaUnavailableError:
+                raise
             except Exception as exc:
                 oom_type = getattr(cp.cuda.memory, "OutOfMemoryError", ())
                 if oom_type and isinstance(exc, oom_type):

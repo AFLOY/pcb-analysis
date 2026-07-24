@@ -120,6 +120,14 @@ class ControllerTests(unittest.TestCase):
         )
         self.assertEqual(plan.field_precision, "complex128")
 
+        refined = controller.make_plan(
+            self.problem,
+            telemetry,
+            FidelityStage.REFINED,
+            previous_report=ExecutionReport(peak_bytes=1, elapsed_ms=1.0),
+        )
+        self.assertEqual(refined.field_precision, "complex128")
+
 
 if __name__ == "__main__":
     unittest.main()

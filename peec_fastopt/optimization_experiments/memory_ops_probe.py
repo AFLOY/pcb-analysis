@@ -16,7 +16,6 @@ import copy
 import json
 import statistics
 import time
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -124,7 +123,7 @@ def run_physical_memory_matrix(
 ) -> dict[str, Any]:
     import cupy as cp
 
-    from peec_fastopt.cuda_pypeec import CudaPyPeecExecutor, clear_cuda_caches
+    from peec_fastopt.cuda_pypeec import clear_cuda_caches
     from plane_opt.current_field_backend import solve_current_field_case
 
     grid, cases, base_config = _load_board(extract, config_path, candidate_path)

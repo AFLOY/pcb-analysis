@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -26,6 +27,12 @@ class StackupTests(unittest.TestCase):
         self.assertEqual(stack.index("F.Cu"), 0)
         self.assertEqual(stack.index("B.Cu"), 1)
         self.assertAlmostEqual(stack.separation_m(0, 1), 1.6e-3)
+
+    def test_invalid_stackup_geometry_is_rejected(self):
+        with self.assertRaises(ValueError):
+            Stackup.dual_sided(board_thickness_mm=0.0)
+        with self.assertRaises(ValueError):
+            Stackup(layer_names=("F.Cu",), z_mm=(float("nan"),))
 
 
 class MultilayerOperatorTests(unittest.TestCase):
@@ -130,6 +137,41 @@ class MultilayerOperatorTests(unittest.TestCase):
         # Lumped via energy is strictly positive when both pads are occupied.
         self.assertGreater(with_via, scorer.base_energy)
 
+    def test_sparse_score_does_not_materialize_full_delta_volume(self):
+        shape = (10, 10)
+        stack = Stackup.dual_sided()
+        scorer = MultilayerDeltaScorer(
+            FFTInteraction25D(shape, stack), np.zeros((2, *shape))
+        )
+        delta = SparseDeltaML.from_changes([(0, 2, 3, 1.0)])
+        with patch.object(
+            SparseDeltaML,
+            "dense",
+            side_effect=AssertionError("sparse scoring called dense()"),
+        ):
+            self.assertTrue(np.isfinite(scorer.energy(delta)))
+
+    def test_identical_vias_are_idempotent_not_fourfold(self):
+        via = ViaSpec(row=2, col=3, layer_from=0, layer_to=1)
+        deduplicated = ViaSet.from_iterable((via, via))
+        self.assertEqual(len(deduplicated), 1)
+        self.assertAlmostEqual(
+            deduplicated.vias[0].lumped_weight(1e6), via.lumped_weight(1e6)
+        )
+        with self.assertRaises(ValueError):
+            ViaSet.from_iterable(
+                (
+                    via,
+                    ViaSpec(
+                        row=2,
+                        col=3,
+                        layer_from=0,
+                        layer_to=1,
+                        inductance_h=2e-9,
+                    ),
+                )
+            )
+
 
 class LayoutOpsTests(unittest.TestCase):
     def test_compile_segment_and_via(self):
@@ -165,9 +207,10 @@ class LayoutOpsTests(unittest.TestCase):
         self.assertTrue(compiled.high_risk_topology)
         self.assertGreater(compiled.occupancy_delta.size, 0)
         self.assertEqual(len(compiled.vias), 1)
-        # Via pads touch both layers at (1,3): +1 F and +1 B, plus segment cells.
+        # Geometry is a union: the segment endpoint and via pad on F.Cu occupy
+        # the same cell once, while B.Cu receives the other pad.
         dense = compiled.occupancy_delta.dense(2, (8, 8))
-        self.assertAlmostEqual(dense[0, 1, 3], 2.0)  # segment + via pad
+        self.assertAlmostEqual(dense[0, 1, 3], 1.0)
         self.assertAlmostEqual(dense[1, 1, 3], 1.0)  # via pad only
         self.assertAlmostEqual(dense[1, 5, 5], -1.0)
 
@@ -185,6 +228,18 @@ class LayoutOpsTests(unittest.TestCase):
         compiled = compile_candidate(edit, stack, base_vias=base)
         self.assertEqual(len(compiled.vias), 1)
         self.assertEqual(compiled.vias.vias[0].normalized()[:2], (3, 3))
+        self.assertTrue(compiled.high_risk_topology)
+
+    def test_untouched_base_via_does_not_promote_segment_only_edit(self):
+        stack = Stackup.dual_sided()
+        base = ViaSet(
+            vias=(ViaSpec(row=2, col=2, layer_from=0, layer_to=1, important=True),)
+        )
+        edit = CandidateEdit(
+            segments=[SegmentOp(action="add", layer=0, cells=((4, 4),))]
+        )
+        compiled = compile_candidate(edit, stack, base_vias=base)
+        self.assertFalse(compiled.high_risk_topology)
 
 
 class Lowmem25DTests(unittest.TestCase):
@@ -218,6 +273,20 @@ class Lowmem25DTests(unittest.TestCase):
         self.assertIn("split_error", scores)
         self.assertGreaterEqual(scores["split_error"], 0.0)
 
+    def test_invalid_lowmem_geometry_is_rejected(self):
+        stack = Stackup.dual_sided()
+        volume = np.zeros((2, 2, 2))
+        with self.assertRaises(ValueError):
+            exact_multilayer_energy(volume, stack, cell_size_m=0.0)
+        with self.assertRaises(ValueError):
+            approximate_multilayer_energy(
+                volume,
+                stack,
+                cell_size_m=0.2e-3,
+                block_size=0,
+                near_radius=1.0,
+            )
+
 
 class SparseDeltaMLTests(unittest.TestCase):
     def test_2d_style_changes_default_layer(self):
@@ -225,6 +294,13 @@ class SparseDeltaMLTests(unittest.TestCase):
         self.assertEqual(delta.size, 1)
         self.assertEqual(int(delta.layers[0]), 0)
         self.assertAlmostEqual(float(delta.values[0]), 0.75)
+
+    def test_negative_coordinates_are_rejected_instead_of_wrapping(self):
+        delta = SparseDeltaML.from_changes([(0, -1, 0, 1.0)])
+        with self.assertRaises(IndexError):
+            delta.dense(1, (2, 2))
+        with self.assertRaises(TypeError):
+            SparseDeltaML.from_changes([(0, 1.5, 0, 1.0)])
 
     def test_2d_delta_path_still_consistent(self):
         # Guard: classic single-layer API remains the production scalar path.

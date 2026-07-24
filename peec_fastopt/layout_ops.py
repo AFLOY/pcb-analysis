@@ -7,7 +7,9 @@ scorer understands.  Geometry DRC remains the router's responsibility (Gate 0).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
+from numbers import Integral
 from typing import Iterable, Literal, Sequence
 
 from .multilayer_peec import SparseDeltaML, ViaSet, ViaSpec
@@ -29,9 +31,26 @@ class SegmentOp:
     def __post_init__(self) -> None:
         if self.action not in {"add", "remove"}:
             raise ValueError("action must be add or remove")
-        if not self.cells and self.value != 0.0:
-            # empty is allowed; it simply no-ops
-            pass
+        value = float(self.value)
+        if not math.isfinite(value) or value < 0.0:
+            raise ValueError("segment value must be finite and non-negative")
+        cells: list[tuple[int, int]] = []
+        for cell in self.cells:
+            if len(cell) != 2:
+                raise ValueError("segment cells must be (row, col) pairs")
+            row, col = cell
+            if (
+                isinstance(row, bool)
+                or isinstance(col, bool)
+                or not isinstance(row, Integral)
+                or not isinstance(col, Integral)
+            ):
+                raise TypeError("segment row and col must be integers")
+            if row < 0 or col < 0:
+                raise ValueError("segment row and col must be non-negative")
+            cells.append((int(row), int(col)))
+        object.__setattr__(self, "cells", tuple(cells))
+        object.__setattr__(self, "value", value)
 
 
 @dataclass(frozen=True)
@@ -54,6 +73,20 @@ class ViaOp:
     def __post_init__(self) -> None:
         if self.action not in {"add", "remove"}:
             raise ValueError("action must be add or remove")
+        for name in ("row", "col"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, Integral):
+                raise TypeError(f"via {name} must be an integer")
+            if value < 0:
+                raise ValueError(f"via {name} must be non-negative")
+            object.__setattr__(self, name, int(value))
+        for name in ("resistance_ohm", "inductance_h", "mutual_weight"):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative")
+            object.__setattr__(self, name, value)
+        object.__setattr__(self, "important", bool(self.important))
+        object.__setattr__(self, "touch_pads", bool(self.touch_pads))
 
 
 @dataclass
@@ -109,16 +142,10 @@ def apply_via_ops(base_vias: ViaSet, ops: Sequence[ViaOp], stackup: Stackup) -> 
             if previous is None:
                 by_key[key] = spec
             else:
-                by_key[key] = ViaSpec(
-                    row=key[0],
-                    col=key[1],
-                    layer_from=key[2],
-                    layer_to=key[3],
-                    resistance_ohm=previous.resistance_ohm + spec.resistance_ohm,
-                    inductance_h=previous.inductance_h + spec.inductance_h,
-                    important=previous.important or spec.important,
-                    mutual_weight=previous.mutual_weight + spec.mutual_weight,
-                )
+                # A physical via is a set element, not an additive impedance.
+                # Identical adds are idempotent; conflicting properties are
+                # rejected by ViaSet instead of being multiplied together.
+                by_key[key] = ViaSet.from_iterable((previous, spec)).vias[0]
         else:
             by_key.pop(key, None)
     return ViaSet(vias=tuple(by_key.values()))
@@ -132,30 +159,45 @@ def compile_candidate(
 ) -> CompiledCandidate:
     """Compile router ops into a scorer-ready occupancy delta and via set."""
     base_vias = base_vias or ViaSet()
-    changes: list[tuple[int, int, int, float]] = []
+    changes: dict[tuple[int, int, int], float] = {}
     high_risk = False
+
+    def record_change(layer: int, row: int, col: int, value: float) -> None:
+        if value == 0.0:
+            return
+        key = (layer, row, col)
+        previous = changes.get(key)
+        if previous is None:
+            changes[key] = value
+        elif previous != value:
+            raise ValueError(
+                f"conflicting occupancy edits at layer/row/col {key}: "
+                f"{previous} and {value}"
+            )
+        # Repeated identical geometry (for example a segment ending on a via
+        # pad) is a union and therefore contributes only once.
 
     for segment in edit.segments:
         layer = stackup.index(segment.layer)
         signed = _sign(segment.action) * float(segment.value)
         for row, col in segment.cells:
-            changes.append((layer, int(row), int(col), signed))
+            record_change(layer, int(row), int(col), signed)
 
     for via in edit.vias:
-        if via.important or via.action == "add":
-            # Layer transitions and new vias are treated as topology-risk.
-            high_risk = True
+        # Every layer transition edit changes topology, including removal of
+        # an ordinary via.
+        high_risk = True
         if via.touch_pads:
             layer_from = stackup.index(via.layer_from)
             layer_to = stackup.index(via.layer_to)
             signed = _sign(via.action)
-            changes.append((layer_from, int(via.row), int(via.col), signed))
-            changes.append((layer_to, int(via.row), int(via.col), signed))
+            record_change(layer_from, int(via.row), int(via.col), signed)
+            record_change(layer_to, int(via.row), int(via.col), signed)
 
-    occupancy = SparseDeltaML.from_changes(changes)
+    occupancy = SparseDeltaML.from_changes(
+        (*key, value) for key, value in changes.items()
+    )
     vias = apply_via_ops(base_vias, edit.vias, stackup)
-    if any(via.important for via in vias.vias):
-        high_risk = True
     return CompiledCandidate(
         occupancy_delta=occupancy,
         vias=vias,

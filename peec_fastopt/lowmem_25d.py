@@ -8,6 +8,7 @@ far field.  Reuses the scalar near/far machinery in ``lowmem_peec``.
 
 from __future__ import annotations
 
+import math
 from typing import Literal
 
 import numpy as np
@@ -30,11 +31,19 @@ def volume_to_points(
         raise ValueError("volume must be (n_layers, ny, nx)")
     if volume.shape[0] != stackup.n_layers:
         raise ValueError("volume layer count must match stackup")
+    if not np.all(np.isfinite(volume)):
+        raise ValueError("volume must contain only finite values")
+    cell_size_m = float(cell_size_m)
+    if not math.isfinite(cell_size_m) or cell_size_m <= 0.0:
+        raise ValueError("cell_size_m must be finite and positive")
+    abs_threshold = float(abs_threshold)
+    if not math.isfinite(abs_threshold) or abs_threshold < 0.0:
+        raise ValueError("abs_threshold must be finite and non-negative")
     layers, rows, cols = np.nonzero(np.abs(volume) > abs_threshold)
     if layers.size == 0:
         return np.empty((0, 3), dtype=np.float64), np.empty(0, dtype=np.float64)
     values = volume[layers, rows, cols]
-    z_cells = stackup.z_m[layers] / float(cell_size_m)
+    z_cells = stackup.z_m[layers] / cell_size_m
     points = np.column_stack(
         [
             rows.astype(np.float64),
@@ -66,8 +75,6 @@ def exact_multilayer_energy(
     points, values = volume_to_points(
         volume, stackup, cell_size_m=cell_size_m
     )
-    if values.size == 0:
-        return 0.0
     return exact_energy(points, values, softening=softening)
 
 
@@ -85,8 +92,6 @@ def approximate_multilayer_energy(
     points, values = volume_to_points(
         volume, stackup, cell_size_m=cell_size_m
     )
-    if values.size == 0:
-        return 0.0
     return approximate_energy(
         points,
         values,
