@@ -60,18 +60,35 @@ def benchmark(
 ) -> dict[str, Any]:
     if warmups < 0 or repeats < 1:
         raise ValueError("warmups must be non-negative and repeats must be positive")
-    from plane_opt.current_field_backend import solve_current_field_case
-    from plane_opt.geometry_metrics import CopperGrid
-    from plane_opt.topology_holes import apply_mask_runs
-    from plane_opt.topology_domain import ROLES
+    # plane_opt is a separate project and is not a dependency of this package,
+    # so it is imported at call time and only for this benchmark.
+    from plane_opt.configuration import load_adopted_pipeline_config
+    from plane_opt.domain.topology import (
+        pipeline_role_context,
+        resolve_pipeline_roles,
+    )
+    from plane_opt.geometry.connectivity import apply_mask_runs
+    from plane_opt.geometry.metrics import CopperGrid
+    from plane_opt.physics.current_field import solve_current_field_case
 
     data = json.loads(extract.read_text(encoding="utf-8"))
-    base_config = json.loads(config_path.read_text(encoding="utf-8"))
+    # A board file states only what is specific to that board; the algorithm
+    # defaults, and so grid_resolution_mm, come from plane_opt itself. Reading
+    # the file directly would give a configuration missing most of its keys.
+    base_config = load_adopted_pipeline_config(config_path)
+    # Roles come from the configuration rather than from a module-level
+    # constant: plane_opt resolves them per board and exposes them only inside
+    # a role context, where an unset context reads as empty rather than as some
+    # other board's roles.
+    roles = resolve_pipeline_roles(base_config)
     grid = CopperGrid(data, float(base_config["grid_resolution_mm"]))
     if candidate_path is not None:
         candidate_data = json.loads(candidate_path.read_text(encoding="utf-8"))
         candidate = _select_candidate(candidate_data, candidate_name)
-        for role in ROLES:
+        missing = sorted(set(roles) - set(candidate["mask_runs"]))
+        if missing:
+            raise ValueError(f"candidate is missing masks for roles: {missing}")
+        for role in roles:
             apply_mask_runs(grid, role, candidate["mask_runs"][role])
     cases = [
         case
@@ -96,14 +113,15 @@ def benchmark(
     for case in cases:
         name = str(case["name"])
         for backend in ("pypeec", "cuda_peec"):
-            metrics, times = _timed_solve(
-                solve_current_field_case,
-                grid,
-                case,
-                configurations[backend],
-                warmups=warmups,
-                repeats=repeats,
-            )
+            with pipeline_role_context(roles):
+                metrics, times = _timed_solve(
+                    solve_current_field_case,
+                    grid,
+                    case,
+                    configurations[backend],
+                    warmups=warmups,
+                    repeats=repeats,
+                )
             all_times[backend].extend(times)
             results[backend][name] = {
                 "median_ms": statistics.median(times),

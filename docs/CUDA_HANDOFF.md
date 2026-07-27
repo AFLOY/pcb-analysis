@@ -65,7 +65,8 @@ difference was 1.60e-11 and every gate passed.
 
 ## Memory-ops findings (GTX 1650, 2026-07-17)
 
-Probe script: `peec_fastopt/optimization_experiments/memory_ops_probe.py`.
+Probe script: `experiments/memory_ops_probe.py`, kept out of the
+repository; the findings below are the part worth keeping.
 
 - Mesher voxel data must stay on the **host**.  PyPEEC 5.8 indexes `domain_def`
   with NumPy; pushing the whole voxel tree to CuPy breaks material indexing.

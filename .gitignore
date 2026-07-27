@@ -8,4 +8,6 @@ dist/
 .env
 .venv/
 benchmark-results/
-experiments/output/
+
+# Local probes and scratch work, kept out of the released repository.
+experiments/

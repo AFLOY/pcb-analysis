@@ -69,7 +69,6 @@ peec_fastopt/     Core library (solvers, operators, controller)
 tests/            Test suite (pytest)
 docs/             Design documents and benchmark results
 examples/         Demo scripts and benchmarks
-experiments/      Research prototypes
 ```
 
 ## Development
