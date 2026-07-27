@@ -7,10 +7,24 @@ name = "peec-fastopt"
 version = "0.1.0"
 description = "CUDA-accelerated PEEC solver for PCB PDN optimization"
 readme = "README.md"
-license = "MIT"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [
   { name = "Hiroyuki Yamada", email = "H44bcda@gmail.com" },
+]
+keywords = ["peec", "pcb", "pdn", "electromagnetics", "cuda", "optimization"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering :: Physics",
+  "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+  "Typing :: Typed",
 ]
 dependencies = [
   "numpy>=1.26,<2.4",
@@ -30,11 +44,13 @@ Repository = "https://github.com/AFLOY/peec-cuda"
 Issues = "https://github.com/AFLOY/peec-cuda/issues"
 
 [project.scripts]
-peec-cuda-calibrate = "examples.cuda_calibrate:main"
-peec-cuda-benchmark = "examples.plane_opt_benchmark:main"
+peec-fastopt-calibrate = "peec_fastopt.cli.calibrate:main"
 
 [tool.setuptools.packages.find]
 include = ["peec_fastopt*"]
+
+[tool.setuptools.package-data]
+peec_fastopt = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

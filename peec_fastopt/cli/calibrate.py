@@ -1,4 +1,9 @@
-"""Run controller/FFT calibration on a machine with CUDA and CuPy."""
+"""Measure this machine's CUDA and CuPy throughput for the controller.
+
+Installed as ``peec-fastopt-calibrate``.  CuPy is an optional dependency,
+so importing it is left to call time: the package must import on a host
+with no GPU.
+"""
 
 from __future__ import annotations
 
