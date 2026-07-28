@@ -71,6 +71,25 @@ docs/             Design documents and benchmark results
 examples/         Demo scripts and benchmarks
 ```
 
+## The two solvers
+
+`cuda_pypeec` runs PyPEEC's own three-dimensional voxel solve on CUDA. PyPEEC
+owns the physics; this owns the device policy. `pypeec_memory` predicts what a
+model costs before it is attempted, which matters once a model spans a board's
+height instead of one copper layer: on a two-sided 34.7mm board the prepared
+operators go from 4.5 MiB to 541 MiB while the conductor merely doubles.
+
+`sheet_peec` solves the same physics on a mesh built for what a PCB is -- a few
+thin sheets at heights the stackup states. Its inductance operator is a
+two-dimensional transform per layer pair rather than a three-dimensional one
+over the board's height, which brings the same board's operators to 5.6 MiB.
+At zero frequency it reproduces an independent resistor network to machine
+precision; above it, the transform path matches a dense assembly of the same
+operator. See [docs/SHEET_PEEC.md](docs/SHEET_PEEC.md).
+
+`multilayer_peec` is neither. It is a scalar interaction proxy for ranking many
+candidate shapes cheaply, and it solves for no current or potential.
+
 ## Development
 
 ```bash
