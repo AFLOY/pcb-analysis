@@ -33,6 +33,13 @@ class CudaSheetUnavailableError(RuntimeError):
     """Raised when the requested CUDA sheet backend cannot initialize."""
 
 
+# The Krylov call below passes ``rtol``, which CuPy renamed from ``tol`` in 14.
+# The distribution requirement already states this, but an environment can
+# satisfy the import and not the requirement, and the mismatch then surfaces
+# from inside the solve as a bare ``TypeError``.
+MINIMUM_CUPY_MAJOR_VERSION = 14
+
+
 class CudaSheetSolveError(RuntimeError):
     """Raised when CUDA initialized but the sheet solve failed."""
 
@@ -267,7 +274,25 @@ def _import_cupy() -> Any:
         raise CudaSheetUnavailableError(
             "CuPy with a matching CUDA runtime is required"
         ) from error
+    _require_cupy_version(cp)
     return cp
+
+
+def _require_cupy_version(cp: Any) -> None:
+    """Reject an unsupported CuPy before it can fail from inside the solve."""
+    version = str(getattr(cp, "__version__", ""))
+    try:
+        major = int(version.split(".", 1)[0])
+    except ValueError:
+        raise CudaSheetUnavailableError(
+            f"cannot read the installed CuPy version from {version!r}"
+        ) from None
+    if major < MINIMUM_CUPY_MAJOR_VERSION:
+        raise CudaSheetUnavailableError(
+            f"CuPy {version} is installed, but the CUDA sheet backend needs "
+            f"{MINIMUM_CUPY_MAJOR_VERSION} or newer for the Krylov solver's "
+            "keyword arguments"
+        )
 
 
 def solve_sheet_case_cuda(
@@ -616,8 +641,11 @@ def solve_sheet_case_cuda(
     except CudaSheetUnavailableError:
         raise
     except Exception as error:
+        # Name the class.  A CuPy signature change arrives here as a
+        # ``TypeError`` and reads as a numerical failure without it.
         raise CudaSheetSolveError(
-            f"CUDA sheet-PEEC execution failed: {error}"
+            f"CUDA sheet-PEEC execution failed: "
+            f"{type(error).__name__}: {error}"
         ) from error
     finally:
         if device is not None and pool is not None:
