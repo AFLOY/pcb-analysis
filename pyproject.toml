@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "peec-fastopt"
-version = "0.3.0"
+version = "0.3.1"
 description = "CUDA-accelerated PEEC solver for PCB PDN optimization"
 readme = "README.md"
 license = { file = "LICENSE" }
