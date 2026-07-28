@@ -18,10 +18,29 @@ from dataclasses import dataclass
 from typing import Any
 
 from .controller import ExecutionReport, HardwareTelemetry
+from .pypeec_memory import (
+    DEFAULT_UNMEASURED_FRACTION,
+    MemoryEstimate,
+    describe_estimate,
+    estimate_pypeec_memory,
+)
 
 
 class CudaUnavailableError(RuntimeError):
     """Raised when the configured CUDA runtime cannot be used."""
+
+
+class CudaPeecMemoryError(CudaUnavailableError):
+    """Raised when a solve is predicted, or found, not to fit on the device.
+
+    A subclass of :class:`CudaUnavailableError` so that a caller configured to
+    fall back to the CPU keeps falling back: a model too large for this device
+    is exactly the case that fallback exists for.
+    """
+
+    def __init__(self, message: str, estimate: "MemoryEstimate | None" = None) -> None:
+        super().__init__(message)
+        self.estimate = estimate
 
 
 class CudaPeecSolveError(RuntimeError):
@@ -35,18 +54,37 @@ class CudaPeecConfig:
     memory_reserve_fraction: float = 0.10
     cache_voxel: bool = True
     voxel_cache_entries: int = 8
+    # Host bytes the meshed-voxel cache may hold.  Entry counts stopped being a
+    # useful budget once a model could span a board's height instead of one
+    # copper layer: eight entries of a tall mesh is a different quantity of
+    # memory from eight entries of a flat one.
+    voxel_cache_max_bytes: int = 512 * 1024 * 1024
     # Return unused CuPy blocks to the driver after each solve.  Keeps free
     # VRAM higher across multi-case epochs at a small allocator cost.
     release_pool_after_solve: bool = True
+    # Refuse a solve the estimate says cannot fit, instead of discovering it
+    # part-way through an allocation.  Turn off to let the device decide.
+    preflight_memory: bool = True
+    unmeasured_memory_fraction: float = DEFAULT_UNMEASURED_FRACTION
+    # CuPy's FFT plan cache holds cuFFT workspaces outside the pool this
+    # executor caps.  A tall box makes those plans large, so the cache is
+    # bounded here rather than left at CuPy's default.  None leaves CuPy's
+    # policy alone; a negative byte budget means unlimited, as CuPy defines it.
+    fft_plan_cache_entries: int | None = 4
+    fft_plan_cache_bytes: int | None = None
 
     @classmethod
     def from_mapping(cls, settings: dict[str, Any] | None) -> "CudaPeecConfig":
         values = settings or {}
         precision = str(values.get("precision", "auto"))
-        if precision not in {"auto", "complex64", "complex128"}:
+        if precision not in {"auto", "complex128"}:
             raise ValueError(
-                "current_field_solver.cuda_peec.precision must be auto, "
-                "complex64, or complex128"
+                "current_field_solver.cuda_peec.precision must be auto or "
+                "complex128. complex64 was accepted while it did nothing: "
+                "PyPEEC 5.8 allocates its FFT tensors and solution vectors as "
+                "complex128 and offers no way to ask for anything narrower, so "
+                "requesting it bought no memory and named a policy that was "
+                "never applied"
             )
         reserve = float(values.get("memory_reserve_fraction", 0.10))
         if not 0.0 <= reserve < 1.0:
@@ -54,18 +92,39 @@ class CudaPeecConfig:
         cache_entries = int(values.get("voxel_cache_entries", 8))
         if cache_entries < 1:
             raise ValueError("voxel_cache_entries must be positive")
+        cache_bytes = int(values.get("voxel_cache_max_bytes", 512 * 1024 * 1024))
+        if cache_bytes < 0:
+            raise ValueError("voxel_cache_max_bytes must be non-negative")
         device_id = int(values.get("device_id", 0))
         if device_id < 0:
             raise ValueError("device_id must be non-negative")
+        unmeasured = float(
+            values.get("unmeasured_memory_fraction", DEFAULT_UNMEASURED_FRACTION)
+        )
+        if not 0.0 <= unmeasured < 4.0:
+            raise ValueError("unmeasured_memory_fraction must be in [0, 4)")
+        plan_entries = values.get("fft_plan_cache_entries", 4)
+        if plan_entries is not None:
+            plan_entries = int(plan_entries)
+            if plan_entries < 0:
+                raise ValueError("fft_plan_cache_entries must be non-negative")
+        plan_bytes = values.get("fft_plan_cache_bytes")
+        if plan_bytes is not None:
+            plan_bytes = int(plan_bytes)
         return cls(
             device_id=device_id,
             precision=precision,
             memory_reserve_fraction=reserve,
             cache_voxel=bool(values.get("cache_voxel", True)),
             voxel_cache_entries=cache_entries,
+            voxel_cache_max_bytes=cache_bytes,
             release_pool_after_solve=bool(
                 values.get("release_pool_after_solve", True)
             ),
+            preflight_memory=bool(values.get("preflight_memory", True)),
+            unmeasured_memory_fraction=unmeasured,
+            fft_plan_cache_entries=plan_entries,
+            fft_plan_cache_bytes=plan_bytes,
         )
 
 
@@ -84,26 +143,72 @@ class CudaPeecResult:
     requested_precision: str
     effective_precision: str
     voxel_cache_hit: bool
+    estimate: MemoryEstimate | None = None
+    fft_plan_cache_bytes: int = 0
 
     def metrics(self) -> dict[str, Any]:
-        return {
+        metrics = {
             "cuda_device_name": self.device_name,
             "cuda_device_id": int(self.telemetry.backend.rsplit(":", 1)[-1]),
             "cuda_runtime_version": self.cuda_runtime_version,
             "cupy_version": self.cupy_version,
             "requested_precision": self.requested_precision,
             "effective_precision": self.effective_precision,
+            # PyPEEC owns the solver dtype, so a request for anything other
+            # than complex128 cannot be honoured.  Say so rather than let the
+            # requested value read as the applied one.
+            "precision_request_honored": (
+                self.effective_precision == self.requested_precision
+                or self.requested_precision == "auto"
+            ),
             "voxel_cache_hit": self.voxel_cache_hit,
             "peak_device_bytes": self.execution_report.peak_bytes,
             "memory_measurement_complete": self.execution_report.memory_complete,
+            "fft_plan_cache_bytes": self.fft_plan_cache_bytes,
             "mesher_elapsed_ms": self.mesher_elapsed_ms,
             "solver_elapsed_ms": self.solver_elapsed_ms,
             "total_elapsed_ms": self.total_elapsed_ms,
         }
+        if self.estimate is not None:
+            metrics.update(self.estimate.as_metrics())
+            peak = self.execution_report.peak_bytes
+            if peak > 0:
+                metrics["estimate_over_measured_ratio"] = (
+                    self.estimate.required_bytes / peak
+                )
+        return metrics
 
 
-_VOXEL_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
+@dataclass
+class _CachedVoxel:
+    voxel: dict[str, Any]
+    host_bytes: int
+
+
+_VOXEL_CACHE: OrderedDict[str, _CachedVoxel] = OrderedDict()
 _VOXEL_CACHE_LOCK = threading.RLock()
+
+
+def _host_bytes(value: Any, _depth: int = 0) -> int:
+    """Approximate what a meshed voxel tree costs in host memory.
+
+    Only the array payloads are counted; the dict scaffolding around them is
+    noise beside a mesh over a board-height box.  The recursion is bounded
+    because the tree PyPEEC returns is not deep and a runaway walk would cost
+    more than the accounting saves.
+    """
+    if _depth > 8:
+        return 0
+    nbytes = getattr(value, "nbytes", None)
+    if isinstance(nbytes, int):
+        return nbytes
+    if isinstance(value, dict):
+        return sum(_host_bytes(item, _depth + 1) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return sum(_host_bytes(item, _depth + 1) for item in value)
+    if isinstance(value, (bytes, bytearray)):
+        return len(value)
+    return 0
 
 
 def _pool_limit_for_solve(
@@ -143,11 +248,45 @@ def _pool_limit_for_solve(
     return int(policy_limit)
 
 
-def _geometry_key(geometry: dict[str, Any], device_id: int = 0) -> str:
+def _geometry_key(geometry: dict[str, Any]) -> str:
+    """Key a meshed voxel tree by the geometry that produced it.
+
+    The device is deliberately not part of the key.  The mesh is held on the
+    host and PyPEEC builds it without touching a GPU, so keying by device would
+    mesh the same board once per device for no gain.
+    """
     payload = json.dumps(
         geometry, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest() + f":{device_id}"
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _describe(estimate: MemoryEstimate | None) -> str:
+    """Describe an estimate for a message, or say that none could be made."""
+    return "no memory estimate" if estimate is None else describe_estimate(estimate)
+
+
+def _trim_voxel_cache(max_entries: int, max_bytes: int) -> None:
+    """Evict oldest entries until both budgets hold.
+
+    The byte budget is the one that matters for a tall model, but it is checked
+    second so that a single entry larger than the whole budget is still kept:
+    evicting it would mesh the same board again on the next case and gain
+    nothing.
+    """
+    while len(_VOXEL_CACHE) > max_entries:
+        _VOXEL_CACHE.popitem(last=False)
+    while len(_VOXEL_CACHE) > 1:
+        total = sum(entry.host_bytes for entry in _VOXEL_CACHE.values())
+        if total <= max_bytes:
+            break
+        _VOXEL_CACHE.popitem(last=False)
+
+
+def voxel_cache_bytes() -> int:
+    """Report what the meshed-voxel cache is holding on the host."""
+    with _VOXEL_CACHE_LOCK:
+        return sum(entry.host_bytes for entry in _VOXEL_CACHE.values())
 
 
 def clear_cuda_caches() -> None:
@@ -162,12 +301,17 @@ def cupy_tolerance(
     """Return an isolated PyPEEC tolerance tree selecting CuPy FFTs.
 
     PyPEEC 5.8 controls the FFT implementation through this nested value.  It
-    currently owns the solver dtype, so the requested mixed-precision policy
-    is recorded but complex128 remains the effective physical-solve dtype.
+    also owns the solver dtype: ``lib_matrix/multiply_fft.py`` allocates its
+    prepared tensors and its products as ``complex128`` unconditionally.  There
+    is therefore no narrower precision to select here, and the argument exists
+    only to reject a request this adapter cannot carry out.
     """
 
-    if precision not in {"auto", "complex64", "complex128"}:
-        raise ValueError(f"unsupported CUDA PEEC precision: {precision}")
+    if precision not in {"auto", "complex128"}:
+        raise ValueError(
+            f"unsupported CUDA PEEC precision: {precision}. PyPEEC 5.8 solves "
+            "in complex128 and exposes no way to ask for less"
+        )
     configured = copy.deepcopy(tolerance)
     dense = configured.setdefault("dense_options", {})
     dense["method"] = "fft"
@@ -217,8 +361,95 @@ class CudaPyPeecExecutor:
             ) from exc
         return pypeec
 
+    def __enter__(self) -> "CudaPyPeecExecutor":
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Release what this executor holds on the device.
+
+        An optimizer epoch solves many cases on one geometry, and keeping the
+        pool and the FFT plans across them is what makes a tall box affordable
+        the second time.  Constructing an executor per case, as callers do
+        today, throws that away; a caller that holds one open for an epoch can
+        close it here instead of at every solve.
+        """
+        try:
+            with self._device():
+                self.cp.get_default_memory_pool().free_all_blocks()
+                self.cp.get_default_pinned_memory_pool().free_all_blocks()
+                cache = self._plan_cache()
+                if cache is not None:
+                    cache.clear()
+        except Exception:  # noqa: BLE001 - closing must not raise
+            pass
+
     def _device(self) -> Any:
         return self.cp.cuda.Device(self.config.device_id)
+
+    def _plan_cache(self) -> Any | None:
+        """Reach CuPy's per-thread FFT plan cache, if this CuPy exposes one."""
+        try:
+            return self.cp.fft.config.get_plan_cache()
+        except (AttributeError, RuntimeError):
+            return None
+
+    def _plan_cache_bytes(self) -> int:
+        cache = self._plan_cache()
+        if cache is None:
+            return 0
+        try:
+            return int(cache.get_curr_size_bytes())
+        except (AttributeError, RuntimeError, TypeError):
+            return 0
+
+    def _is_memory_error(self, exc: BaseException) -> bool:
+        """Say whether a failure is the device running out of room.
+
+        CuPy's own out-of-memory type is the obvious case.  cuFFT is the one
+        that matters on a tall box: its plan workspaces are allocated outside
+        the pool, so exhausting them raises a cuFFT allocation failure rather
+        than CuPy's error, and treating that as a generic fault loses both the
+        fallback and the telemetry.
+        """
+        oom_type = getattr(self.cp.cuda.memory, "OutOfMemoryError", ())
+        if oom_type and isinstance(exc, oom_type):
+            return True
+        name = type(exc).__name__
+        if "OutOfMemory" in name or "CUFFTError" in name or "CuFFTError" in name:
+            text = str(exc).upper()
+            return (
+                "CUFFTERROR" in name.upper()
+                or "ALLOC" in text
+                or "MEMORY" in text
+                or "OUT OF" in text
+            )
+        return False
+
+    def estimate(
+        self,
+        geometry: dict[str, Any],
+        problem: dict[str, Any] | None = None,
+        tolerance: dict[str, Any] | None = None,
+    ) -> MemoryEstimate | None:
+        """Predict this solve's device memory without touching the device.
+
+        Returns ``None`` when the geometry states no voxel box.  Being unable
+        to predict is not a reason to refuse: the prediction exists to stop a
+        solve that will not fit, and a geometry this cannot read is one PyPEEC
+        will reject on its own terms, with its own message.
+        """
+        try:
+            return estimate_pypeec_memory(
+                geometry,
+                problem,
+                tolerance,
+                unmeasured_fraction=self.config.unmeasured_memory_fraction,
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
 
     def probe(self) -> HardwareTelemetry:
         try:
@@ -246,6 +477,19 @@ class CudaPyPeecExecutor:
         telemetry = self.probe()
         reserve = int(telemetry.total_bytes * self.config.memory_reserve_fraction)
 
+        estimate = self.estimate(geometry, problem, tolerance)
+        if self.config.preflight_memory and estimate is not None:
+            budget = telemetry.free_bytes - reserve
+            if estimate.required_bytes > budget:
+                raise CudaPeecMemoryError(
+                    "CUDA PEEC solve is predicted not to fit: "
+                    f"{describe_estimate(estimate)}; the device offers "
+                    f"{budget / (1024 ** 2):.1f} MiB after a "
+                    f"{self.config.memory_reserve_fraction:.0%} reserve. "
+                    f"Assumptions: {'; '.join(estimate.assumptions)}",
+                    estimate,
+                )
+
         configured_tolerance = cupy_tolerance(
             tolerance, precision=self.config.precision
         )
@@ -270,7 +514,20 @@ class CudaPyPeecExecutor:
             # the limit inside the selected context so a nonzero device_id
             # cannot leak policy onto another GPU.
             old_limit = int(pool.get_limit())
+            plan_cache = self._plan_cache()
+            old_plan_size: int | None = None
+            old_plan_bytes: int | None = None
             try:
+                # A tall box makes each cuFFT plan large, and those workspaces
+                # live outside the pool capped below.  Bound the cache so the
+                # reserve means something; restore the caller's policy after.
+                if plan_cache is not None:
+                    if self.config.fft_plan_cache_entries is not None:
+                        old_plan_size = int(plan_cache.get_size())
+                        plan_cache.set_size(self.config.fft_plan_cache_entries)
+                    if self.config.fft_plan_cache_bytes is not None:
+                        old_plan_bytes = int(plan_cache.get_memsize())
+                        plan_cache.set_memsize(self.config.fft_plan_cache_bytes)
                 pool_limit = _pool_limit_for_solve(
                     total_bytes=telemetry.total_bytes,
                     free_bytes=telemetry.free_bytes,
@@ -279,11 +536,13 @@ class CudaPyPeecExecutor:
                     existing_limit=old_limit,
                 )
                 if pool_limit <= int(pool.used_bytes()):
-                    raise CudaUnavailableError(
-                        "CUDA memory reserve leaves no pool headroom for the solve"
+                    raise CudaPeecMemoryError(
+                        "CUDA memory reserve leaves no pool headroom for the "
+                        f"solve; {_describe(estimate)}",
+                        estimate,
                     )
                 pool.set_limit(size=pool_limit)
-                cache_key = _geometry_key(geometry, self.config.device_id)
+                cache_key = _geometry_key(geometry)
                 voxel = None
                 cache_hit = False
                 if self.config.cache_voxel:
@@ -292,7 +551,7 @@ class CudaPyPeecExecutor:
                         cache_hit = cached is not None
                         if cache_hit:
                             # Defensive copy: PyPEEC may mutate geometry views.
-                            voxel = copy.deepcopy(cached)
+                            voxel = copy.deepcopy(cached.voxel)
                             _VOXEL_CACHE.move_to_end(cache_key)
                 if cache_hit:
                     mesher_ms = 0.0
@@ -305,11 +564,15 @@ class CudaPyPeecExecutor:
                     voxel = self.pypeec.run_mesher_data(geometry)
                     mesher_ms = (time.perf_counter() - mesher_start) * 1000.0
                     if self.config.cache_voxel:
+                        stored = copy.deepcopy(voxel)
+                        entry = _CachedVoxel(stored, _host_bytes(stored))
                         with _VOXEL_CACHE_LOCK:
-                            _VOXEL_CACHE[cache_key] = copy.deepcopy(voxel)
+                            _VOXEL_CACHE[cache_key] = entry
                             _VOXEL_CACHE.move_to_end(cache_key)
-                            while len(_VOXEL_CACHE) > self.config.voxel_cache_entries:
-                                _VOXEL_CACHE.popitem(last=False)
+                            _trim_voxel_cache(
+                                self.config.voxel_cache_entries,
+                                self.config.voxel_cache_max_bytes,
+                            )
 
                 cp.cuda.Stream.null.synchronize()
                 free_before_solve, _ = cp.cuda.runtime.memGetInfo()
@@ -335,8 +598,7 @@ class CudaPyPeecExecutor:
             except CudaUnavailableError:
                 raise
             except Exception as exc:
-                oom_type = getattr(cp.cuda.memory, "OutOfMemoryError", ())
-                if oom_type and isinstance(exc, oom_type):
+                if self._is_memory_error(exc):
                     report = ExecutionReport(
                         peak_bytes=0,
                         elapsed_ms=(time.perf_counter() - total_start) * 1000.0,
@@ -345,12 +607,21 @@ class CudaPyPeecExecutor:
                         memory_complete=False,
                     )
                     raise CudaPeecSolveError(
-                        f"CUDA PEEC ran out of memory: {report}"
+                        f"CUDA PEEC ran out of memory: {report}; "
+                        f"{_describe(estimate)}; plan cache held "
+                        f"{self._plan_cache_bytes() / (1024 ** 2):.1f} MiB; "
+                        f"free VRAM at entry "
+                        f"{telemetry.free_bytes / (1024 ** 2):.1f} MiB"
                     ) from exc
                 raise CudaPeecSolveError(
                     f"CUDA PEEC execution failed: {exc}"
                 ) from exc
             finally:
+                if plan_cache is not None:
+                    if old_plan_size is not None:
+                        plan_cache.set_size(old_plan_size)
+                    if old_plan_bytes is not None:
+                        plan_cache.set_memsize(old_plan_bytes)
                 # A zero limit means unlimited; restore the caller's policy.
                 pool.set_limit(size=old_limit)
                 if self.config.release_pool_after_solve:
@@ -393,4 +664,6 @@ class CudaPyPeecExecutor:
             requested_precision=self.config.precision,
             effective_precision="complex128",
             voxel_cache_hit=cache_hit,
+            estimate=estimate,
+            fft_plan_cache_bytes=self._plan_cache_bytes(),
         )
