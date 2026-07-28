@@ -104,13 +104,16 @@ class Terminal:
     name: str
     layer: int
     cells: tuple[Cell, ...]
-    current_a: float
+    current_a: complex
 
     def __post_init__(self) -> None:
         if not self.cells:
             raise ValueError(f"terminal {self.name} covers no cells")
         object.__setattr__(self, "cells", tuple(self.cells))
-        object.__setattr__(self, "current_a", float(self.current_a))
+        current = complex(self.current_a)
+        if not math.isfinite(current.real) or not math.isfinite(current.imag):
+            raise ValueError("terminal current must be finite")
+        object.__setattr__(self, "current_a", current)
 
 
 @dataclass
@@ -433,6 +436,8 @@ def solve_sheet_case(
     incidence = mesh.incidence()
     resistance = mesh.resistances()
     injected = _source_vector(mesh, terminals)
+    if frequency_hz == 0.0 and float(np.max(np.abs(injected.imag))) > 1e-15:
+        raise ValueError("DC terminal currents must be real")
 
     # Potential is defined up to a constant per connected component, so each
     # component needs its own gauge.  Grounding one node and hoping the
@@ -466,25 +471,38 @@ def solve_sheet_case(
         keep[first] = False
         grounded_nodes.append(first)
     grounded = grounded_nodes[0]
-    # Branches inside a dropped component keep their rows, which are then all
-    # zero: KVL leaves their current at zero, which is what a component nothing
-    # drives should carry.  Removing them would only save iterations.
-    reduced = incidence[:, keep]
+    # Remove every branch that is not wholly inside a driven component.
+    # Keeping an undriven island's KVL row without its KCL columns does *not*
+    # leave its current at zero once the dense inductance operator couples it
+    # to driven copper; it creates a current with nowhere to close.  The stated
+    # policy is to omit undriven islands, so their branches must leave the
+    # unknown vector as well as their nodes.
+    driven_endpoint_count = np.asarray(
+        abs(incidence) @ kept_nodes.astype(np.int8)
+    ).reshape(-1)
+    active_branches = driven_endpoint_count == 2
+    active_incidence = incidence[active_branches]
+    active_resistance = resistance[active_branches]
+    reduced = active_incidence[:, keep]
 
     if frequency_hz == 0.0:
-        admittance = sp.diags(1.0 / resistance)
+        admittance = sp.diags(1.0 / active_resistance)
         system = (reduced.T @ admittance @ reduced).tocsc()
         solution = spla.spsolve(system, injected[keep].real)
         voltage = np.zeros(mesh.node_count, dtype=np.complex128)
         voltage[keep] = solution
-        current = admittance @ (reduced @ solution)
+        active_current = admittance @ (reduced @ solution)
+        current = np.zeros(mesh.branch_count, dtype=np.complex128)
+        current[active_branches] = active_current
         residual = float(
-            np.linalg.norm(reduced.T @ current - injected[keep].real)
+            np.linalg.norm(
+                reduced.T @ active_current - injected[keep].real
+            )
             / max(np.linalg.norm(injected[keep].real), 1e-30)
         )
         return SheetSolution(
             node_voltage=voltage,
-            branch_current=current.astype(np.complex128),
+            branch_current=current,
             frequency_hz=0.0,
             iterations=1,
             residual=residual,
@@ -494,8 +512,6 @@ def solve_sheet_case(
         )
 
     omega = 2.0 * math.pi * frequency_hz
-    inline_count = len(mesh.branch_x) + len(mesh.branch_y)
-
     # The vertical branches' own inductance is an operator, not a per-branch
     # scalar.  They are parallel to one another so they couple, and their mutual
     # terms cancel much of the loop inductance their self terms claim: adding the
@@ -514,9 +530,11 @@ def solve_sheet_case(
 
     def _flux(currents: np.ndarray) -> np.ndarray:
         """Apply the partial inductance to a real vector of branch currents."""
-        grid_x, grid_y = mesh.scatter(currents)
+        full_currents = np.zeros(mesh.branch_count, dtype=np.float64)
+        full_currents[active_branches] = currents
+        grid_x, grid_y = mesh.scatter(full_currents)
         if has_vertical:
-            grid_z = mesh.scatter_vertical(currents)
+            grid_z = mesh.scatter_vertical(full_currents)
             flux_x, flux_y, flux_z = operator.apply(grid_x, grid_y, grid_z)
         else:
             flux_x, flux_y = operator.apply(grid_x, grid_y)
@@ -524,21 +542,21 @@ def solve_sheet_case(
         flux = mesh.gather(flux_x, flux_y)
         if flux_z is not None:
             mesh.gather_vertical(flux_z, flux)
-        return flux
+        return flux[active_branches]
 
     def impedance(currents: np.ndarray) -> np.ndarray:
         """Apply ``Z = R + j omega L`` to a vector of branch currents."""
         flux = _flux(currents.real).astype(np.complex128)
         if np.iscomplexobj(currents):
             flux = flux + 1j * _flux(currents.imag)
-        return resistance * currents + 1j * omega * flux
+        return active_resistance * currents + 1j * omega * flux
 
     # The whole system is solved at once rather than by eliminating the branch
     # currents first.  Eliminating them needs Z^{-1}, and with Z dense that is
     # an inner Krylov solve inside every outer product -- the cost multiplies,
     # and on a stack of filaments it stops being affordable.  The saddle-point
     # form has one Krylov iteration and one application of Z per step.
-    branches = mesh.branch_count
+    branches = int(active_branches.sum())
     unknowns = int(keep.sum())
     size = branches + unknowns
 
@@ -553,12 +571,14 @@ def solve_sheet_case(
     # exactly solvable and, because the self term dominates the coupling,
     # close.  Its Schur complement is the sparse nodal admittance matrix, so it
     # is factored once and reused for every iteration.
-    diagonal = resistance + 1j * omega * np.concatenate(
+    inline_count = len(mesh.branch_x) + len(mesh.branch_y)
+    full_diagonal = resistance + 1j * omega * np.concatenate(
         [
             np.full(inline_count, _self_inductance(operator)),
             _vertical_self_inductance(mesh, operator),
         ]
     )
+    diagonal = full_diagonal[active_branches]
     schur = (reduced.T @ sp.diags(1.0 / diagonal) @ reduced).tocsc()
     factored = spla.splu(schur)
 
@@ -592,7 +612,8 @@ def solve_sheet_case(
         callback=count,
         callback_type="pr_norm",
     )
-    current = result[:branches]
+    current = np.zeros(mesh.branch_count, dtype=np.complex128)
+    current[active_branches] = result[:branches]
     voltage = np.zeros(mesh.node_count, dtype=np.complex128)
     voltage[keep] = result[branches:]
     residual = float(

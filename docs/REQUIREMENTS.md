@@ -99,7 +99,7 @@ role とは同一電位に属する銅の集合で、他の role の銅はこの
 |---|---|
 | `resistive_mesh` | 接続する面内枝の電流の最大 |
 | `pypeec` / `cuda_peec` | 電流密度ベクトルの大きさ |
-| `sheet_peec` | 両側の枝の平均を軸ごとに取り、2軸を大きさとして合成 |
+| `sheet_peec` | 両側の枝の平均を軸ごとに取り、2軸を大きさとして合成。厚さ方向をfilament化した場合は物理層セル内の最大値 |
 
 一様な帯導体では 3 つとも一致する。分かれるのは導体の縁と角で、power_module の PGND
 で実測すると `resistive_mesh` と `sheet_peec` は最大 19.7%、平均 8.3% 違う（相関 0.993）。
@@ -252,6 +252,7 @@ voxel の箱に導体は 29,006 しかない。
 | 直交枝の相互インダクタンス | 厳密にゼロ |
 | DC vs 独立な抵抗網 | 1.6e-19 / スケール 7.2e-4 |
 | AC vs 密行列直接解（0 / 3e5 / 1e8 Hz） | 1.2e-14 / 4.2e-11 / 3.7e-11 |
+| 異厚3層sheet CPU vs CUDA metric最大相対差 | 1.5e-11 |
 | 抵抗解からの乖離の周波数依存 | 一次、小数 3 桁まで |
 | 発達分布に対する軸方向電界の共通性 | 最悪 6.1%、支配的な虚部で 3.7% |
 
@@ -271,8 +272,6 @@ voxel の箱に導体は 29,006 しかない。
   分布を再現する義務を負わない。面内格子が側壁の表皮層を解像できない以上、離散解は真の
   分布と違う集中の仕方をし、この mesh 上でより大きい損失を持ち得る。実測でも長さ 9.6mm
   以上で天井 4.93 を超える。天井が束縛するのは mesh の表現力であって求解の出力ではない。
-- CUDA 上では何も動かしていない。変換は `numpy.fft` である。
-
 ---
 
 ## 6. 定式化と離散化の理論
@@ -455,8 +454,9 @@ I_{\alpha,m}(\boldsymbol q)
 
 `build_kernel()` が符号付き面内 offset と層間距離から核を作り、
 `SheetInductanceOperator.__init__()` が層対・軸ごとのスペクトルを準備する。
-`2*rows × 2*cols` へのゼロ padding により、FFT の巡回畳み込みを物理的な線形畳み込みへ変換している。現在の変換は
-`numpy.fft.rfft2()`／`irfft2()` である。
+`2*rows × 2*cols` へのゼロ padding により、FFT の巡回畳み込みを物理的な線形畳み込みへ変換している。CPU経路は
+`numpy.fft.rfft2()`／`irfft2()`、CUDA経路はbatched
+`cupy.fft.rfft2()`／`irfft2()`で同じspectrumを適用する。
 
 この構造は、一様な面内 pitch、一様な磁気媒質、同一層内で共通の枝形状を必要とする。局所細分化、位置依存の透磁率、傾斜導体を導入すると、そのままでは並進不変性を失う。
 
@@ -661,11 +661,11 @@ f_{\mathrm{MQS,max}}
 |---|---|---|---|---|
 | ~~縦枝間の部分インダクタンス~~ **解決** | — | 指摘どおり自己項のみ、しかも既定値 0 だった。3.5mm インレイのフィラメント界面で隣接列の相互項は自己項の 46〜69%、表面リンクの ωL/R は 0.46 で、無視できる量ではなかった | 面内と同じ畳み込みとして自己・相互を一体で実装した。「level」は縦枝が繋ぐ層対一つで、同一 level の枝は同じ高さを張るので結合は面内 offset のみに依存する。11 フィラメントで 10 level・55 表・1.1 MiB・構築 2.1 秒。level は stackup から推論せず明示させ、演算子が知らない level を持つ mesh は拒否する。回帰試験は `tests/test_sheet_peec.py` の `VerticalOperatorTests` | 解決済み。根拠は物理側にある（平行な枝は結合する、隣接列の相互項は自己項の 46〜69%、逆向きの再配分電流で相互項が自己項を打ち消す）。当初「射影の天井を超える値は収束解が取り得ない」と述べたが、これは誤りだった。天井は真の分布を mesh 上で表現したときの損失であり、ソルバは真の分布を再現する義務がないので、天井はソルバ出力の上界ではない。§5.2 参照 |
 | 側壁の電流集中を解像できない | 面内 pitch より細い edge/side-wall basis | 300 kHz の \(\delta=0.1207\) mm に対して optimizer の pitch は 0.2 mm、すなわち \(1.66\delta\)。既定の厚さ分割だけでは、与えられた厳密分布が持つ損失の 77.2% しか保持できない。bulk P99 はまさにこの局所集中を読む | 最も単純には面内格子を全体で 0.1 mm 以下へ細分化し、FFT の並進不変性を保つ。局所 refinement を使うなら、FFT 遠方場と非一様な近傍補正を結ぶ multilevel/domain-decomposition 演算子が必要 | **P0**。現行 0.2 mm の厚銅 P99 と交流損失には、反復収束では回復できない既知の天井がある |
-| optimizer 向け結果 adapter | `SheetSolution.node_voltage` と `branch_current` から、`SolveResult.current_density` および `bulk_p99_current_density_a_per_mm2` へ変換する経路 | `peec_fastopt/sheet_peec.py` は配列を返すだけである。一方 optimizer は `/home/hyamada/plane_opt_refactor/src/plane_opt/physics/resistive_mesh.py` の `SolveResult` と、`pypeec_solution_to_result()` が作る cell-wise density を読む。adapter がないため gate に接続できない | §1・§2 の定義に従い、枝中心電流から層・セルごとの複素電流密度へ写像し、端子セル除外、フィラメント集約、縦電流の別集計を実装する。既存二 backend と同じ fixture で契約試験を行う | **P0**。ソルバが解けても主要 consumer が結果を評価できない |
-| end-to-end sheet 求解の境界条件と絶対検証 | 発達した表皮電流分布へ到達することを示す端子条件と測定手順 | 現在の bar 励振は端面電流を DC 比率で固定するため、最大横寸法/\(\pi\) 程度の entry length で交流分布へ緩和する必要がある。測定窓がその影響を除けていない。また `Terminal.current_a` は `float` なので、フィラメントごとに異なる位相を注入できない | 十分長い bar、等電位端面、または場の解の複素分布を与える端子を実装する。観測量は断面平均電位ではなく \(\sum_b R_b|I_b|^2/|I|^2\) とし、面内・厚さ方向を細分化して参照解へ収束することを示す | **P0**。現状は演算子が発達解を表現できることまでで、求解器が自身の離散化天井へ達することを示していない |
+| ~~optimizer 向け結果 adapter~~ **解決** | — | `plane-opt-current-field-problem/v1`を独立にparseし、層別厚さ、center Z、複素terminal、vertical segmentをsheet meshへ変換する。結果はnamed nodeへ逆写像し、scalar/phasor voltageと面内current densityを返す | `peec_fastopt/plane_opt_contract.py`へ実装し、異厚3層のparse、mesh、DC end-to-endを`tests/test_plane_opt_contract.py`で回帰する。`plane_opt_refactor`側は`CurrentFieldProblem.as_dict()`だけを渡す | 解決済み。vertical currentとJoule lossはmetricsに接続済み。`magnetic_energy_j`は、それを読むgateの導入前にresultへ追加する必要がある |
+| end-to-end sheet 求解の境界条件と絶対検証 | 発達した表皮電流分布へ到達することを示す端子条件と測定手順 | 現在の bar 励振は端面電流を DC 比率で固定するため、最大横寸法/\(\pi\) 程度の entry length で交流分布へ緩和する必要がある。測定窓がその影響を除けていない。`Terminal.current_a`の複素化は完了したが、等電位端面条件は未実装である | 十分長い bar、等電位端面、または場の解の複素分布を与える端子を実装する。観測量は断面平均電位ではなく \(\sum_b R_b|I_b|^2/|I|^2\) とし、面内・厚さ方向を細分化して参照解へ収束することを示す | **P0**。現状は演算子が発達解を表現できることまでで、求解器が自身の離散化天井へ達することを示していない |
 | ~~複数連結成分のゲージと電流収支~~ **解決** | — | 指摘どおり実在した。2成分の導体で系が厳密に特異になり、`MatrixRankWarning` を出して NaN を返していた。`solve_sheet_case()` の docstring が主張していた「上流の端子検査が1成分であることを確立している」という検査は存在しなかった | `_components()` と `_components_with_terminals()` を追加し、端子を持つ成分ごとに1節点を接地、成分ごとに電流収支を検査、端子を持たない島は `undriven_nodes` として報告して除外する。回帰試験は `tests/test_sheet_peec.py` の `ConnectedComponentTests` | 解決済み |
 | PyPEEC の operator 再利用と case batching | operator preparation と sweep solve の間の再利用可能な公開境界 | optimizer の `solve_pypeec_multiterminal_case()` は case ごとに `run_mesher_data()` と `run_solver_data()` を呼ぶ。CUDA wrapper は `cuda_pypeec.py` の `_VOXEL_CACHE` で mesher 出力だけを再利用するが、solver operator は呼出しごとに準備される。power module の9 case、BLDC board の15 caseは、いずれも端子 pad 集合が全て異なるため、一つの既存 sweep にまとめる対象もない | PyPEEC 側に「geometry/operator prepare」と「source/frequency solve」の境界を設けるか、`peec_fastopt` が独自演算子を所有する。異なる pad partition を一つの prepared domain で扱える source API も必要 | **P1**。正しさではなく反復最適化の準備時間を支配する。なお PyPEEC 5.8 本体は本環境に未インストールなので、「公開 seam が存在しない」という upstream API の事実はローカル実行では再確認できず、現 adapter と既存設計文書から確認できる範囲に限る |
-| sheet 経路の CUDA 実装 | kernel spectrum、2D FFT、saddle-point Krylov、前処理の device 実装 | `SheetInductanceOperator` は `numpy.fft.rfft2()`／`irfft2()` を使用し、`solve_sheet_case()` は SciPy GMRES/SuperLU を使用する。`cuda_pypeec.py` には別系統の PyPEEC/CuPy adapter があるが、sheet solver の CUDA 化ではなく、実機検証も別問題である | CuPy または backend-neutral array API へ演算子を移し、層対を batched cuFFT で処理する。incidence と Krylov を device resident にし、CPU 経路との複素解・残差一致を確認する | **P1**。standalone product の性能要求に直結するが、物理式の正しさは変えない |
+| ~~sheet 経路の CUDA 実装~~ **実装済み、性能改善は継続** | GTX 1650でCPUを上回る性能 | `sheet_cuda.py`へkernel spectrum、batched 2D cuFFT、sparse incidence、左前処理saddle-point GMRES、device三角solveを実装した。CuPy 14のSuperLU因子生成だけはCPU SciPyで行う。異厚3層fixtureはCPUとのmetric最大相対差1.5e-11、実寸power_module PGNDはfallbackなしで残差3.38e-12、closure 8.72e-14 Aへ収束した。一方solve時間はCPU約109.2秒、CUDA約107.9秒で明確な高速化ではない | operator/circuitのcase間cache、CUDA Graphまたはcustom Krylov、factor再利用、より大きい問題でbreak-evenを測る | **P1**。正しさと実機実行は確認済みだが、現GPU・現caseでは性能採用条件を満たさない |
 | barrel の幾何からの自己・相互項と表皮効果 | drill 径、plating 厚、barrel 長からの部分インダクタンス生成と、barrel wall 内の交流電流分布 | `via_resistance()` は環状断面から DC 抵抗だけを計算する。`ViaBranch.inductance_h` は呼出側が与える scalar で、幾何から計算されない。barrel wall の厚さ方向・周方向の skin/proximity effect もない | 円筒殻または等価直方体による自己項を実装し、§7.1 の \(L_{zz}\) 相互項へ統合する。plating が \(\delta/2\) を超える場合は壁厚方向の filament または surface-impedance model を選択する | **P1**。通常の 25 µm plating は 300 kHz の \(\delta/2\) より薄いため現対象では wall skin effect は小さいが、filled via・厚 plating・高周波には一般化できない |
 | graded filament の一般誤差保証 | 任意断面・任意周波数に対する a priori 誤差推定 | `graded_filaments()` は中央フィラメントを \(\delta\) より厚くできる。`discretisation_note()` の `ceiling_fraction` は一つの 1.6×3.5 mm bar、300 kHz の最近傍測定であり、保証境界ではない | 複数の aspect ratio、周波数、端部条件に対する場の解を作り、面内 pitch と filament grading の二変数収束モデルを構築する。許容誤差を満たさない入力は求解前に拒否する | **P1**。現在の測定対象には根拠があるが、standalone product の一般入力には外挿できない |
 | 容量・誘電体・遅延 | 係数電位、電荷未知数、誘電体境界、retarded Green 関数 | power/ground plane 間の変位電流、plane resonance、容量性 return path を表現できない。§6.9 の \(\eta_C\) が小さくない case、または約 0.43 GHz の寸法上限を超える case では適用外になる | quasi-static capacitive PEEC として係数電位行列・電荷保存を追加し、必要なら layered-medium／retarded Green 関数へ拡張する。少なくとも入力から \(\eta_C\) と電気長を評価して適用外を拒否する | **P1**。20 kHz／300 kHz の現対象では低いが、周波数上限を持つ standalone field solver には不可欠 |
@@ -685,4 +685,3 @@ f_{\mathrm{MQS,max}}
 `MixedThicknessTests`）。異厚の2層を両端でビア接続し、面内抵抗の比に従って分流する
 ことを確認する。最初に書いた試験は中央のビア1本で分流を測ろうとしており、上流の層は
 分流できないので想定が誤っていた。
-

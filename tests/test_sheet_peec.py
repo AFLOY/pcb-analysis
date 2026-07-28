@@ -349,6 +349,19 @@ class ConnectedComponentTests(unittest.TestCase):
                 self.assertTrue(solution.converged)
                 self.assertTrue(np.isfinite(solution.node_voltage).all())
                 self.assertEqual(solution.undriven_nodes, 9)
+                injected = np.zeros(mesh.node_count, dtype=np.complex128)
+                for terminal in terminals:
+                    node = mesh.node_index[
+                        (terminal.layer, *terminal.cells[0])
+                    ]
+                    injected[node] += terminal.current_a
+                closure = (
+                    mesh.incidence().T @ solution.branch_current - injected
+                )
+                self.assertLess(float(np.abs(closure).max()), 1e-8)
+                for index, (_layer, _row, col) in enumerate(mesh.branch_x):
+                    if col >= 4:
+                        self.assertEqual(solution.branch_current[index], 0.0j)
 
     def test_a_case_split_across_two_islands_is_refused(self):
         mesh, operator = self._two_islands()

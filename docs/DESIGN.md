@@ -236,10 +236,20 @@ edits feed.
 | Near/far 2.5D cascade | `lowmem_25d.py` | implemented |
 | Dynamic memory controller `layers` | `controller.py` | already parameterized |
 | Full PEEC-MNA / adjoint / residual gates | — | not yet |
-| plane_opt multilayer geometry mapping | plane_opt | external |
+| plane_opt current-field schema mapping | `plane_opt_contract.py` | implemented |
+| Sheet PEEC CUDA execution | `sheet_cuda.py` | implemented; no CPU fallback |
 | Physical CUDA PyPEEC path | `cuda_pypeec.py` | layer-agnostic executor; mapping-dependent |
 
 ### Integration contract for plane_opt
+
+The full current-field solve consumes
+`plane-opt-current-field-problem/v1` through
+`plane_opt_contract.solve_plane_opt_problem()`. The mapping contains each
+layer's own thickness and center Z, conductor cells, complex terminals,
+scenario frequency, and explicit vertical segments; this package does not
+import `plane_opt`.
+
+The sparse candidate-scoring path remains:
 
 1. Build a `Stackup` (layer names + z centers in mm) for the board.
 2. Represent the accepted layout as occupancy `x0` with shape

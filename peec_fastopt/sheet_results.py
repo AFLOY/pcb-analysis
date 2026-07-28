@@ -48,10 +48,10 @@ def _terminal_cells(mesh: SheetMesh, terminals: Sequence[Terminal]) -> set[Cell]
     }
 
 
-def cell_current_density(
+def cell_current_density_phasor(
     mesh: SheetMesh, solution: SheetSolution, *, thickness_m: Sequence[float] | None = None
-) -> dict[Cell, float]:
-    """Give each cell's in-plane current density, in A/mm^2.
+) -> dict[Cell, tuple[complex, complex]]:
+    """Give each cell's two in-plane density phasors, in A/mm^2.
 
     A branch carries the current between two cells; a cell's own density is the
     current through it, which is the mean of the branches on either side.  A cell
@@ -72,22 +72,15 @@ def cell_current_density(
 
     along_x = np.zeros((layers, rows, cols), dtype=np.complex128)
     along_y = np.zeros_like(along_x)
-    count_x = np.zeros((layers, rows, cols), dtype=np.float64)
-    count_y = np.zeros_like(count_x)
-
     for index, (layer, row, col) in enumerate(mesh.branch_x):
         value = solution.branch_current[index]
         along_x[layer, row, col] += value
         along_x[layer, row, col + 1] += value
-        count_x[layer, row, col] += 1.0
-        count_x[layer, row, col + 1] += 1.0
     offset = len(mesh.branch_x)
     for index, (layer, row, col) in enumerate(mesh.branch_y):
         value = solution.branch_current[offset + index]
         along_y[layer, row, col] += value
         along_y[layer, row + 1, col] += value
-        count_y[layer, row, col] += 1.0
-        count_y[layer, row + 1, col] += 1.0
 
     # Both branches of an axis, whether or not both exist: a missing branch
     # carries nothing, and dividing by the two that could have been there is
@@ -96,14 +89,27 @@ def cell_current_density(
         along_x = along_x / 2.0
         along_y = along_y / 2.0
 
-    density: dict[Cell, float] = {}
+    density: dict[Cell, tuple[complex, complex]] = {}
     for (layer, row, col) in mesh.node_index:
         area_mm2 = (mesh.pitch_m * 1e3) * (thickness_m[layer] * 1e3)
-        magnitude = math.hypot(
-            abs(along_x[layer, row, col]), abs(along_y[layer, row, col])
+        density[(layer, row, col)] = (
+            complex(along_x[layer, row, col] / area_mm2),
+            complex(along_y[layer, row, col] / area_mm2),
         )
-        density[(layer, row, col)] = magnitude / area_mm2
     return density
+
+
+def cell_current_density(
+    mesh: SheetMesh, solution: SheetSolution, *, thickness_m: Sequence[float] | None = None
+) -> dict[Cell, float]:
+    """Give the magnitude of each cell's in-plane density, in A/mm^2."""
+    phasor = cell_current_density_phasor(
+        mesh, solution, thickness_m=thickness_m
+    )
+    return {
+        cell: math.hypot(abs(value[0]), abs(value[1]))
+        for cell, value in phasor.items()
+    }
 
 
 def vertical_currents(mesh: SheetMesh, solution: SheetSolution) -> dict[Cell, float]:
@@ -152,9 +158,6 @@ def sheet_fields(
     resistance = mesh.resistances()
     loss = float(np.sum(resistance * np.abs(solution.branch_current) ** 2))
 
-    requested = {}
-    for item in terminals:
-        requested[item.name] = float(item.current_a)
     incidence = mesh.incidence()
     node_balance = incidence.T @ solution.branch_current
     injected = np.zeros(mesh.node_count, dtype=np.complex128)

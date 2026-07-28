@@ -273,13 +273,6 @@ module can settle.
 
 ## What is not done
 
-- The solver has no adapter into `plane_opt`'s `SolveResult` contract. It
-  returns node potentials and branch currents; the gate reads a bulk current
-  density percentile, which needs the branch currents mapped back to per-cell
-  densities.
-- Layers of differing copper thickness are refused rather than handled.
-- Nothing here runs on CUDA yet. The transforms are `numpy.fft`; the operator
-  is shaped for a device but has not been put on one.
 - The barrel's partial self inductance is taken as a given scalar. Nothing
   computes it from the hole.
 - A barrel's own partial inductance is still whatever the caller states as a
@@ -301,11 +294,32 @@ module can settle.
   length of roughly the largest transverse dimension over pi -- about 1.1mm
   here, against measurement windows only 0.6 to 2.4mm from the ends. An
   equipotential end face, or the field solve's own profile injected with its
-  phase, would settle it. `Terminal.current_a` is a float, so a per-filament
-  phase cannot be given through the present API.
+  phase, would settle it. `Terminal.current_a` now accepts complex current, but
+  the equipotential terminal model is still absent.
 - Resistance was read from the mean node potential over a column, which has no
   unique meaning where the cross section is not an equipotential. The
   observable to use is the Joule loss, `sum R_b |I_b|^2 / |I|^2`, which is what
   the field solve computes. Not `Re(I^H Z I)` over a sub-region: cutting a dense
   mutual inductance in half lets reactive power exchange across the cut appear
   in the real part.
+
+## CUDA execution
+
+`sheet_cuda.py` uses the same mesh and closed-form kernels as the CPU solver.
+Prepared spectra, batched 2D transforms, sparse incidence products, Krylov
+vectors, and preconditioner triangular solves reside in CuPy. There is no
+implicit CPU fallback. CuPy 14 builds the sparse LU factors with SciPy
+SuperLU, then uploads the factors and performs each triangular solve on CUDA;
+the result records this as
+`scipy_superlu_factor_cupy_triangular_solve`.
+`max_iterations` means restart cycles on both paths; the CUDA adapter converts
+it to CuPy's total-inner-iteration limit.
+
+An undriven copper island is omitted as both nodes and branches. Omitting only
+its KCL columns while retaining its KVL rows allows the dense inductance
+operator to induce current in a component with no closure equation. The
+returned current of every omitted branch is zero and `undriven_node_count`
+records its size.
+
+Measured device acceptance and CPU comparisons are in
+`docs/SHEET_CUDA_RESULTS.md`.

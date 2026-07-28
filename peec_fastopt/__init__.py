@@ -35,16 +35,31 @@ from .multilayer_peec import (
     ViaSet,
     ViaSpec,
 )
+from .plane_opt_contract import (
+    PLANE_OPT_PROBLEM_SCHEMA,
+    PLANE_OPT_RESULT_SCHEMA,
+    PlaneOptProblem,
+    PlaneOptSolveResult,
+    build_plane_opt_sheet_inputs,
+    solve_plane_opt_problem,
+)
 from .sheet_inductance import (
     CellGeometry,
     build_kernel,
     mutual_partial_inductance,
     self_partial_inductance,
 )
+from .sheet_cuda import (
+    CudaSheetSolveError,
+    CudaSheetTelemetry,
+    CudaSheetUnavailableError,
+    solve_sheet_case_cuda,
+)
 from .sheet_operator import SheetInductanceOperator, SheetLayer, SheetStackup
 from .sheet_results import (
     SheetFields,
     cell_current_density,
+    cell_current_density_phasor,
     sheet_fields,
     vertical_currents,
 )
@@ -62,8 +77,15 @@ __all__ = [
     "CandidateEdit",
     "CellGeometry",
     "CompiledCandidate",
+    "CudaSheetSolveError",
+    "CudaSheetTelemetry",
+    "CudaSheetUnavailableError",
     "FFTInteraction25D",
     "MultilayerDeltaScorer",
+    "PLANE_OPT_PROBLEM_SCHEMA",
+    "PLANE_OPT_RESULT_SCHEMA",
+    "PlaneOptProblem",
+    "PlaneOptSolveResult",
     "SegmentOp",
     "SheetFields",
     "SheetInductanceOperator",
@@ -80,12 +102,16 @@ __all__ = [
     "ViaSpec",
     "build_kernel",
     "cell_current_density",
+    "cell_current_density_phasor",
     "compile_candidate",
     "compile_many",
+    "build_plane_opt_sheet_inputs",
     "mutual_partial_inductance",
     "self_partial_inductance",
     "sheet_fields",
     "solve_sheet_case",
+    "solve_sheet_case_cuda",
+    "solve_plane_opt_problem",
     "via_resistance",
     "vertical_currents",
 ]
