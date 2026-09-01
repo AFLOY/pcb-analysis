@@ -2,16 +2,16 @@ import unittest
 
 import numpy as np
 
-from peec_fastopt.sheet_operator import (
+from electrical.dice_peec.sheet_operator import (
     SheetInductanceOperator,
     SheetLayer,
     SheetStackup,
 )
-from peec_fastopt.sheet_inductance import (
+from electrical.dice_peec.sheet_inductance import (
     mutual_partial_inductance,
     vertical_cell,
 )
-from peec_fastopt.sheet_peec import (
+from electrical.dice_peec.sheet_peec import (
     SheetMesh,
     Terminal,
     ViaBranch,
@@ -563,7 +563,7 @@ class VerticalOperatorTests(unittest.TestCase):
         # Omitting the coupling let the answer sit above the loss the mesh can
         # hold given the exact current profile, which is not a value a converged
         # solve can produce.  With the operator it lands below it.
-        from peec_fastopt.skin_filaments import filament_links, graded_filaments
+        from electrical.dice_peec.skin_filaments import filament_links, graded_filaments
 
         thickness, frequency = 3.5e-3, 3e5
         rows, cols = 6, 12

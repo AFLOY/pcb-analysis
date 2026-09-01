@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from peec_fastopt.cuda_delta import CudaDeltaQuadraticScorer
-from peec_fastopt.cuda_pypeec import (
+from electrical.dice_peec.cuda_delta import CudaDeltaQuadraticScorer
+from electrical.dice_peec.cuda_pypeec import (
     CudaPeecConfig,
     CudaPeecMemoryError,
     CudaPeecSolveError,
@@ -14,8 +14,8 @@ from peec_fastopt.cuda_pypeec import (
     cupy_tolerance,
     voxel_cache_bytes,
 )
-from peec_fastopt.delta_peec import SparseDelta
-from peec_fastopt._bench_utils import (
+from electrical.dice_peec.delta_peec import SparseDelta
+from electrical.dice_peec._bench_utils import (
     _select_candidate,
     ranking_consistent,
     relative_difference,
@@ -522,7 +522,7 @@ class CudaDeltaPackingTests(unittest.TestCase):
                 self.skipTest("no CUDA device")
         except Exception as error:
             self.skipTest(f"CUDA unavailable: {error}")
-        from peec_fastopt.delta_peec import DeltaQuadraticScorer, FFTInteraction2D
+        from electrical.dice_peec.delta_peec import DeltaQuadraticScorer, FFTInteraction2D
 
         rng = np.random.default_rng(3)
         base = rng.normal(size=(24, 20)).astype(np.float32)

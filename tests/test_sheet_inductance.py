@@ -3,7 +3,7 @@ import unittest
 
 import numpy as np
 
-from peec_fastopt.sheet_inductance import (
+from electrical.dice_peec.sheet_inductance import (
     NEAR_RADIUS_CELLS,
     CellGeometry,
     bar_self_inductance,

@@ -1,0 +1,106 @@
+{
+  "schema": "electrical-maxwell-cuda-benchmark/v1",
+  "measured_at": "2026-09-02T07:19:36+0900",
+  "environment": {
+    "platform": "Linux-6.12.0-211.49.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "device": {
+      "id": 0,
+      "name": "NVIDIA GeForce GTX 1650",
+      "compute_capability": "7.5",
+      "global_memory_bytes": 3880845312,
+      "cupy": "14.1.1",
+      "cuda_runtime": 13020,
+      "driver": 13030
+    }
+  },
+  "definitions": {
+    "operator_timing": "synchronised apply_low wall time; allocations included",
+    "solver_timing": "synchronised solve_mpir wall time; operator setup excluded",
+    "speedup": "CPU median divided by CUDA median",
+    "outer_precision": "host complex128",
+    "inner_precision": "CPU/CUDA complex64"
+  },
+  "operator": [
+    {
+      "element_shape": [
+        128,
+        128
+      ],
+      "elements": 16384,
+      "unknowns": 16641,
+      "kernel": "cuda-fused-node-gather-q1",
+      "cpu_complex64": {
+        "median_ms": 0.79032,
+        "minimum_ms": 0.784287,
+        "maximum_ms": 0.81818,
+        "samples_ms": [
+          0.79032,
+          0.81818,
+          0.784287
+        ],
+        "repeats": 3
+      },
+      "cuda_complex64": {
+        "median_ms": 0.037158,
+        "minimum_ms": 0.036332,
+        "maximum_ms": 0.03751,
+        "samples_ms": [
+          0.03751,
+          0.037158,
+          0.036332
+        ],
+        "repeats": 3
+      },
+      "speedup_cpu_over_cuda": 21.269174874858713,
+      "relative_action_error": 8.50882480151021e-08
+    }
+  ],
+  "solver": {
+    "element_shape": [
+      64,
+      256
+    ],
+    "elements": 16384,
+    "unknowns": 16705,
+    "cpu_mpir": {
+      "timing": {
+        "median_ms": 4698.522398,
+        "minimum_ms": 4685.479916,
+        "maximum_ms": 4720.400721,
+        "samples_ms": [
+          4685.479916,
+          4720.400721,
+          4698.522398
+        ],
+        "repeats": 3
+      },
+      "converged": true,
+      "relative_residual": 1.0391826976054981e-11,
+      "outer_iterations": 9,
+      "inner_iterations": 3300
+    },
+    "cuda_mpir": {
+      "timing": {
+        "median_ms": 2365.343595,
+        "minimum_ms": 2363.026747,
+        "maximum_ms": 2369.453717,
+        "samples_ms": [
+          2369.453717,
+          2365.343595,
+          2363.026747
+        ],
+        "repeats": 3
+      },
+      "converged": true,
+      "relative_residual": 1.637411670134425e-11,
+      "outer_iterations": 9,
+      "inner_iterations": 3300,
+      "runtime": "cupy-complex64",
+      "kernel": "cuda-fused-node-gather-q1"
+    },
+    "speedup_cpu_over_cuda": 1.9864016407307625,
+    "relative_solution_error": 4.375915310610812e-09
+  }
+}

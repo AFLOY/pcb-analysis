@@ -2,8 +2,8 @@ import unittest
 
 import numpy as np
 
-from peec_fastopt.delta_peec import DeltaQuadraticScorer, FFTInteraction2D, SparseDelta
-from peec_fastopt.lowmem_peec import approximate_energy, exact_energy
+from electrical.dice_peec.delta_peec import DeltaQuadraticScorer, FFTInteraction2D, SparseDelta
+from electrical.dice_peec.lowmem_peec import approximate_energy, exact_energy
 
 
 class DeltaPeecTests(unittest.TestCase):

@@ -1,0 +1,324 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "周波数領域Maxwell MPIR-FEM 小規模検証",
+    "description": "渦電流、表皮効果、誘電損失、波動伝搬の精度とCPU速度を閉形式解および直接解で検証した技術レポート。",
+    "generatedAt": "2026-09-02T06:43:08+09:00",
+    "charts": [
+      {
+        "id": "fine_grid_accuracy",
+        "title": "閉形式解に対するfine-grid誤差",
+        "subtitle": "各収束列の最細分割、相対誤差をppmで表示",
+        "type": "bar",
+        "dataset": "fine_accuracy",
+        "sourceId": "maxwell_benchmark",
+        "valueFormat": "number",
+        "encodings": {
+          "x": {
+            "field": "metric",
+            "type": "nominal",
+            "label": "検証量"
+          },
+          "y": {
+            "field": "relative_error_ppm",
+            "type": "quantitative",
+            "label": "相対誤差",
+            "format": "number",
+            "unit": "ppm"
+          },
+          "tooltip": [
+            {
+              "field": "elements",
+              "type": "quantitative",
+              "label": "要素数",
+              "format": "number"
+            },
+            {
+              "field": "unknowns",
+              "type": "quantitative",
+              "label": "未知数",
+              "format": "number"
+            },
+            {
+              "field": "reference",
+              "type": "nominal",
+              "label": "参照解"
+            }
+          ]
+        }
+      },
+      {
+        "id": "cpu_solver_timing",
+        "title": "130未知数におけるCPU求解時間",
+        "subtitle": "7回の中央値。密直接解は行列組立て時間を除外",
+        "type": "bar",
+        "dataset": "speed_comparison",
+        "sourceId": "maxwell_benchmark",
+        "valueFormat": "number",
+        "encodings": {
+          "x": {
+            "field": "method",
+            "type": "nominal",
+            "label": "求解法"
+          },
+          "y": {
+            "field": "median_ms",
+            "type": "quantitative",
+            "label": "中央値",
+            "format": "number",
+            "unit": "ms"
+          },
+          "tooltip": [
+            {
+              "field": "relative_error_vs_direct",
+              "type": "quantitative",
+              "label": "直接解との差",
+              "format": "number"
+            },
+            {
+              "field": "precision",
+              "type": "nominal",
+              "label": "主精度"
+            }
+          ]
+        }
+      }
+    ],
+    "tables": [
+      {
+        "id": "convergence_table",
+        "title": "メッシュ収束の監査値",
+        "subtitle": "全11ケース。時間は7回の中央値、誤差は独立な閉形式解に対する値",
+        "dataset": "convergence_rows",
+        "sourceId": "maxwell_benchmark",
+        "defaultSort": {
+          "field": "elements",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "physics",
+            "label": "物理ケース",
+            "type": "text"
+          },
+          {
+            "field": "elements",
+            "label": "要素数",
+            "format": "number"
+          },
+          {
+            "field": "unknowns",
+            "label": "未知数",
+            "format": "number"
+          },
+          {
+            "field": "field_error",
+            "label": "場の相対誤差",
+            "type": "text"
+          },
+          {
+            "field": "impedance_error",
+            "label": "インピーダンス誤差",
+            "type": "text"
+          },
+          {
+            "field": "median_ms",
+            "label": "中央値",
+            "format": "number",
+            "unit": "ms"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "maxwell_benchmark",
+        "label": "Maxwell small-simulation benchmark snapshot",
+        "path": "docs/MAXWELL_SMALL_RESULTS.json"
+      },
+      {
+        "id": "maxwell_tests",
+        "label": "Frequency-domain FEM regression tests",
+        "path": "tests/test_frequency_domain_fem.py"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# 周波数領域Maxwell MPIR-FEM 小規模検証"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "sourceId": "maxwell_benchmark",
+        "body": "## 技術サマリー\n\n- **4つの要求物理を2DスカラーMaxwell方程式で実装した。** 導電項が渦電流と表皮効果、複素誘電率が誘電損失、変位電流項が波動伝搬を担う。\n- **閉形式解への収束を確認した。** 最細分割では、無損失誘電体波動の場誤差が0.873 ppm、損失誘電体が9.96 ppm、銅板の表皮場が282 ppm、複素表面インピーダンスが294 ppmだった。\n- **小規模CPUではMPIRが同条件のcomplex128 matrix-free GMRESより1.68倍高速だった。** ただし事前組立て済み密直接解はMPIRより約444倍高速であり、小規模問題にmatrix-freeを選ぶ速度上の理由はない。\n- **CUDAとBlackholeの速度は未測定である。** 今回の速度値はNumPy CPUだけを対象にし、アクセラレータ性能の代理にはしない。"
+      },
+      {
+        "id": "accuracy_finding",
+        "type": "markdown",
+        "sourceId": "maxwell_benchmark",
+        "body": "## 誘電体と銅の両方で閉形式解へ収束した\n\n無損失・損失誘電体では1D Helmholtz解、銅板では複素伝搬定数から得る場分布と表面インピーダンスを参照にした。下図は各系列の最細分割だけを比較する。値が小さいほど高精度だが、ケースごとに要素数が異なるため、物理間のアルゴリズム優劣ではなく到達精度として読む。"
+      },
+      {
+        "id": "accuracy_chart_block",
+        "type": "chart",
+        "chartId": "fine_grid_accuracy"
+      },
+      {
+        "id": "speed_finding",
+        "type": "markdown",
+        "sourceId": "maxwell_benchmark",
+        "body": "## MPIRは同じ反復幅のFP64 GMRESを上回ったが、小規模直接解には及ばない\n\nMPIRはFP64作用6回とcomplex64作用842回で183.6 ms、Jacobi前処理付きcomplex128 GMRESは761反復で308.0 msだった。MPIRの誤差は事前組立て密直接解に対して1.76e-12である。一方、密直接解の0.413 msには行列組立てが含まれず、規模も130未知数しかない。したがってこの比較は、大規模問題でのbreak-evenやGPU高速化を証明しない。"
+      },
+      {
+        "id": "speed_chart_block",
+        "type": "chart",
+        "chartId": "cpu_solver_timing"
+      },
+      {
+        "id": "scope_definitions",
+        "type": "markdown",
+        "body": "## 解いている方程式と評価量\n\n対象はz方向に形状・材料が不変な2D断面の `E_z` スカラー偏波で、時間規約は `exp(+jωt)`。弱形式は `∫(1/μ)∇E·∇v + ∫(jωσ − ω²ε*)Ev = 0` である。σEを渦電流密度、複素εの虚部を誘電損失、ω²με項を波動伝搬として評価した。誤差は節点場の相対L2ノルム、表皮効果ではさらに複素表面インピーダンスの相対誤差を用いた。"
+      },
+      {
+        "id": "methodology",
+        "type": "markdown",
+        "body": "## 検証方法は同じコード経路の自己比較に依存しない\n\n各問題は1要素高の2D Q1メッシュとして実行し、解析解を持つ1D問題へ縮退させた。無損失誘電体は正弦解、損失誘電体は複素sinh解、銅板は複素cosh解と表面インピーダンスを独立に計算した。求解は外側complex128残差・内側complex64 Jacobi-GMRESのMPIR。速度比較では同じ作用素、許容誤差、Jacobi前処理、restart 32を使い、1 warmup後7回の中央値を報告した。"
+      },
+      {
+        "id": "convergence_intro",
+        "type": "markdown",
+        "sourceId": "maxwell_benchmark",
+        "body": "## 全収束列は概ねQ1要素の二次収束を示した\n\n要素幅を半分にすると、誘電体場誤差と銅板の場・インピーダンス誤差は概ね4分の1になった。反復誤差を離散化誤差より十分小さくするため、最終判定はcomplex128残差 `1e-11` を基準にした。"
+      },
+      {
+        "id": "convergence_table_block",
+        "type": "table",
+        "tableId": "convergence_table"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## 結果は2Dスカラー偏波とCPU小規模測定に限定される\n\n- 任意3DベクトルMaxwellではなく、z不変な `E_z` 偏波である。3D PCBのモード混成、異方性、曲面、ベクトル境界条件にはNédélec辺要素が必要。\n- 現在の境界はDirichletと自然Neumannで、ポート、PML、開放放射境界、Sパラメータ抽出は未実装。\n- 材料は要素内で等方・周波数点ごとに一定。分散モデル、非線形磁性、温度依存性は未実装。\n- CPU NumPyではcomplex64作用1回はcomplex128より約4%速いだけであり、CUDA/BlackholeのFP32 throughput優位を検証していない。\n- 密直接解の時間は行列組立てを除外しているため、反復法に不利な小規模上限として解釈する。"
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "body": "## 次はベクトル辺要素と実機break-evenを検証する\n\n1. 三角形Nédélec辺要素のcurl-curl作用素と、ポート／PMLを追加する。\n2. 既知の導波管モード、誘電体界面のFresnel係数、散乱体のエネルギー収支を参照試験に加える。\n3. CUDAで同一JSONベンチマークを再実行し、problem sizeを増やしてMPIRとFP64 GMRESのbreak-evenを測る。\n4. Blackholeではcomplex64作用、Arnoldi reduction、Jacobi更新を常駐化し、外側complex128残差だけをホストに残す。"
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## 残る判断事項\n\n- 最初の3D対象を、マイクロストリップ、ビア遷移、平面共振のどれにするか。\n- 許容する周波数帯と、ポート／放射境界の優先順位。\n- CUDAとBlackholeで共有する複素数レイアウトをAoSとSoAのどちらに固定するか。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-09-02T06:43:08+09:00",
+    "status": "ready",
+    "datasets": {
+      "fine_accuracy": [
+        {
+          "metric": "無損失誘電体場",
+          "relative_error_ppm": 0.8725992884,
+          "elements": 64,
+          "unknowns": 130,
+          "reference": "正弦Helmholtz解",
+          "physics": "full-wave dielectric"
+        },
+        {
+          "metric": "損失誘電体場",
+          "relative_error_ppm": 9.9618353522,
+          "elements": 48,
+          "unknowns": 98,
+          "reference": "複素sinh解",
+          "physics": "lossy dielectric"
+        },
+        {
+          "metric": "銅板表皮場",
+          "relative_error_ppm": 282.2207011,
+          "elements": 128,
+          "unknowns": 258,
+          "reference": "複素cosh解",
+          "physics": "eddy current"
+        },
+        {
+          "metric": "銅板表面Z",
+          "relative_error_ppm": 294.0209704,
+          "elements": 128,
+          "unknowns": 258,
+          "reference": "複素表面インピーダンス",
+          "physics": "skin effect"
+        }
+      ],
+      "speed_comparison": [
+        {
+          "method": "MPIR",
+          "median_ms": 183.565327,
+          "relative_error_vs_direct": 1.7649720883e-12,
+          "precision": "outer complex128 / inner complex64",
+          "unknowns": 130,
+          "repeats": 7
+        },
+        {
+          "method": "FP64 GMRES",
+          "median_ms": 307.963631,
+          "relative_error_vs_direct": 8.0280774120e-10,
+          "precision": "complex128",
+          "unknowns": 130,
+          "repeats": 7
+        },
+        {
+          "method": "密直接解",
+          "median_ms": 0.413169,
+          "relative_error_vs_direct": 0.0,
+          "precision": "complex128; preassembled",
+          "unknowns": 130,
+          "repeats": 7
+        }
+      ],
+      "convergence_rows": [
+        {"sort_order": 1, "physics": "無損失誘電体", "elements": 8, "unknowns": 18, "field_error": "5.198e-5", "impedance_error": "—", "median_ms": 6.136},
+        {"sort_order": 2, "physics": "無損失誘電体", "elements": 16, "unknowns": 34, "field_error": "1.353e-5", "impedance_error": "—", "median_ms": 7.964},
+        {"sort_order": 3, "physics": "無損失誘電体", "elements": 32, "unknowns": 66, "field_error": "3.454e-6", "impedance_error": "—", "median_ms": 17.980},
+        {"sort_order": 4, "physics": "無損失誘電体", "elements": 64, "unknowns": 130, "field_error": "8.726e-7", "impedance_error": "—", "median_ms": 180.044},
+        {"sort_order": 5, "physics": "損失誘電体", "elements": 12, "unknowns": 26, "field_error": "1.537e-4", "impedance_error": "—", "median_ms": 5.736},
+        {"sort_order": 6, "physics": "損失誘電体", "elements": 24, "unknowns": 50, "field_error": "3.937e-5", "impedance_error": "—", "median_ms": 12.666},
+        {"sort_order": 7, "physics": "損失誘電体", "elements": 48, "unknowns": 98, "field_error": "9.962e-6", "impedance_error": "—", "median_ms": 118.163},
+        {"sort_order": 8, "physics": "銅板表皮", "elements": 16, "unknowns": 34, "field_error": "1.514e-2", "impedance_error": "1.882e-2", "median_ms": 10.770},
+        {"sort_order": 9, "physics": "銅板表皮", "elements": 32, "unknowns": 66, "field_error": "4.164e-3", "impedance_error": "4.705e-3", "median_ms": 21.194},
+        {"sort_order": 10, "physics": "銅板表皮", "elements": 64, "unknowns": 130, "field_error": "1.098e-3", "impedance_error": "1.176e-3", "median_ms": 48.114},
+        {"sort_order": 11, "physics": "銅板表皮", "elements": 128, "unknowns": 258, "field_error": "2.822e-4", "impedance_error": "2.940e-4", "median_ms": 212.217}
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "maxwell_benchmark",
+      "label": "Maxwell small-simulation benchmark snapshot",
+      "path": "docs/MAXWELL_SMALL_RESULTS.json",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_json_auto('docs/MAXWELL_SMALL_RESULTS.json', maximum_depth = -1);",
+        "description": "Reads the complete reviewed benchmark snapshot; report datasets are bounded reshapes of these records.",
+        "tables_used": ["docs/MAXWELL_SMALL_RESULTS.json"],
+        "filters": ["No rows excluded; timing summaries use the stored seven-repeat medians."],
+        "metric_definitions": {
+          "relative_error_ppm": "relative error multiplied by 1,000,000",
+          "median_ms": "median of seven wall-clock samples after one warmup"
+        },
+        "executed_at": "2026-09-02T06:43:08+09:00"
+      }
+    },
+    {
+      "id": "maxwell_tests",
+      "label": "Frequency-domain FEM regression tests",
+      "path": "tests/test_frequency_domain_fem.py"
+    }
+  ]
+}

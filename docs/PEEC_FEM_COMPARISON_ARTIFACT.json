@@ -1,0 +1,358 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Sheet PEECとmatrix-free FEMの適用範囲・性能比較",
+    "description": "同一DC銅ストリップと共通の銅板表皮基準を用いて、精度、CPU/CUDA時間、operator容量、対応物理を比較した技術レポート。",
+    "generatedAt": "2026-09-02T07:32:45+09:00",
+    "charts": [
+      {
+        "id": "dc_cpu_timing",
+        "title": "同一DCストリップのCPU solve時間",
+        "subtitle": "1 warmup後5回の中央値。PEECは疎直接解、FEMはFP64/FP32 MPIR-PCG",
+        "type": "bar",
+        "dataset": "dc_cpu_timing",
+        "sourceId": "report_widget_query",
+        "valueFormat": "number",
+        "encodings": {
+          "x": {
+            "field": "case",
+            "type": "nominal",
+            "label": "実装・長さ方向要素数"
+          },
+          "y": {
+            "field": "median_ms",
+            "type": "quantitative",
+            "label": "solve中央値",
+            "format": "number",
+            "unit": "ms"
+          },
+          "tooltip": [
+            {
+              "field": "method",
+              "type": "nominal",
+              "label": "実装"
+            },
+            {
+              "field": "unknowns",
+              "type": "quantitative",
+              "label": "節点・未知数",
+              "format": "number"
+            },
+            {
+              "field": "relative_error",
+              "type": "quantitative",
+              "label": "解析抵抗への相対誤差",
+              "format": "number"
+            }
+          ]
+        }
+      },
+      {
+        "id": "skin_impedance_error",
+        "title": "FEM表面インピーダンスのメッシュ収束",
+        "subtitle": "0.5 mm銅板、1 MHz。PEEC filamentモジュールの無限平板基準に対する相対誤差",
+        "type": "bar",
+        "dataset": "skin_error",
+        "sourceId": "report_widget_query",
+        "valueFormat": "number",
+        "encodings": {
+          "x": {
+            "field": "elements",
+            "type": "nominal",
+            "label": "厚み方向要素数"
+          },
+          "y": {
+            "field": "relative_error_percent",
+            "type": "quantitative",
+            "label": "複素表面Zの相対誤差",
+            "format": "number",
+            "unit": "%"
+          },
+          "tooltip": [
+            {
+              "field": "unknowns",
+              "type": "quantitative",
+              "label": "未知数",
+              "format": "number"
+            },
+            {
+              "field": "median_ms",
+              "type": "quantitative",
+              "label": "CPU中央値",
+              "format": "number",
+              "unit": "ms"
+            }
+          ]
+        }
+      }
+    ],
+    "tables": [
+      {
+        "id": "dc_audit",
+        "title": "DC直接比較の監査値",
+        "subtitle": "幅0.2 mm、厚さ35 µm、1 A。CUDA時間はPEECがprepare込みtotal、FEMがoperator再利用時のwarm solve",
+        "dataset": "dc_audit",
+        "sourceId": "report_widget_query",
+        "defaultSort": {
+          "field": "elements",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "elements",
+            "label": "要素数",
+            "format": "number"
+          },
+          {
+            "field": "method",
+            "label": "実装",
+            "type": "text"
+          },
+          {
+            "field": "unknowns",
+            "label": "節点・未知数",
+            "format": "number"
+          },
+          {
+            "field": "relative_error",
+            "label": "解析抵抗への誤差",
+            "type": "text"
+          },
+          {
+            "field": "cpu_ms",
+            "label": "CPU",
+            "format": "number",
+            "unit": "ms"
+          },
+          {
+            "field": "cuda_ms",
+            "label": "CUDA",
+            "format": "number",
+            "unit": "ms"
+          },
+          {
+            "field": "operator_kib",
+            "label": "静的operator",
+            "format": "number",
+            "unit": "KiB"
+          }
+        ]
+      },
+      {
+        "id": "capability_matrix",
+        "title": "対応物理と直接比較の可否",
+        "subtitle": "現行実装の範囲。任意3D full-waveは双方とも未対応",
+        "dataset": "capabilities",
+        "sourceId": "report_widget_query",
+        "defaultSort": {
+          "field": "capability",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "capability",
+            "label": "物理・機能",
+            "type": "text"
+          },
+          {
+            "field": "sheet_peec",
+            "label": "Sheet PEEC",
+            "type": "text"
+          },
+          {
+            "field": "matrix_free_fem",
+            "label": "matrix-free FEM",
+            "type": "text"
+          },
+          {
+            "field": "comparison",
+            "label": "比較上の扱い",
+            "type": "text"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "report_widget_query",
+        "label": "Normalized report widget query",
+        "path": "experiments/peec_fem_comparison_report.sql"
+      },
+      {
+        "id": "comparison_benchmark",
+        "label": "PEEC/FEM comparable benchmark snapshot",
+        "path": "docs/PEEC_FEM_COMPARISON_RESULTS.json"
+      },
+      {
+        "id": "comparison_code",
+        "label": "PEEC/FEM comparison benchmark implementation",
+        "path": "experiments/peec_fem_comparison.py"
+      },
+      {
+        "id": "sheet_cuda_evidence",
+        "label": "Sheet-PEEC CUDA acceptance",
+        "path": "docs/SHEET_CUDA_RESULTS.md"
+      },
+      {
+        "id": "fem_cuda_evidence",
+        "label": "Maxwell FEM CUDA benchmark snapshot",
+        "path": "docs/MAXWELL_CUDA_RESULTS.json"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# Sheet PEECとmatrix-free FEMの適用範囲・性能比較"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "sourceId": "comparison_benchmark",
+        "body": "## 技術サマリー\n\n- **PCB配線・プレーンのDC/準静的解析では、現行Sheet PEECを残すべきである。** 同一DCストリップでPEEC CPUはFEM CPUより4.9–16.3倍高速で、解析抵抗への誤差もPEECが `4.0e-15–7.7e-14`、FEMが `2.1e-12–5.5e-12` と双方十分小さい。\n- **FEMの優位は局所operatorの軽さと、PEECが持たない誘電体・波動場である。** 静的低精度operator容量は同じストリップでPEECの22–24%に収まり、誘電損失と2Dスカラーfull-waveを解ける。\n- **この小規模DCケースではCUDAを使うべきではない。** PEEC CUDAは5.6–7.0 ms、FEM CUDAは111–495 msで、どちらもCPUより遅い。FEMはPCGの逐次reductionと細長い問題の反復数が支配した。\n- **表皮効果では両実装の物理基準が一致した。** PEEC filamentモジュールの無限平板インピーダンスとFEMは、厚み方向128要素で0.0294%まで一致した。"
+      },
+      {
+        "id": "dc_finding",
+        "type": "markdown",
+        "sourceId": "comparison_benchmark",
+        "body": "## 同じDC問題ではPEECの疎直接解が速い\n\n長さ方向32/64/128要素の1セル幅銅ストリップを用いた。PEECのセル数はFEM要素数+1、FEMは幅方向1要素なので、両者の物理長、幅、厚さ、1 A端子電流、解析抵抗 `ρL/(wt)` は同一である。FEMの未知数はPEEC節点数の約2倍だが、差の中心は未知数だけでなく、PEECがDCで疎直接解、FEMが混合精度反復改良PCGを使う点にある。"
+      },
+      {
+        "id": "dc_chart",
+        "type": "chart",
+        "chartId": "dc_cpu_timing"
+      },
+      {
+        "id": "cuda_finding",
+        "type": "markdown",
+        "sourceId": "comparison_benchmark",
+        "body": "## CUDAの負けはoperator速度ではなく求解制御にある\n\n32要素でPEEC CUDAは5.58 ms、FEM CUDAは111.49 ms、128要素では7.01 ms対494.93 msだった。PEEC時間は毎回のdevice prepareを含み、FEM時間はoperator再利用後のwarm solveなので、この定義差はむしろFEMに有利である。それでもFEMが遅いのは、細長いPoisson問題で78から301回の内側PCG反復が必要となり、各反復のdot/norm同期がGTX 1650のkernel throughputを相殺するためである。"
+      },
+      {
+        "id": "dc_table",
+        "type": "table",
+        "tableId": "dc_audit"
+      },
+      {
+        "id": "skin_finding",
+        "type": "markdown",
+        "sourceId": "comparison_benchmark",
+        "body": "## 表皮効果は同じ平板基準へ二次収束した\n\n0.5 mm銅板を1 MHzで励振し、FEMの複素表面インピーダンスをPEECのfilament分割が参照する無限平板式と比較した。厚み方向要素を16→32→64→128と倍増すると誤差は1.882%→0.4705%→0.1176%→0.0294%となり、要素幅半減ごとにほぼ1/4へ低下した。下図のPEEC値は解析式の評価であり、9 filamentのSheet PEEC end-to-end solve時間や誤差ではない。"
+      },
+      {
+        "id": "skin_chart",
+        "type": "chart",
+        "chartId": "skin_impedance_error"
+      },
+      {
+        "id": "scope",
+        "type": "markdown",
+        "body": "## 両者は置換関係ではなく、異なる物理領域を埋める\n\nSheet PEECはPCBのセル電流、相互部分インダクタンス、ビア、複数銅層、形状最適化の回路寄りモデルである。matrix-free FEMの周波数領域フロントエンドはz不変断面の `E_z` 場を解き、導電率、誘電率、誘電損失、変位電流を同じ弱形式に持つ。したがって、PCB面内の端子間インダクタンスを現在のスカラーFEMへ移すことも、誘電体波動を現在のSheet PEECへ求めることも正しくない。"
+      },
+      {
+        "id": "capability_table",
+        "type": "table",
+        "tableId": "capability_matrix"
+      },
+      {
+        "id": "methodology",
+        "type": "markdown",
+        "sourceId": "comparison_code",
+        "body": "## 比較方法は共通の解析解と保存済みスナップショットで再現できる\n\nDCは35 µm銅、0.2 mm幅・ピッチ、1 Aを用い、PEECの電圧差とFEMのJoule損失を抵抗として `ρL/(wt)` と照合した。operator構築はcold 1回、solveは1 warmup後5回の中央値。CUDAはGTX 1650で実行した。表皮比較は `exp(+jωt)` 規約の複素インピーダンスを用い、PEEC側のskin-depth式とFEM側の複素伝搬定数式を別コード経路で評価した。"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "body": "## 結論には境界条件と問題形状の制約がある\n\n- DC速度は1セル幅の細長い一様ストリップであり、2D分岐、複数層、ビア、大規模面では順位が変わり得る。\n- PEEC CPUはDC専用の疎直接解、FEMは大規模化を想定したJacobi-PCGであり、同じ線形ソルバー同士の比較ではない。これは現行公開APIのend-to-end選択比較である。\n- CUDA時間はPEECがprepare込み、FEMがresident operatorのwarm solveで完全には同じ境界ではない。この差を考慮しても小規模FEM CUDAが不利という結論は変わらない。\n- 表皮PEEC値は解析material helperで、filament Sheet PEECの端子・entry effect・in-plane proximityを含むend-to-end solveではない。\n- 任意3D full-wave Maxwell、ポート、PML、Sパラメータはどちらにもまだない。"
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "body": "## 実装方針はPEEC維持、FEM拡張、共通dispatcher追加が妥当\n\n1. DCおよび低周波PCBネットワークはSheet PEECを既定にし、誘電体・断面表皮・波動問題をFEMへ振り分ける。\n2. `analysis_regime`、`frequency_hz`、材料誘電率、必要出力からbackendを選ぶ共通dispatcherを追加する。\n3. FEM DC CUDAはdot/norm同期を削減するpipelined PCGまたはs-step CGを導入し、2D面メッシュでbreak-evenを再測定する。\n4. 次の公平なAC比較は、同一長方形導体断面に対するFEM場とPEEC filamentのJoule損失を、同じequipotential端面条件で測る。"
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "body": "## 次に決めるべきこと\n\n- 自動dispatcherでPEEC/FEMを切り替える閾値を、周波数だけでなく `厚さ/表皮深さ` と誘電体変位電流比で定義するか。\n- 3D full-waveへ進む前に、2Dベクトル断面モードまたはPEEC-FEM連成を優先するか。\n- Tenstorrent移植の最初の対象を、反復数の多いDC-PCGではなく、40倍のoperator高速化を確認済みのMaxwell作用に固定するか。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-09-02T07:32:45+09:00",
+    "status": "ready",
+    "datasets": {
+      "dc_cpu_timing": [
+        {"case": "PEEC · 32", "method": "Sheet PEEC", "elements": 32, "unknowns": 33, "median_ms": 0.927680, "relative_error": 3.9619916976e-15},
+        {"case": "FEM · 32", "method": "matrix-free FEM", "elements": 32, "unknowns": 66, "median_ms": 4.535462, "relative_error": 2.1130622387e-12},
+        {"case": "PEEC · 64", "method": "Sheet PEEC", "elements": 64, "unknowns": 65, "median_ms": 0.956573, "relative_error": 4.1600912825e-14},
+        {"case": "FEM · 64", "method": "matrix-free FEM", "elements": 64, "unknowns": 130, "median_ms": 8.516614, "relative_error": 3.0899133028e-12},
+        {"case": "PEEC · 128", "method": "Sheet PEEC", "elements": 128, "unknowns": 129, "median_ms": 1.059831, "relative_error": 7.7258838103e-14},
+        {"case": "FEM · 128", "method": "matrix-free FEM", "elements": 128, "unknowns": 258, "median_ms": 17.303286, "relative_error": 5.5498699257e-12}
+      ],
+      "skin_error": [
+        {"elements": 16, "unknowns": 34, "relative_error_percent": 1.8820960237, "median_ms": 11.132687},
+        {"elements": 32, "unknowns": 66, "relative_error_percent": 0.4704899660, "median_ms": 21.562463},
+        {"elements": 64, "unknowns": 130, "relative_error_percent": 0.1176116001, "median_ms": 48.906506},
+        {"elements": 128, "unknowns": 258, "relative_error_percent": 0.0294020970, "median_ms": 215.378544}
+      ],
+      "dc_audit": [
+        {"sort_order": 1, "elements": 32, "method": "Sheet PEEC", "unknowns": 33, "relative_error": "3.962e-15", "cpu_ms": 0.927680, "cuda_ms": 5.576541, "operator_kib": 2.125},
+        {"sort_order": 2, "elements": 32, "method": "matrix-free FEM", "unknowns": 66, "relative_error": "2.113e-12", "cpu_ms": 4.535462, "cuda_ms": 111.488846, "operator_kib": 0.510},
+        {"sort_order": 3, "elements": 64, "method": "Sheet PEEC", "unknowns": 65, "relative_error": "4.160e-14", "cpu_ms": 0.956573, "cuda_ms": 6.041281, "operator_kib": 4.125},
+        {"sort_order": 4, "elements": 64, "method": "matrix-free FEM", "unknowns": 130, "relative_error": "3.090e-12", "cpu_ms": 8.516614, "cuda_ms": 275.143187, "operator_kib": 0.947},
+        {"sort_order": 5, "elements": 128, "method": "Sheet PEEC", "unknowns": 129, "relative_error": "7.726e-14", "cpu_ms": 1.059831, "cuda_ms": 7.007449, "operator_kib": 8.125},
+        {"sort_order": 6, "elements": 128, "method": "matrix-free FEM", "unknowns": 258, "relative_error": "5.550e-12", "cpu_ms": 17.303286, "cuda_ms": 494.934210, "operator_kib": 1.822}
+      ],
+      "capabilities": [
+        {"sort_order": 1, "capability": "DC PCB conduction / vias", "sheet_peec": "対応", "matrix_free_fem": "対応", "comparison": "直接比較可能"},
+        {"sort_order": 2, "capability": "準静的部分インダクタンス", "sheet_peec": "対応", "matrix_free_fem": "scalar Ezでは対象外", "comparison": "適用範囲が異なる"},
+        {"sort_order": 3, "capability": "表皮・近接効果", "sheet_peec": "graded filament", "matrix_free_fem": "導体断面場", "comparison": "同じ平板基準、離散化が異なる"},
+        {"sort_order": 4, "capability": "誘電損失・波動伝搬", "sheet_peec": "非対応", "matrix_free_fem": "2D scalar full-wave", "comparison": "FEMのみ"},
+        {"sort_order": 5, "capability": "任意3D vector full-wave", "sheet_peec": "非対応", "matrix_free_fem": "非対応", "comparison": "将来の辺要素が必要"}
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "report_widget_query",
+      "label": "Normalized report widget query",
+      "path": "experiments/peec_fem_comparison_report.sql"
+    },
+    {
+      "id": "comparison_benchmark",
+      "label": "PEEC/FEM comparable benchmark snapshot",
+      "path": "docs/PEEC_FEM_COMPARISON_RESULTS.json",
+      "query": {
+        "engine": "python",
+        "language": "python",
+        "description": "Runs matched DC-strip and skin-slab cases and records all timing samples and errors.",
+        "tables_used": ["docs/PEEC_FEM_COMPARISON_RESULTS.json"],
+        "filters": ["DC elements 32, 64, 128; skin elements 16, 32, 64, 128; five timed repeats after one warmup."],
+        "metric_definitions": {
+          "relative_error": "absolute difference from the common analytical reference divided by its magnitude",
+          "median_ms": "median synchronized wall-clock milliseconds for five samples",
+          "static_operator_bytes": "prepared operator coefficient/table bytes excluding Krylov vectors"
+        },
+        "executed_at": "2026-09-02T07:32:45+09:00"
+      }
+    },
+    {
+      "id": "comparison_code",
+      "label": "PEEC/FEM comparison benchmark implementation",
+      "path": "experiments/peec_fem_comparison.py"
+    },
+    {
+      "id": "sheet_cuda_evidence",
+      "label": "Sheet-PEEC CUDA acceptance",
+      "path": "docs/SHEET_CUDA_RESULTS.md"
+    },
+    {
+      "id": "fem_cuda_evidence",
+      "label": "Maxwell FEM CUDA benchmark snapshot",
+      "path": "docs/MAXWELL_CUDA_RESULTS.json"
+    }
+  ]
+}

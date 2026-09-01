@@ -3,21 +3,21 @@ from unittest.mock import patch
 
 import numpy as np
 
-from peec_fastopt.delta_peec import DeltaQuadraticScorer, FFTInteraction2D, SparseDelta
-from peec_fastopt.layout_ops import CandidateEdit, SegmentOp, ViaOp, compile_candidate
-from peec_fastopt.lowmem_25d import (
+from electrical.dice_peec.delta_peec import DeltaQuadraticScorer, FFTInteraction2D, SparseDelta
+from electrical.dice_peec.layout_ops import CandidateEdit, SegmentOp, ViaOp, compile_candidate
+from electrical.dice_peec.lowmem_25d import (
     approximate_multilayer_energy,
     exact_multilayer_energy,
     fidelity_cascade_scores,
 )
-from peec_fastopt.multilayer_peec import (
+from electrical.dice_peec.multilayer_peec import (
     FFTInteraction25D,
     MultilayerDeltaScorer,
     SparseDeltaML,
     ViaSet,
     ViaSpec,
 )
-from peec_fastopt.stackup import Stackup
+from electrical.dice_peec.stackup import Stackup
 
 
 class StackupTests(unittest.TestCase):

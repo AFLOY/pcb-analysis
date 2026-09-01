@@ -6,8 +6,13 @@ import argparse
 import json
 from dataclasses import asdict
 
-from peec_fastopt.backends import SyntheticBackend
-from peec_fastopt.controller import DynamicController, FidelityStage, GIB, ProblemProfile
+from electrical.dice_peec.backends import SyntheticBackend
+from electrical.dice_peec.controller import (
+    DynamicController,
+    FidelityStage,
+    GIB,
+    ProblemProfile,
+)
 
 
 def main() -> None:
@@ -43,4 +48,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

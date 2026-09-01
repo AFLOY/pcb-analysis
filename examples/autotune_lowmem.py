@@ -9,7 +9,7 @@ import time
 import numpy as np
 from scipy.stats import rankdata
 
-from peec_fastopt.lowmem_peec import approximate_energy, exact_energy
+from electrical.dice_peec.lowmem_peec import approximate_energy, exact_energy
 
 # benchmark.py is co-located in examples/; add examples/ to path if needed.
 import sys
