@@ -16,6 +16,11 @@ class MatrixFreeMPIRSystem(Protocol):
     The high path consumes and returns host FP64 arrays.  The low path operates
     on the device-native arrays owned by ``runtime``.  No assembled global
     matrix is part of this interface.
+
+    ``diagonal_low`` feeds the default Jacobi preconditioner.  A system may
+    additionally define ``precondition_low(vector) -> vector``, an SPD (for
+    PCG) approximate inverse applied on the low-precision runtime; when present
+    it replaces the Jacobi scaling in every inner solver.
     """
 
     size: int
@@ -28,6 +33,17 @@ class MatrixFreeMPIRSystem(Protocol):
     def apply_low(self, vector: Any) -> Any: ...
 
     def diagonal_low(self) -> Any: ...
+
+
+def _low_preconditioner(system: MatrixFreeMPIRSystem) -> Any:
+    """Return the low-precision preconditioner action of ``system``."""
+
+    custom = getattr(system, "precondition_low", None)
+    if custom is not None:
+        return custom
+    runtime = system.runtime
+    diagonal = system.diagonal_low()
+    return lambda vector: runtime.divide(vector, diagonal)
 
 
 @dataclass(frozen=True)
@@ -96,8 +112,8 @@ def _inner_pcg(
     if rhs_norm == 0.0:
         return np.zeros_like(rhs_high), 0, 0.0, 0
 
-    diagonal = system.diagonal_low()
-    preconditioned = runtime.divide(residual, diagonal)
+    precondition = _low_preconditioner(system)
+    preconditioned = precondition(residual)
     direction = runtime.copy(preconditioned)
     rz = float(np.real(runtime.dot(residual, preconditioned)))
     applications = 0
@@ -123,7 +139,7 @@ def _inner_pcg(
                 applications,
             )
 
-        preconditioned = runtime.divide(residual, diagonal)
+        preconditioned = precondition(residual)
         next_rz = float(np.real(runtime.dot(residual, preconditioned)))
         if not np.isfinite(next_rz) or rz == 0.0:
             break
@@ -152,7 +168,7 @@ def _inner_gmres(
     runtime = system.runtime
     rhs = runtime.from_host(rhs_high)
     correction = runtime.zeros_like(rhs)
-    diagonal = system.diagonal_low()
+    precondition = _low_preconditioner(system)
     rhs_norm = runtime.norm(rhs)
     if rhs_norm == 0.0:
         return np.zeros_like(rhs_high), 0, 0.0, 0
@@ -189,7 +205,7 @@ def _inner_gmres(
         coefficients = np.zeros(0, dtype=np.complex64)
 
         for column in range(cycle):
-            preconditioned = runtime.divide(basis[column], diagonal)
+            preconditioned = precondition(basis[column])
             preconditioned_basis.append(preconditioned)
             candidate = system.apply_low(preconditioned)
             applications += 1
@@ -260,7 +276,7 @@ def _inner_gmres_cuda(
     xp = runtime.namespace
     rhs = runtime.from_host(rhs_high)
     correction = runtime.zeros_like(rhs)
-    diagonal = system.diagonal_low()
+    precondition = _low_preconditioner(system)
     rhs_norm = runtime.norm(rhs)
     if rhs_norm == 0.0:
         return np.zeros_like(rhs_high), 0, 0.0, 0
@@ -298,9 +314,7 @@ def _inner_gmres_cuda(
         coefficients = np.zeros(0, dtype=np.complex128)
 
         for column in range(cycle):
-            preconditioned_basis[column] = runtime.divide(
-                basis[column], diagonal
-            )
+            preconditioned_basis[column] = precondition(basis[column])
             candidate = system.apply_low(preconditioned_basis[column])
             applications += 1
 

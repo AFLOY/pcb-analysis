@@ -80,7 +80,10 @@ The package is divided into three parts:
 | `frequency_domain.py` | Scalar full-wave Q1 operator, fields, currents, and losses |
 
 `MatrixFreeMPIRSystem` is the solver-facing contract. A new physical operator
-provides `apply_high`, `apply_low`, and `diagonal_low`. A new accelerator
+provides `apply_high`, `apply_low`, and `diagonal_low`. It may also provide
+`precondition_low`, an SPD approximate inverse on the low-precision runtime
+that replaces the default Jacobi scaling in every inner solver; the thermal
+package uses this hook for its two-level preconditioner. A new accelerator
 provides the low-precision vector runtime. CUDA is optional and imported only
 when a CuPy runtime is constructed.
 
@@ -171,6 +174,7 @@ The accuracy and CPU timing audit is in
 skin-effect, and capability comparison with Sheet PEEC is in
 [PEEC_FEM_COMPARISON_REPORT.html](PEEC_FEM_COMPARISON_REPORT.html), backed by
 `PEEC_FEM_COMPARISON_RESULTS.json`. The next 3D increment needs edge elements,
-ports, and an absorbing boundary. An electrothermal extension belongs under
-`src/thermal/<method+acceleration>` and can exchange Joule-loss fields through
-a physics-neutral coupling layer.
+ports, and an absorbing boundary. The electrothermal extension lives under
+`src/thermal/matrix_free_mpir_fem` and receives the per-element and per-via
+Joule loss that `solve_pcb_dc` now reports; see
+[THERMAL_MPIR_FEM.md](THERMAL_MPIR_FEM.md).

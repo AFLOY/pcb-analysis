@@ -380,24 +380,38 @@ class MatrixFreePCBOperator:
             flat[self._via_a_high] - flat[self._via_b_high]
         )
 
-    def joule_loss(self, potential_v: np.ndarray) -> float:
+    def element_joule_loss(self, potential_v: np.ndarray) -> np.ndarray:
+        """Return the Joule loss of every Q1 element, in W.
+
+        The loss is the exact element quadratic form ``sigma t v^T K_e v``,
+        which sums to the operator's total loss.  It is the heat a thermal
+        solve receives from this electrical solve, element by element.
+        """
+
         potential = np.asarray(potential_v, dtype=np.float64).reshape(
             self.mesh.node_shape
         )
         element_values = np.stack(self._element_views(potential), axis=-1)
-        element_energy = self._coefficient_high * np.einsum(
+        return self._coefficient_high * np.einsum(
             "...i,ij,...j->...",
             element_values,
             self._local_high,
             element_values,
             optimize=True,
         )
-        via_current_drop = 0.0
-        if self._via_a_high.size:
-            flat = potential.reshape(-1)
-            drop = flat[self._via_a_high] - flat[self._via_b_high]
-            via_current_drop = float(np.sum(self._via_g_high * drop * drop))
-        return float(np.sum(element_energy) + via_current_drop)
+
+    def via_joule_loss(self, potential_v: np.ndarray) -> np.ndarray:
+        """Return the Joule loss dissipated in each via, in W."""
+
+        flat = np.asarray(potential_v, dtype=np.float64).reshape(-1)
+        drop = flat[self._via_a_high] - flat[self._via_b_high]
+        return self._via_g_high * drop * drop
+
+    def joule_loss(self, potential_v: np.ndarray) -> float:
+        return float(
+            np.sum(self.element_joule_loss(potential_v))
+            + np.sum(self.via_joule_loss(potential_v))
+        )
 
 
 @dataclass(frozen=True)
@@ -406,6 +420,8 @@ class PCBConductionSolution:
     current_density_a_per_m2: np.ndarray
     via_current_a: np.ndarray
     joule_loss_w: float
+    element_joule_loss_w: np.ndarray
+    via_joule_loss_w: np.ndarray
     max_current_density_a_per_m2: float
     solve: MPIRResult
 
@@ -417,8 +433,14 @@ def solve_pcb_dc(
     runtime: LowPrecisionRuntime | None = None,
     backend: RuntimeBackend | None = None,
     device_id: int = 0,
+    initial_potential_v: np.ndarray | None = None,
 ) -> PCBConductionSolution:
-    """Solve a layered PCB's DC conduction problem with matrix-free MPIR."""
+    """Solve a layered PCB's DC conduction problem with matrix-free MPIR.
+
+    ``initial_potential_v`` warm-starts the outer refinement, for example with
+    the potential of the previous iteration of a coupled analysis; NaN entries
+    (inactive nodes of a reported solution) are treated as zero.
+    """
 
     operator = MatrixFreePCBOperator(
         problem.mesh,
@@ -429,7 +451,15 @@ def solve_pcb_dc(
         device_id=device_id,
     )
     rhs = operator.build_rhs(problem.terminals)
-    result = solve_mpir(operator, rhs, config=config)
+    initial = None
+    if initial_potential_v is not None:
+        initial = np.nan_to_num(
+            np.asarray(initial_potential_v, dtype=np.float64).reshape(-1), nan=0.0
+        )
+        if initial.size != operator.size:
+            raise ValueError("initial_potential_v must hold one value per node")
+        initial = np.where(operator.free_nodes.reshape(-1), initial, 0.0)
+    result = solve_mpir(operator, rhs, config=config, initial_guess=initial)
     potential = result.solution.reshape(problem.mesh.node_shape)
     field = operator.element_electric_field(potential)
     conductivity = np.asarray(problem.mesh.conductivity_s_per_m, dtype=np.float64)
@@ -443,6 +473,8 @@ def solve_pcb_dc(
         current_density_a_per_m2=current_density,
         via_current_a=operator.via_currents(potential),
         joule_loss_w=operator.joule_loss(potential),
+        element_joule_loss_w=operator.element_joule_loss(potential),
+        via_joule_loss_w=operator.via_joule_loss(potential),
         max_current_density_a_per_m2=maximum,
         solve=result,
     )
