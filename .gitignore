@@ -16,5 +16,6 @@ experiments/*
 !experiments/__init__.py
 !experiments/maxwell_small_benchmark.py
 !experiments/maxwell_cuda_benchmark.py
+!experiments/thermal_sparse_fp32_benchmark.py
 !experiments/peec_fem_comparison.py
 !experiments/peec_fem_comparison_report.sql
