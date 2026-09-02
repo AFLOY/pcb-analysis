@@ -1,21 +1,14 @@
-name: Publish to PyPI
+name: Release
 
-# Builds the wheel and source distribution once, checks them, and uploads them
-# with PyPI Trusted Publishing (OIDC) -- no API token is stored in the repo.
-# Runs when a GitHub release is published, or by hand for a dry run to
-# TestPyPI.  Before the first run, register this repository as a pending
-# publisher on PyPI: project "pcb-analysis", workflow "publish.yml",
-# environment "pypi" (and the same on TestPyPI with environment "testpypi").
+# Builds the wheel and source distribution once, checks them, installs the
+# wheel into a clean environment, and attaches both to the GitHub release
+# that triggered the run.  No PyPI: users install straight from the release
+# assets, and the checksum file lets them verify what they downloaded.
 on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      target:
-        description: Where to upload
-        type: choice
-        default: testpypi
-        options: [testpypi, pypi]
+    # A manual run builds and checks but attaches nothing.
 
 permissions:
   contents: read
@@ -56,41 +49,29 @@ jobs:
           wheel-env/bin/python -c "import electrical.dice_peec, electrical.matrix_free_mpir_fem"
           wheel-env/bin/pcb-analysis-calibrate --help > /dev/null
 
+      - name: Write checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
-  publish-testpypi:
+  attach:
     needs: build
-    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/p/pcb-analysis
     permissions:
-      id-token: write
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-
-  publish-pypi:
-    needs: build
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/pcb-analysis
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Attach the distributions to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber

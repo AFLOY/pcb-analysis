@@ -34,16 +34,27 @@ iterative refinement (MPIR) on NumPy or CuPy.
 
 ## Installation
 
-### From PyPI
+### From a GitHub release
+
+Each release carries a built wheel, a source distribution, and their SHA-256
+checksums. Install the wheel by URL; replace the version with the release you
+want.
 
 ```bash
-pip install pcb-analysis            # CPU only
-pip install 'pcb-analysis[cuda]'    # with CuPy and PyPEEC
+pip install https://github.com/AFLOY/pcb-analysis/releases/download/v0.6.0/pcb_analysis-0.6.0-py3-none-any.whl
+# with CuPy and PyPEEC
+pip install 'pcb-analysis[cuda] @ https://github.com/AFLOY/pcb-analysis/releases/download/v0.6.0/pcb_analysis-0.6.0-py3-none-any.whl'
 ```
 
-Releases are built and uploaded by the `Publish to PyPI` workflow when a
-GitHub release is published; the tag has to match the version in
-`pyproject.toml`.
+Or let pip build from the repository at a tag, which also works while the
+repository is private for anyone with access to it:
+
+```bash
+pip install 'git+https://github.com/AFLOY/pcb-analysis.git@v0.6.0'
+```
+
+The `Release` workflow builds, checks, and attaches the files when a GitHub
+release is published; the tag has to match the version in `pyproject.toml`.
 
 ### From a checkout, CPU only
 
