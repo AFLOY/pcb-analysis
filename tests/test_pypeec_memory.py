@@ -1,6 +1,6 @@
 import unittest
 
-from peec_fastopt.pypeec_memory import (
+from electrical.dice_peec.pypeec_memory import (
     COMPLEX_BYTES,
     describe_estimate,
     estimate_pypeec_memory,

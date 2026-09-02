@@ -3,16 +3,16 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "peec-fastopt"
-version = "0.3.1"
-description = "CUDA-accelerated PEEC solver for PCB PDN optimization"
+name = "pcb-analysis"
+version = "0.6.0"
+description = "CUDA-accelerated PEEC and matrix-free full-wave FEM for electrical PCB analysis"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [
   { name = "Hiroyuki Yamada", email = "H44bcda@gmail.com" },
 ]
-keywords = ["peec", "pcb", "pdn", "electromagnetics", "cuda", "optimization"]
+keywords = ["peec", "fem", "maxwell", "skin-effect", "pcb", "pdn", "electromagnetics", "cuda", "optimization"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
@@ -39,18 +39,25 @@ cuda = [
 test = ["pytest>=8,<9"]
 
 [project.urls]
-Homepage = "https://github.com/AFLOY/peec-cuda"
-Repository = "https://github.com/AFLOY/peec-cuda"
-Issues = "https://github.com/AFLOY/peec-cuda/issues"
+Homepage = "https://github.com/AFLOY/pcb-analysis"
+Repository = "https://github.com/AFLOY/pcb-analysis"
+Issues = "https://github.com/AFLOY/pcb-analysis/issues"
 
 [project.scripts]
-peec-fastopt-calibrate = "peec_fastopt.cli.calibrate:main"
+pcb-analysis-calibrate = "electrical.dice_peec.cli.calibrate:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
-include = ["peec_fastopt*"]
+where = ["src"]
+include = ["electrical*"]
 
 [tool.setuptools.package-data]
-peec_fastopt = ["py.typed"]
+electrical = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Exercise the src-layout packages directly while keeping local experiment
+# modules importable from the repository root.
+pythonpath = ["src", "."]

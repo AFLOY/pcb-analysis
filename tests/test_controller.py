@@ -1,7 +1,7 @@
 import unittest
 
-from peec_fastopt.backends import SyntheticBackend
-from peec_fastopt.controller import (
+from electrical.dice_peec.backends import SyntheticBackend
+from electrical.dice_peec.controller import (
     CandidateEstimate,
     DynamicController,
     ExecutionReport,

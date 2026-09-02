@@ -9,7 +9,11 @@ import time
 import numpy as np
 from scipy.stats import rankdata
 
-from peec_fastopt.delta_peec import DeltaQuadraticScorer, FFTInteraction2D, SparseDelta
+from electrical.dice_peec.delta_peec import (
+    DeltaQuadraticScorer,
+    FFTInteraction2D,
+    SparseDelta,
+)
 
 
 def make_base(grid: int) -> np.ndarray:

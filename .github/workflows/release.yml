@@ -1,0 +1,77 @@
+name: Release
+
+# Builds the wheel and source distribution once, checks them, installs the
+# wheel into a clean environment, and attaches both to the GitHub release
+# that triggered the run.  No PyPI: users install straight from the release
+# assets, and the checksum file lets them verify what they downloaded.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    # A manual run builds and checks but attaches nothing.
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build with the oldest supported setuptools
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'setuptools==69.*' wheel build twine
+          python -m build --no-isolation
+          twine check dist/*
+
+      - name: Confirm the release tag matches the package version
+        if: github.event_name == 'release'
+        run: |
+          version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$tag" != "$version" ]; then
+            echo "release tag $GITHUB_REF_NAME does not match pyproject version $version" >&2
+            exit 1
+          fi
+
+      - name: Install the wheel into a clean environment and import it
+        working-directory: /tmp
+        run: |
+          python -m venv wheel-env
+          wheel-env/bin/pip install --upgrade pip
+          wheel-env/bin/pip install "$GITHUB_WORKSPACE"/dist/*.whl
+          wheel-env/bin/python -c "import electrical.dice_peec, electrical.matrix_free_mpir_fem"
+          wheel-env/bin/pcb-analysis-calibrate --help > /dev/null
+
+      - name: Write checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  attach:
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Attach the distributions to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber

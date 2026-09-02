@@ -1,0 +1,724 @@
+{
+  "schema": "electrical-peec-fem-comparison/v2",
+  "measured_at": "2026-09-02T08:25:56+0900",
+  "environment": {
+    "platform": "Linux-6.12.0-211.49.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "cuda_requested": true,
+    "cuda_executed": true
+  },
+  "definitions": {
+    "dc_case": "same one-cell-wide copper strip and 1 A terminal current",
+    "dc_exact_resistance": "rho * length / (width * thickness)",
+    "setup_timing": "single cold construction; not a statistical estimate",
+    "solve_timing": "median wall-clock time after one warmup",
+    "static_operator_bytes": "prepared coefficients/tables only; Krylov vectors excluded",
+    "skin_reference": "closed-form infinite-slab impedance; the PEEC filament module's copy of it is reported only as a cross-check",
+    "skin_fem": "1D field solve through the slab thickness; AC/DC ratio from the sheet current the surface field drives",
+    "skin_peec": "sheet-PEEC bar of graded filaments, current injected in DC proportion at both ends; AC/DC ratio from the filament current division at the middle of the middle row",
+    "filament_averaged_slab": "AC/DC ratio the exact slab profile gives once averaged over the same filaments; what the cut alone costs, not a bound on the solve",
+    "peec_skin_timing": "cold operator construction once; CPU solve timed without warm-up over --peec-skin-repeats runs; CUDA timed after one warm-up"
+  },
+  "dc_strip": [
+    {
+      "elements_along_length": 32,
+      "length_m": 0.0064,
+      "width_m": 0.0002,
+      "thickness_m": 3.5e-05,
+      "exact_resistance_ohm": 0.015762285714285715,
+      "peec": {
+        "nodes": 33,
+        "branches": 32,
+        "resistance_ohm": 0.015762285714285777,
+        "relative_error": 3.961991697597841e-15,
+        "residual": 1.475552811121985e-14,
+        "operator_setup": {
+          "median_ms": 12.849644,
+          "minimum_ms": 12.849644,
+          "maximum_ms": 12.849644,
+          "samples_ms": [
+            12.849644
+          ],
+          "repeats": 1
+        },
+        "cpu_solve": {
+          "median_ms": 0.938098,
+          "minimum_ms": 0.934436,
+          "maximum_ms": 1.013729,
+          "samples_ms": [
+            1.013729,
+            0.938098,
+            0.936658,
+            0.938908,
+            0.934436
+          ],
+          "repeats": 5
+        },
+        "static_operator_bytes": 2176,
+        "cuda_total": {
+          "median_ms": 5.5555920116603374,
+          "minimum_ms": 5.504086002474651,
+          "maximum_ms": 6.044314010068774,
+          "samples_ms": [
+            6.044314010068774,
+            5.560484016314149,
+            5.525127024156973,
+            5.504086002474651,
+            5.5555920116603374
+          ],
+          "repeats": 5
+        },
+        "cuda_last_prepare_ms": 0.5621440068352968,
+        "cuda_last_solve_ms": 4.172766988631338,
+        "cuda_memory_pool_peak_bytes": 35840
+      },
+      "fem": {
+        "unknowns": 66,
+        "resistance_ohm": 0.01576228571431902,
+        "relative_error": 2.1130622387188486e-12,
+        "residual": 8.810352752893297e-13,
+        "outer_iterations": 4,
+        "inner_iterations": 78,
+        "operator_setup": {
+          "median_ms": 0.166812,
+          "minimum_ms": 0.166812,
+          "maximum_ms": 0.166812,
+          "samples_ms": [
+            0.166812
+          ],
+          "repeats": 1
+        },
+        "cpu_solve": {
+          "median_ms": 4.560738,
+          "minimum_ms": 4.551492,
+          "maximum_ms": 4.568211,
+          "samples_ms": [
+            4.568211,
+            4.561809,
+            4.551492,
+            4.554637,
+            4.560738
+          ],
+          "repeats": 5
+        },
+        "static_low_operator_bytes": 522,
+        "cuda_operator_setup": {
+          "median_ms": 0.430902,
+          "minimum_ms": 0.430902,
+          "maximum_ms": 0.430902,
+          "samples_ms": [
+            0.430902
+          ],
+          "repeats": 1
+        },
+        "cuda_warm_solve": {
+          "median_ms": 111.056915,
+          "minimum_ms": 109.317749,
+          "maximum_ms": 112.902575,
+          "samples_ms": [
+            111.056915,
+            111.174281,
+            112.902575,
+            110.505929,
+            109.317749
+          ],
+          "repeats": 5
+        },
+        "cuda_residual": 8.020420899187227e-13,
+        "cuda_relative_solution_error_vs_cpu": 3.249538625665284e-13
+      }
+    },
+    {
+      "elements_along_length": 64,
+      "length_m": 0.0128,
+      "width_m": 0.0002,
+      "thickness_m": 3.5e-05,
+      "exact_resistance_ohm": 0.03152457142857143,
+      "peec": {
+        "nodes": 65,
+        "branches": 64,
+        "resistance_ohm": 0.03152457142857274,
+        "relative_error": 4.160091282477733e-14,
+        "residual": 3.498383041697726e-14,
+        "operator_setup": {
+          "median_ms": 12.394009,
+          "minimum_ms": 12.394009,
+          "maximum_ms": 12.394009,
+          "samples_ms": [
+            12.394009
+          ],
+          "repeats": 1
+        },
+        "cpu_solve": {
+          "median_ms": 0.951653,
+          "minimum_ms": 0.945875,
+          "maximum_ms": 0.959695,
+          "samples_ms": [
+            0.959695,
+            0.956112,
+            0.950149,
+            0.945875,
+            0.951653
+          ],
+          "repeats": 5
+        },
+        "static_operator_bytes": 4224,
+        "cuda_total": {
+          "median_ms": 6.521728995721787,
+          "minimum_ms": 5.998173000989482,
+          "maximum_ms": 6.849259982118383,
+          "samples_ms": [
+            6.502685020677745,
+            6.849259982118383,
+            6.6379600029904395,
+            6.521728995721787,
+            5.998173000989482
+          ],
+          "repeats": 5
+        },
+        "cuda_last_prepare_ms": 0.5729580007027835,
+        "cuda_last_solve_ms": 4.598261992214248,
+        "cuda_memory_pool_peak_bytes": 46080
+      },
+      "fem": {
+        "unknowns": 130,
+        "resistance_ohm": 0.03152457142847402,
+        "relative_error": 3.0899133028265828e-12,
+        "residual": 2.548476146180217e-12,
+        "outer_iterations": 4,
+        "inner_iterations": 149,
+        "operator_setup": {
+          "median_ms": 0.135838,
+          "minimum_ms": 0.135838,
+          "maximum_ms": 0.135838,
+          "samples_ms": [
+            0.135838
+          ],
+          "repeats": 1
+        },
+        "cpu_solve": {
+          "median_ms": 8.14745,
+          "minimum_ms": 8.062999,
+          "maximum_ms": 8.309986,
+          "samples_ms": [
+            8.309986,
+            8.155907,
+            8.062999,
+            8.14745,
+            8.098218
+          ],
+          "repeats": 5
+        },
+        "static_low_operator_bytes": 970,
+        "cuda_operator_setup": {
+          "median_ms": 0.378641,
+          "minimum_ms": 0.378641,
+          "maximum_ms": 0.378641,
+          "samples_ms": [
+            0.378641
+          ],
+          "repeats": 1
+        },
+        "cuda_warm_solve": {
+          "median_ms": 269.54334,
+          "minimum_ms": 267.261462,
+          "maximum_ms": 271.970925,
+          "samples_ms": [
+            271.970925,
+            267.261462,
+            269.54334,
+            270.790535,
+            268.489425
+          ],
+          "repeats": 5
+        },
+        "cuda_residual": 2.1044697385326195e-12,
+        "cuda_relative_solution_error_vs_cpu": 1.6175826996561316e-12
+      }
+    },
+    {
+      "elements_along_length": 128,
+      "length_m": 0.0256,
+      "width_m": 0.0002,
+      "thickness_m": 3.5e-05,
+      "exact_resistance_ohm": 0.06304914285714286,
+      "peec": {
+        "nodes": 129,
+        "branches": 128,
+        "resistance_ohm": 0.06304914285714773,
+        "relative_error": 7.72588381031579e-14,
+        "residual": 1.1410154759923843e-13,
+        "operator_setup": {
+          "median_ms": 12.413031,
+          "minimum_ms": 12.413031,
+          "maximum_ms": 12.413031,
+          "samples_ms": [
+            12.413031
+          ],
+          "repeats": 1
+        },
+        "cpu_solve": {
+          "median_ms": 1.05697,
+          "minimum_ms": 1.038957,
+          "maximum_ms": 1.224953,
+          "samples_ms": [
+            1.05697,
+            1.048527,
+            1.224953,
+            1.067412,
+            1.038957
+          ],
+          "repeats": 5
+        },
+        "static_operator_bytes": 8320,
+        "cuda_total": {
+          "median_ms": 7.038338982965797,
+          "minimum_ms": 6.895124010043219,
+          "maximum_ms": 7.128409983124584,
+          "samples_ms": [
+            7.038338982965797,
+            7.128409983124584,
+            6.97288999799639,
+            7.042683020699769,
+            6.895124010043219
+          ],
+          "repeats": 5
+        },
+        "cuda_last_prepare_ms": 0.5646969948429614,
+        "cuda_last_solve_ms": 5.505286972038448,
+        "cuda_memory_pool_peak_bytes": 73216
+      },
+      "fem": {
+        "unknowns": 258,
+        "resistance_ohm": 0.06304914285679294,
+        "relative_error": 5.549869925735109e-12,
+        "residual": 2.2166132953362625e-12,
+        "outer_iterations": 4,
+        "inner_iterations": 301,
+        "operator_setup": {
+          "median_ms": 0.13798,
+          "minimum_ms": 0.13798,
+          "maximum_ms": 0.13798,
+          "samples_ms": [
+            0.13798
+          ],
+          "repeats": 1
+        },
+        "cpu_solve": {
+          "median_ms": 16.812686,
+          "minimum_ms": 16.597009,
+          "maximum_ms": 16.916052,
+          "samples_ms": [
+            16.812686,
+            16.807594,
+            16.893188,
+            16.597009,
+            16.916052
+          ],
+          "repeats": 5
+        },
+        "static_low_operator_bytes": 1866,
+        "cuda_operator_setup": {
+          "median_ms": 0.382536,
+          "minimum_ms": 0.382536,
+          "maximum_ms": 0.382536,
+          "samples_ms": [
+            0.382536
+          ],
+          "repeats": 1
+        },
+        "cuda_warm_solve": {
+          "median_ms": 489.681025,
+          "minimum_ms": 487.843608,
+          "maximum_ms": 494.944693,
+          "samples_ms": [
+            487.860512,
+            494.944693,
+            489.681025,
+            493.698261,
+            487.843608
+          ],
+          "repeats": 5
+        },
+        "cuda_residual": 1.7503437288942812e-12,
+        "cuda_relative_solution_error_vs_cpu": 2.0528283919625515e-12
+      }
+    }
+  ],
+  "skin_effect": [
+    {
+      "elements_through_thickness": 16,
+      "unknowns": 34,
+      "frequency_hz": 1000000.0,
+      "thickness_m": 0.0005,
+      "fem_ac_to_dc_ratio": 3.856708574252705,
+      "closed_form_ac_to_dc_ratio": 3.7879960999035642,
+      "fem_ac_to_dc_ratio_relative_error": 0.018139531440090523,
+      "fem_impedance_ohm": {
+        "real": 0.0001329793116402333,
+        "imag": 0.00012781166431412254
+      },
+      "peec_slab_reference_ohm": {
+        "real": 0.0001306101055247372,
+        "imag": 0.00013035105098107967
+      },
+      "closed_form_impedance_ohm": {
+        "real": 0.0001306101055246749,
+        "imag": 0.00013035105098114136
+      },
+      "fem_relative_error_vs_peec_slab_reference": 0.018820960237329026,
+      "peec_reference_relative_error_vs_closed_form": 4.750894464723997e-13,
+      "peec_filaments_at_four_per_skin_depth": 9,
+      "peec_surface_filament_m": 1.652071240705277e-05,
+      "fem_cpu_timing": {
+        "median_ms": 10.851076,
+        "minimum_ms": 10.648393,
+        "maximum_ms": 12.676548,
+        "samples_ms": [
+          10.7557,
+          10.648393,
+          11.749606,
+          12.676548,
+          10.851076
+        ],
+        "repeats": 5
+      },
+      "fem_residual": 1.6076553909291956e-14
+    },
+    {
+      "elements_through_thickness": 32,
+      "unknowns": 66,
+      "frequency_hz": 1000000.0,
+      "thickness_m": 0.0005,
+      "fem_ac_to_dc_ratio": 3.805561545885032,
+      "closed_form_ac_to_dc_ratio": 3.7879960999035642,
+      "fem_ac_to_dc_ratio_relative_error": 0.004637134125326776,
+      "fem_impedance_ohm": {
+        "real": 0.0001312157621021159,
+        "imag": 0.00012972902008863616
+      },
+      "peec_slab_reference_ohm": {
+        "real": 0.0001306101055247372,
+        "imag": 0.00013035105098107967
+      },
+      "closed_form_impedance_ohm": {
+        "real": 0.0001306101055246749,
+        "imag": 0.00013035105098114136
+      },
+      "fem_relative_error_vs_peec_slab_reference": 0.004704899659713893,
+      "peec_reference_relative_error_vs_closed_form": 4.750894464723997e-13,
+      "peec_filaments_at_four_per_skin_depth": 9,
+      "peec_surface_filament_m": 1.652071240705277e-05,
+      "fem_cpu_timing": {
+        "median_ms": 21.410566,
+        "minimum_ms": 21.200883,
+        "maximum_ms": 21.49065,
+        "samples_ms": [
+          21.410566,
+          21.471425,
+          21.297965,
+          21.49065,
+          21.200883
+        ],
+        "repeats": 5
+      },
+      "fem_residual": 5.61248845942025e-13
+    },
+    {
+      "elements_through_thickness": 64,
+      "unknowns": 130,
+      "frequency_hz": 1000000.0,
+      "thickness_m": 0.0005,
+      "fem_ac_to_dc_ratio": 3.7924110290419875,
+      "closed_form_ac_to_dc_ratio": 3.7879960999035642,
+      "fem_ac_to_dc_ratio_relative_error": 0.0011655051964112528,
+      "fem_impedance_ohm": {
+        "real": 0.00013076233228136774,
+        "imag": 0.00013019636683261565
+      },
+      "peec_slab_reference_ohm": {
+        "real": 0.0001306101055247372,
+        "imag": 0.00013035105098107967
+      },
+      "closed_form_impedance_ohm": {
+        "real": 0.0001306101055246749,
+        "imag": 0.00013035105098114136
+      },
+      "fem_relative_error_vs_peec_slab_reference": 0.0011761160006083864,
+      "peec_reference_relative_error_vs_closed_form": 4.750894464723997e-13,
+      "peec_filaments_at_four_per_skin_depth": 9,
+      "peec_surface_filament_m": 1.652071240705277e-05,
+      "fem_cpu_timing": {
+        "median_ms": 47.532752,
+        "minimum_ms": 46.985277,
+        "maximum_ms": 47.735276,
+        "samples_ms": [
+          47.665716,
+          47.735276,
+          47.505347,
+          46.985277,
+          47.532752
+        ],
+        "repeats": 5
+      },
+      "fem_residual": 7.758188265472238e-12
+    },
+    {
+      "elements_through_thickness": 128,
+      "unknowns": 258,
+      "frequency_hz": 1000000.0,
+      "thickness_m": 0.0005,
+      "fem_ac_to_dc_ratio": 3.7891012956421646,
+      "closed_form_ac_to_dc_ratio": 3.7879960999035642,
+      "fem_ac_to_dc_ratio_relative_error": 0.00029176263899226783,
+      "fem_impedance_ohm": {
+        "real": 0.00013064821267374184,
+        "imag": 0.00013031243174878142
+      },
+      "peec_slab_reference_ohm": {
+        "real": 0.0001306101055247372,
+        "imag": 0.00013035105098107967
+      },
+      "closed_form_impedance_ohm": {
+        "real": 0.0001306101055246749,
+        "imag": 0.00013035105098114136
+      },
+      "fem_relative_error_vs_peec_slab_reference": 0.0002940209698862155,
+      "peec_reference_relative_error_vs_closed_form": 4.750894464723997e-13,
+      "peec_filaments_at_four_per_skin_depth": 9,
+      "peec_surface_filament_m": 1.652071240705277e-05,
+      "fem_cpu_timing": {
+        "median_ms": 210.594103,
+        "minimum_ms": 210.206089,
+        "maximum_ms": 216.146145,
+        "samples_ms": [
+          210.206089,
+          216.146145,
+          214.358067,
+          210.594103,
+          210.38021
+        ],
+        "repeats": 5
+      },
+      "fem_residual": 2.4100984487233203e-14
+    }
+  ],
+  "skin_effect_peec": [
+    {
+      "length_cells": 16,
+      "length_m": 0.0032,
+      "width_cells": 8,
+      "width_m": 0.0016,
+      "thickness_m": 0.0005,
+      "frequency_hz": 1000000.0,
+      "cells_per_skin_depth": 4.0,
+      "filaments": 9,
+      "surface_filament_m": 1.652071240705277e-05,
+      "nodes": 1152,
+      "branches": 3112,
+      "closed_form_ac_to_dc_ratio": 3.7879960999035642,
+      "closed_form_impedance_ohm": {
+        "real": 0.0001306101055246749,
+        "imag": 0.00013035105098114136
+      },
+      "filament_averaged_slab_ac_to_dc_ratio": 3.5548807443856876,
+      "peec_ac_to_dc_ratio": 3.341716661318094,
+      "peec_relative_error_vs_closed_form": 0.11781412303904741,
+      "peec_relative_error_vs_filament_averaged_slab": 0.05996377892683151,
+      "peec_profile_relative_l2_error_vs_filament_averaged_slab": 0.06658884188659027,
+      "peec_iterations": 479,
+      "peec_residual": 4.916179509304662e-09,
+      "peec_converged": true,
+      "operator_setup": {
+        "median_ms": 1205.852845,
+        "minimum_ms": 1205.852845,
+        "maximum_ms": 1205.852845,
+        "samples_ms": [
+          1205.852845
+        ],
+        "repeats": 1
+      },
+      "cpu_solve": {
+        "median_ms": 3694.709086,
+        "minimum_ms": 3694.709086,
+        "maximum_ms": 3694.709086,
+        "samples_ms": [
+          3694.709086
+        ],
+        "repeats": 1
+      },
+      "static_operator_bytes": 548352,
+      "cuda_total": {
+        "median_ms": 22422.536781989038,
+        "minimum_ms": 22422.536781989038,
+        "maximum_ms": 22422.536781989038,
+        "samples_ms": [
+          22422.536781989038
+        ],
+        "repeats": 1
+      },
+      "cuda_last_prepare_ms": 5.0023279909510165,
+      "cuda_last_solve_ms": 22416.425815987168,
+      "cuda_memory_pool_peak_bytes": 15622656,
+      "cuda_iterations": 600,
+      "cuda_residual": 8.232691840818765e-11,
+      "cuda_ac_to_dc_ratio": 3.341716668582254,
+      "cuda_relative_solution_error_vs_cpu": 2.7587188868236872e-09
+    },
+    {
+      "length_cells": 32,
+      "length_m": 0.0064,
+      "width_cells": 8,
+      "width_m": 0.0016,
+      "thickness_m": 0.0005,
+      "frequency_hz": 1000000.0,
+      "cells_per_skin_depth": 4.0,
+      "filaments": 9,
+      "surface_filament_m": 1.652071240705277e-05,
+      "nodes": 2304,
+      "branches": 6296,
+      "closed_form_ac_to_dc_ratio": 3.7879960999035642,
+      "closed_form_impedance_ohm": {
+        "real": 0.0001306101055246749,
+        "imag": 0.00013035105098114136
+      },
+      "filament_averaged_slab_ac_to_dc_ratio": 3.5548807443856876,
+      "peec_ac_to_dc_ratio": 3.666319418472423,
+      "peec_relative_error_vs_closed_form": 0.032121649078318444,
+      "peec_relative_error_vs_filament_averaged_slab": 0.03134807665847395,
+      "peec_profile_relative_l2_error_vs_filament_averaged_slab": 0.05637458934158789,
+      "peec_iterations": 908,
+      "peec_residual": 9.60193317355804e-09,
+      "peec_converged": true,
+      "operator_setup": {
+        "median_ms": 1365.742657,
+        "minimum_ms": 1365.742657,
+        "maximum_ms": 1365.742657,
+        "samples_ms": [
+          1365.742657
+        ],
+        "repeats": 1
+      },
+      "cpu_solve": {
+        "median_ms": 11453.906802,
+        "minimum_ms": 11453.906802,
+        "maximum_ms": 11453.906802,
+        "samples_ms": [
+          11453.906802
+        ],
+        "repeats": 1
+      },
+      "static_operator_bytes": 1064448,
+      "cuda_total": {
+        "median_ms": 53951.47822701256,
+        "minimum_ms": 53951.47822701256,
+        "maximum_ms": 53951.47822701256,
+        "samples_ms": [
+          53951.47822701256
+        ],
+        "repeats": 1
+      },
+      "cuda_last_prepare_ms": 5.4081520065665245,
+      "cuda_last_solve_ms": 53945.00117300777,
+      "cuda_memory_pool_peak_bytes": 32274944,
+      "cuda_iterations": 1080,
+      "cuda_residual": 5.284166482749247e-10,
+      "cuda_ac_to_dc_ratio": 3.6663194201738207,
+      "cuda_relative_solution_error_vs_cpu": 7.636928453226177e-09
+    },
+    {
+      "length_cells": 64,
+      "length_m": 0.0128,
+      "width_cells": 8,
+      "width_m": 0.0016,
+      "thickness_m": 0.0005,
+      "frequency_hz": 1000000.0,
+      "cells_per_skin_depth": 4.0,
+      "filaments": 9,
+      "surface_filament_m": 1.652071240705277e-05,
+      "nodes": 4608,
+      "branches": 12664,
+      "closed_form_ac_to_dc_ratio": 3.7879960999035642,
+      "closed_form_impedance_ohm": {
+        "real": 0.0001306101055246749,
+        "imag": 0.00013035105098114136
+      },
+      "filament_averaged_slab_ac_to_dc_ratio": 3.5548807443856876,
+      "peec_ac_to_dc_ratio": 3.7620801330760303,
+      "peec_relative_error_vs_closed_form": 0.006841603355450582,
+      "peec_relative_error_vs_filament_averaged_slab": 0.0582858901856491,
+      "peec_profile_relative_l2_error_vs_filament_averaged_slab": 0.061944682993859405,
+      "peec_iterations": 2149,
+      "peec_residual": 5.794459089678305e-09,
+      "peec_converged": true,
+      "operator_setup": {
+        "median_ms": 1368.531584,
+        "minimum_ms": 1368.531584,
+        "maximum_ms": 1368.531584,
+        "samples_ms": [
+          1368.531584
+        ],
+        "repeats": 1
+      },
+      "cpu_solve": {
+        "median_ms": 94797.362345,
+        "minimum_ms": 94797.362345,
+        "maximum_ms": 94797.362345,
+        "samples_ms": [
+          94797.362345
+        ],
+        "repeats": 1
+      },
+      "static_operator_bytes": 2096640,
+      "cuda_total": {
+        "median_ms": 238095.7183999999,
+        "minimum_ms": 238095.7183999999,
+        "maximum_ms": 238095.7183999999,
+        "samples_ms": [
+          238095.7183999999
+        ],
+        "repeats": 1
+      },
+      "cuda_last_prepare_ms": 7.062257995130494,
+      "cuda_last_solve_ms": 238087.55415902124,
+      "cuda_memory_pool_peak_bytes": 68016128,
+      "cuda_iterations": 2880,
+      "cuda_residual": 1.40520192236225e-11,
+      "cuda_ac_to_dc_ratio": 3.7620801368969152,
+      "cuda_relative_solution_error_vs_cpu": 2.16189879798574e-09
+    }
+  ],
+  "capabilities": [
+    {
+      "capability": "DC PCB conduction and vias",
+      "sheet_peec": "yes",
+      "matrix_free_fem": "yes",
+      "comparison": "directly comparable"
+    },
+    {
+      "capability": "magneto-quasistatic partial inductance",
+      "sheet_peec": "yes",
+      "matrix_free_fem": "not in scalar Ez front end",
+      "comparison": "different scope"
+    },
+    {
+      "capability": "skin/proximity effect",
+      "sheet_peec": "graded conductor filaments, solved",
+      "matrix_free_fem": "conductive cross-section field, solved",
+      "comparison": "both solved against the same closed-form slab; different discretisation and different problem size"
+    },
+    {
+      "capability": "dielectric loss and wave propagation",
+      "sheet_peec": "no displacement-current dielectric field",
+      "matrix_free_fem": "yes, 2D scalar full-wave",
+      "comparison": "FEM-only"
+    },
+    {
+      "capability": "arbitrary 3D vector full-wave Maxwell",
+      "sheet_peec": "no",
+      "matrix_free_fem": "no",
+      "comparison": "requires a future 3D edge-element solver"
+    }
+  ]
+}

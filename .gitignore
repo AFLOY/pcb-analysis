@@ -9,5 +9,12 @@ dist/
 .venv/
 benchmark-results/
 
-# Local probes and scratch work, kept out of the released repository.
-experiments/
+# Local probes and scratch work, kept out of the released repository.  The FP32
+# accuracy audit is a repeatable acceptance tool and is intentionally versioned.
+experiments/*
+!experiments/fp32_accuracy.py
+!experiments/__init__.py
+!experiments/maxwell_small_benchmark.py
+!experiments/maxwell_cuda_benchmark.py
+!experiments/peec_fem_comparison.py
+!experiments/peec_fem_comparison_report.sql

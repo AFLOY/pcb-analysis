@@ -65,17 +65,23 @@ jobs:
         working-directory: /tmp
         run: |
           /tmp/wheel-env/bin/python -c "
-          import peec_fastopt
-          from peec_fastopt import MultilayerDeltaScorer, Stackup, ViaSpec, ViaSet
-          from peec_fastopt.cli import calibrate
+          import electrical
+          from electrical.dice_peec import MultilayerDeltaScorer, Stackup, ViaSpec, ViaSet
+          from electrical.matrix_free_mpir_fem import (
+              MatrixFreePCBOperator, solve_pcb_dc, solve_scalar_maxwell
+          )
+          from electrical.dice_peec.cli import calibrate
           assert callable(calibrate.main)
+          assert callable(MultilayerDeltaScorer)
+          assert callable(solve_pcb_dc)
+          assert callable(solve_scalar_maxwell)
           "
           # Every console script the metadata promises has to run.
-          /tmp/wheel-env/bin/peec-fastopt-calibrate --help > /dev/null
+          /tmp/wheel-env/bin/pcb-analysis-calibrate --help > /dev/null
           # The inline-type marker has to survive packaging, not merely exist.
           /tmp/wheel-env/bin/python -c "
           from importlib.resources import files
-          assert files('peec_fastopt').joinpath('py.typed').is_file()
+          assert files('electrical').joinpath('py.typed').is_file()
           "
 
       - name: Run the suite against the installed package
@@ -86,4 +92,4 @@ jobs:
           python -m venv /tmp/sdist-env
           /tmp/sdist-env/bin/pip install --upgrade pip
           /tmp/sdist-env/bin/pip install dist/*.tar.gz
-          cd /tmp && /tmp/sdist-env/bin/python -c "import peec_fastopt"
+          cd /tmp && /tmp/sdist-env/bin/python -c "import electrical.dice_peec, electrical.matrix_free_mpir_fem"

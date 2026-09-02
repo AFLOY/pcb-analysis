@@ -1,5 +1,21 @@
 # DICE-PEEC: optimization-oriented incremental PEEC
 
+## Source taxonomy
+
+Source code is grouped first by analysis target and then by numerical method
+plus acceleration strategy:
+
+```text
+src/electrical/dice_peec/
+src/electrical/matrix_free_mpir_fem/
+```
+
+The first directory contains the PEEC implementation described below. The
+second contains matrix-free FEM accelerated by mixed-precision iterative
+refinement (MPIR). A future thermal implementation belongs under
+`src/thermal/<method+acceleration>` rather than inside either electrical
+solver.
+
 ## Objective
 
 Minimize total PCB routing optimization time, rather than the latency of one
@@ -219,9 +235,9 @@ operator telemetry is available. Partial cuFFT calibration reports are marked
 `memory_complete=False`, so they update timing but cannot incorrectly scale the
 whole PEEC memory model.
 
-## Multilayer implementation status (peec-cuda)
+## Multilayer implementation status (pcb-analysis)
 
-plane_opt will own multilayer pathfinding and via insertion.  peec-cuda owns
+plane_opt will own multilayer pathfinding and via insertion.  pcb-analysis owns
 the fixed-grid 2.5D interaction model and sparse candidate scoring that those
 edits feed.
 
@@ -264,3 +280,19 @@ The sparse candidate-scoring path remains:
 Cell coordinates are in the fixed routing grid.  Vertical distances use
 `stackup.z_mm` converted by `cell_size_m` so interlayer kernels stay consistent
 with the planar FFT grid.
+
+## Matrix-free MPIR-FEM boundary
+
+The electrical FEM path covers real, symmetric DC conduction on layered Q1 PCB
+meshes and the complex 2D scalar `E_z` reduction of frequency-domain Maxwell.
+The latter includes conductivity, displacement current, dielectric loss, eddy
+currents, and skin effect. Outer reliable residuals and updates use host
+float64/complex128; inner Jacobi-PCG or Jacobi-GMRES corrections and most
+operator actions use float32/complex64. Element and via contributions are
+applied directly, so there is no assembled global matrix.
+
+This is complementary to DICE-PEEC rather than a replacement for it: the
+full-wave front end is scalar and z-invariant, not an arbitrary 3D vector PCB
+model. The algorithm, validation limits, CUDA runtime, and intended Tenstorrent
+Blackhole port boundary are specified in
+[MATRIX_FREE_MPIR_FEM.md](MATRIX_FREE_MPIR_FEM.md).

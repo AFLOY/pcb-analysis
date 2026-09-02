@@ -10,7 +10,7 @@ import math
 
 import pytest
 
-from peec_fastopt.plane_opt_contract import solve_plane_opt_problem
+from electrical.dice_peec.plane_opt_contract import solve_plane_opt_problem
 from test_plane_opt_contract import _problem
 
 

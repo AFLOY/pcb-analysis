@@ -1,0 +1,8 @@
+# Install this repository in editable mode with the CUDA and test dependencies
+# declared in pyproject.toml. Keeping versions there avoids two drifting copies
+# of the runtime dependency specification.
+-e .[cuda,test]
+
+# Distribution verification used by CI and local release checks.
+build>=1.2,<2
+wheel>=0.43
