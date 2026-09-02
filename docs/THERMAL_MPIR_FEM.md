@@ -159,6 +159,27 @@ The remaining CUDA solve time is dominated by the host-side FP64 residual
 (seven applications of the NumPy corner-product action) and per-iteration
 reductions, so the CUDA advantage grows with the mesh.
 
+### Measured alternatives, not adopted
+
+`experiments/thermal_sparse_fp32_benchmark.py` (branch
+`exp/thermal-sparse-fp32-coarse`, results in the Git-ignored
+`benchmark-results/thermal-sparse-fp32.json`) compared three bandwidth
+reductions of the CUDA FP32 inner solve on the 4-slab fixture above, GTX 1650,
+CuPy 14.1.1, 2026-09-02:
+
+| Nodes | CSR fine action / matrix-free | Sparse-LU coarse / dense inverse | Tapered sparse coarse solve / dense |
+|---:|---:|---:|---:|
+| 13,005 | 0.46× (2.4 MB vs 0.15 MB) | 5.22 ms vs 0.030 ms | 0.72× (817 vs 577 inner) |
+| 51,005 | 0.41× (9.6 MB vs 0.58 MB) | 11.1 ms vs 0.079 ms | 0.67× (1,233 vs 795 inner) |
+| 202,005 | 0.39× (38 MB vs 2.3 MB) | 14.8 ms vs 0.124 ms | 0.58× (2,019 vs 1,047 inner) |
+
+An assembled FP32 CSR operator is 2.2–2.5× slower than the fused kernel and
+stores 16× more; the exact sparse-LU coarse solve is two orders slower than the
+dense matmul; the Bartlett-tapered sparse coarse inverse (radius 4, SPD) keeps
+the solution to `1e-12` but needs 1.4–1.9× the inner iterations and never wins.
+The matrix-free action and the dense coarse inverse stay. The coarse-space cap
+remains the open item for boards beyond a few hundred thousand nodes.
+
 ## Electrothermal coupling
 
 `solve_pcb_dc` now reports `element_joule_loss_w` (the exact element
