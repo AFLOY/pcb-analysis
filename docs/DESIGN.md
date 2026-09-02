@@ -8,13 +8,24 @@ plus acceleration strategy:
 ```text
 src/electrical/dice_peec/
 src/electrical/matrix_free_mpir_fem/
+src/thermal/matrix_free_mpir_fem/
+src/emc/tiled_dipole_superposition/
+src/multiphysics/staggered_coupling/
 ```
 
 The first directory contains the PEEC implementation described below. The
 second contains matrix-free FEM accelerated by mixed-precision iterative
-refinement (MPIR). A future thermal implementation belongs under
-`src/thermal/<method+acceleration>` rather than inside either electrical
-solver.
+refinement (MPIR). The third is the thermal implementation: steady heat
+conduction through the board stack on the same MPIR solver and low-precision
+runtimes, documented in [THERMAL_MPIR_FEM.md](THERMAL_MPIR_FEM.md). The
+solver and runtimes are imported from the electrical package rather than
+copied; the discretisations and front ends stay apart. The fourth is the EMC
+front end: radiated emissions by tiled superposition of the current elements
+either electrical solve produces, documented in
+[EMC_DIPOLE_SUPERPOSITION.md](EMC_DIPOLE_SUPERPOSITION.md). It owns no field
+solve of its own. The fifth chains the others into coupled scenarios: a
+staggered electro-thermal fixed point and the emission of its converged
+current, documented in [MULTIPHYSICS_SCENARIOS.md](MULTIPHYSICS_SCENARIOS.md).
 
 ## Objective
 

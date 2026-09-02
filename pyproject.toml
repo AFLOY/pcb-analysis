@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pcb-analysis"
 version = "0.6.0"
-description = "CUDA-accelerated PEEC and matrix-free full-wave FEM for electrical PCB analysis"
+description = "CUDA-accelerated PEEC, matrix-free FEM, and radiated-emission evaluation for electrical, thermal, and EMC PCB analysis"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [
   { name = "Hiroyuki Yamada", email = "H44bcda@gmail.com" },
 ]
-keywords = ["peec", "fem", "maxwell", "skin-effect", "pcb", "pdn", "electromagnetics", "cuda", "optimization"]
+keywords = ["peec", "fem", "maxwell", "skin-effect", "thermal", "heat-conduction", "emc", "radiated-emission", "near-field", "multiphysics", "electrothermal", "pcb", "pdn", "electromagnetics", "cuda", "optimization"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
@@ -51,10 +51,13 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["electrical*"]
+include = ["electrical*", "thermal*", "emc*", "multiphysics*"]
 
 [tool.setuptools.package-data]
 electrical = ["py.typed"]
+thermal = ["py.typed"]
+emc = ["py.typed"]
+multiphysics = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

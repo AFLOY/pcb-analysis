@@ -1,19 +1,29 @@
-# Accelerated electrical PCB solvers
+# Accelerated electrical, thermal, EMC, and coupled PCB analysis
 
 [![CI](https://github.com/AFLOY/pcb-analysis/actions/workflows/ci.yml/badge.svg)](https://github.com/AFLOY/pcb-analysis/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-Accelerated PEEC and matrix-free FEM solvers for electrical PCB analysis and
-PDN optimization.
+Accelerated PEEC and matrix-free FEM solvers for electrical and thermal PCB
+analysis, radiated-emission evaluation for EMC, and PDN optimization.
 
-The repository holds two solver families under one `electrical` package.
-`dice_peec` provides exact incremental delta-scoring for local PCB reroutes, a
-2.5D multilayer interaction operator, a thin-sheet PEEC field solver, and an
-adaptive runtime controller for topology-optimization loops.
-`matrix_free_mpir_fem` provides a matrix-free Q1 finite-element solver for DC
-conduction and 2D frequency-domain Maxwell fields, driven by mixed-precision
-iterative refinement (MPIR) on NumPy or CuPy.
+The repository holds two solver families under the `electrical` package, one
+under the `thermal` package, one evaluation front end under `emc`, and the
+coupled scenarios that chain them under `multiphysics`. `electrical.dice_peec` provides exact incremental
+delta-scoring for local PCB reroutes, a 2.5D multilayer interaction operator, a
+thin-sheet PEEC field solver, and an adaptive runtime controller for
+topology-optimization loops. `electrical.matrix_free_mpir_fem` provides a
+matrix-free Q1 finite-element solver for DC conduction and 2D frequency-domain
+Maxwell fields, driven by mixed-precision iterative refinement (MPIR) on NumPy
+or CuPy. `thermal.matrix_free_mpir_fem` solves steady heat conduction through
+the whole board stack with the same MPIR solver and runtimes, and takes the
+Joule loss of an electrical solve as its heat load.
+`emc.tiled_dipole_superposition` reads the current distribution of either
+electrical solve as Hertzian dipoles and evaluates near-field scans, far-field
+patterns, radiated power, and margins to CISPR 32 and FCC Part 15 limits.
+`multiphysics.staggered_coupling` runs the scenarios that couple them: the
+electro-thermal fixed point with temperature-dependent copper, and the emission
+of a cold or thermally converged current distribution.
 
 ## Features
 
@@ -31,6 +41,18 @@ iterative refinement (MPIR) on NumPy or CuPy.
   complex64 GMRES; no assembled matrix and no global atomics
 - **Accelerator boundary** — NumPy/CuPy runtimes with a narrow low-precision
   interface that remains suitable for the later Tenstorrent port
+- **Thermal MPIR-FEM** — matrix-free trilinear hexahedral heat conduction
+  through the copper/laminate stack with anisotropic laminate conductivity,
+  convective faces, fixed-temperature nodes, and a closed heat budget
+- **Electrothermal coupling** — per-element and per-via Joule loss from the DC
+  solve mapped onto the thermal stack without interpolation
+- **Radiated emissions** — exact Hertzian-dipole superposition of the solved
+  currents for near-field scans and far-field patterns, radiated power,
+  dipole-moment proxies, PEC ground-plane images, and margins to CISPR 32 /
+  FCC Part 15 limit lines, tiled on NumPy or CuPy
+- **Coupled scenarios** — staggered electro-thermal iteration with `σ(T)` and
+  via `R(T)`, warm starts and Aitken relaxation; electro-emission and
+  electro-thermal-emission chains; one `run_scenario` entry point
 
 ## Installation
 
@@ -70,9 +92,11 @@ pip install -e '.[cuda]'
 
 > **Note**: Requires an NVIDIA driver and CUDA 13.x. Verify with `nvidia-smi`.
 > The package is installed as `electrical`; the former top-level
-> `peec_fastopt` package now lives at `electrical.dice_peec`. Re-run the
-> editable install after pulling this change so the old path is not left on
-> `sys.path`.
+> `peec_fastopt` package now lives at `electrical.dice_peec`, and the thermal
+> and EMC front ends and the coupled scenarios are the separate top-level
+> packages `thermal`, `emc`, and `multiphysics`. Re-run the editable install
+> after pulling these changes so the new packages are importable and the old
+> path is not left on `sys.path`.
 
 ## Quick start
 
@@ -186,6 +210,164 @@ faster than the NumPy complex64 action for 4,225–66,049 unknowns. The complete
 solve is slower at 4,369 unknowns (0.85×) but 1.99× faster at 16,705 unknowns,
 so CUDA should not be selected solely for tiny meshes.
 
+### Steady thermal conduction
+
+The thermal front end meshes the whole stack as slabs of hexahedral Q1
+elements. Copper, laminate, and vias are element conductivities; laminates may
+have a different through-plane value. Heat enters per element or per node and
+leaves through convective faces and fixed-temperature nodes. The solution
+reports nodal temperature, element heat flux, and a heat budget whose error is
+the solver residual.
+
+```python
+import numpy as np
+from thermal.matrix_free_mpir_fem import (
+    ConvectionBoundary,
+    HeatSource,
+    LayeredThermalMesh,
+    ThermalConductionProblem,
+    solve_thermal_conduction,
+)
+
+# 35 µm copper / 1.5 mm FR-4 / 35 µm copper, 50 mm x 50 mm on a 0.5 mm grid.
+mesh = LayeredThermalMesh(
+    slab_thickness_m=(35e-6, 1.5e-3, 35e-6),
+    pitch_x_m=0.5e-3,
+    pitch_y_m=0.5e-3,
+    conductivity_w_per_m_k=(385.0, 0.8, 385.0),
+    through_plane_conductivity_w_per_m_k=(385.0, 0.3, 385.0),
+    element_shape=(100, 100),
+)
+ambient = 298.15
+problem = ThermalConductionProblem(
+    mesh,
+    convection=(
+        ConvectionBoundary("top", 10.0, ambient),
+        ConvectionBoundary("bottom", 10.0, ambient),
+    ),
+    heat_sources=(HeatSource(((3, 50, 50), (3, 50, 51)), 0.5, "regulator"),),
+)
+solution = solve_thermal_conduction(problem, initial_temperature_k=ambient)
+assert solution.solve.converged
+hottest_k = solution.max_temperature_k
+assert abs(solution.heat_balance_error_w) < 1e-9
+```
+
+The default preconditioner adds a patch-constant coarse correction to Jacobi
+scaling. A cooled copper plate is stiff in-plane and weakly coupled to the air,
+so plain Jacobi PCG needs hundreds of inner iterations per decade on such a
+stack; the two-level variant needs tens. Pass `preconditioner="jacobi"` to
+compare, and `coarse_block_nodes` to set the patch width.
+
+### Electrothermal coupling
+
+`element_joule_heat_w` places the per-element copper loss of a
+`PCBConductionSolution` onto the thermal slabs that hold each electrical layer,
+and `via_joule_heat_sources` turns each via's loss into nodal heat at its
+endpoints. Both meshes must share the in-plane element grid.
+
+```python
+from thermal.matrix_free_mpir_fem import element_joule_heat_w, via_joule_heat_sources
+
+electrical = solve_pcb_dc(pcb_problem)          # copper on layers 0 and 1
+layer_slabs = (0, 2)                            # bottom and top copper slabs
+thermal_problem = ThermalConductionProblem(
+    mesh,
+    convection=(ConvectionBoundary("top", 10.0, ambient),),
+    element_heat_w=element_joule_heat_w(electrical, mesh, layer_slabs),
+    heat_sources=via_joule_heat_sources(pcb_problem, electrical, mesh, layer_slabs),
+)
+solution = solve_thermal_conduction(thermal_problem, backend="auto")
+```
+
+The thermal operator runs its FP32 inner PCG on CuPy with `backend="cuda"`; the
+FP64 reliable update stays on the host exactly as for the electrical solves.
+
+### Radiated emissions
+
+Every current element of a solved board is a Hertzian dipole. The EMC front end
+sums their exact fields for a near-field scan and their far-zone terms for the
+pattern at a test-site distance, then compares the maximum with a limit line.
+
+```python
+import numpy as np
+from emc.tiled_dipole_superposition import (
+    CISPR32_CLASS_B,
+    dipole_moments,
+    dipoles_from_pcb_dc,
+    emission_margin,
+    evaluate_fields,
+    far_field_pattern,
+    scan_plane,
+)
+
+electrical = solve_pcb_dc(pcb_problem)            # two copper layers
+dipoles = dipoles_from_pcb_dc(
+    pcb_problem, electrical, layer_height_m=(0.0, 1.6e-3), close_terminals=True
+)
+frequency_hz = 100e6                              # DC pattern used as a phasor
+
+probe = scan_plane(np.linspace(0, 0.05, 50), np.linspace(0, 0.02, 20), z_m=6.6e-3)
+near = evaluate_fields(dipoles, probe, frequency_hz, backend="auto")
+h_max_a_per_m = near.magnetic_magnitude_a_per_m.max()
+
+pattern = far_field_pattern(dipoles, frequency_hz, distance_m=10.0)
+margin = emission_margin(
+    pattern.max_polarised_field_v_per_m, frequency_hz, CISPR32_CLASS_B, distance_m=10.0
+)
+print(pattern.radiated_power_w, margin.predicted_dbuv_per_m, margin.margin_db)
+
+moments = dipole_moments(dipoles, frequency_hz)   # |P| ≈ 0 once the loop closes
+```
+
+`dipole_moments` reports the net electric moment: a non-zero value for a board
+whose terminal currents balance means the return path through the component is
+not in the model, and `close_terminals=True` adds it as a straight element.
+The magnetic near field and the far field are the robust outputs; the electric
+near field of a current-only description is sensitive to how continuously the
+element chain closes. `dipoles_from_sheet_peec` does the same for a
+frequency-resolved sheet-PEEC solve, without the quasi-static assumption.
+
+### Coupled scenarios
+
+Scenario dataclasses name what is coupled to what; `run_scenario` dispatches on
+the type. The electro-thermal chain iterates the two conduction solves until
+the copper conductivity `σ(T) = σ_ref / (1 + α (T − T_ref))` is self-consistent
+with the temperature it produces, warm-starting both solves and relaxing the
+temperature update with Aitken's Δ² estimate.
+
+```python
+from multiphysics.staggered_coupling import (
+    ElectroThermalEmissionScenario,
+    ElectroThermalScenario,
+    EmissionScenario,
+    run_scenario,
+)
+
+coupled_scenario = ElectroThermalScenario(
+    pcb_problem,                    # PCBConductionProblem, conductivity at 293.15 K
+    thermal_mesh,                   # LayeredThermalMesh on the same (rows, cols)
+    layer_slabs=(0, 2),             # thermal slab holding each copper layer
+    convection=(ConvectionBoundary("top", 10.0, 298.15), ConvectionBoundary("bottom", 10.0, 298.15)),
+)
+coupled = run_scenario(coupled_scenario)
+print(coupled.converged, coupled.iterations, coupled.loss_increase_ratio)
+
+chained = run_scenario(
+    ElectroThermalEmissionScenario(
+        coupled_scenario,
+        layer_height_m=(0.0, 1.6e-3),
+        emission=EmissionScenario((30e6, 100e6, 300e6)),   # CISPR 32 Class B at 10 m
+    )
+)
+print(chained.emission.margin_db, chained.heating_shift_db)
+```
+
+`ElectricalScenario`, `ThermalScenario`, `ElectroEmissionScenario`, and
+`SheetPeecEmissionScenario` (one sheet-PEEC solve per frequency) complete the
+set; `run_scenarios` runs a list. See
+[MULTIPHYSICS_SCENARIOS.md](docs/MULTIPHYSICS_SCENARIOS.md).
+
 ## Project structure
 
 ```text
@@ -193,6 +375,12 @@ src/
   electrical/                         Analysis target
     dice_peec/                         PEEC + DICE/2.5D FFT acceleration
     matrix_free_mpir_fem/              FEM + matrix-free/MPIR acceleration
+  thermal/                            Analysis target
+    matrix_free_mpir_fem/              Heat-conduction FEM + matrix-free/MPIR acceleration
+  emc/                                Analysis target
+    tiled_dipole_superposition/        Radiated emission by dipole superposition, tiled NumPy/CuPy
+  multiphysics/                       Coupled analysis
+    staggered_coupling/                Partitioned fixed-point coupling with warm starts and Aitken relaxation
 tests/                                 Test suite (pytest)
 docs/                                  Design documents, validation reports, raw results
 examples/                              Demo scripts and benchmarks
@@ -200,8 +388,8 @@ experiments/                           Repeatable accuracy and timing audits
 requirements.txt                       Editable install with CUDA/test/build tooling
 ```
 
-Future physics should follow the same rule, for example
-`src/thermal/<method+acceleration>`.
+Future physics should follow the same rule: the first level names the analysis
+target and the second names the method plus its acceleration strategy.
 
 ## Electrical solvers
 
@@ -287,6 +475,9 @@ distribution fails the build rather than a user's install.
 - [Architecture & Design](docs/DESIGN.md)
 - [CUDA Backend Handoff](docs/CUDA_HANDOFF.md)
 - [Matrix-free MPIR-FEM](docs/MATRIX_FREE_MPIR_FEM.md)
+- [Thermal MPIR-FEM](docs/THERMAL_MPIR_FEM.md)
+- [EMC radiated emissions](docs/EMC_DIPOLE_SUPERPOSITION.md)
+- [Coupled analysis scenarios](docs/MULTIPHYSICS_SCENARIOS.md)
 - [Sheet PEEC](docs/SHEET_PEEC.md) and [Sheet PEEC CUDA results](docs/SHEET_CUDA_RESULTS.md)
 - [Requirements](docs/REQUIREMENTS.md)
 - [Sheet PEEC / matrix-free FEM comparison](docs/PEEC_FEM_COMPARISON_REPORT.html)

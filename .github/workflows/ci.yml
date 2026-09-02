@@ -71,10 +71,20 @@ jobs:
               MatrixFreePCBOperator, solve_pcb_dc, solve_scalar_maxwell
           )
           from electrical.dice_peec.cli import calibrate
+          from thermal.matrix_free_mpir_fem import (
+              solve_thermal_conduction, element_joule_heat_w
+          )
+          from emc.tiled_dipole_superposition import far_field_pattern, CISPR32_CLASS_B
+          from multiphysics.staggered_coupling import run_scenario, ElectroThermalScenario
           assert callable(calibrate.main)
           assert callable(MultilayerDeltaScorer)
           assert callable(solve_pcb_dc)
           assert callable(solve_scalar_maxwell)
+          assert callable(solve_thermal_conduction)
+          assert callable(element_joule_heat_w)
+          assert callable(far_field_pattern)
+          assert CISPR32_CLASS_B.bands
+          assert callable(run_scenario) and callable(ElectroThermalScenario)
           "
           # Every console script the metadata promises has to run.
           /tmp/wheel-env/bin/pcb-analysis-calibrate --help > /dev/null
@@ -82,6 +92,9 @@ jobs:
           /tmp/wheel-env/bin/python -c "
           from importlib.resources import files
           assert files('electrical').joinpath('py.typed').is_file()
+          assert files('thermal').joinpath('py.typed').is_file()
+          assert files('emc').joinpath('py.typed').is_file()
+          assert files('multiphysics').joinpath('py.typed').is_file()
           "
 
       - name: Run the suite against the installed package
@@ -92,4 +105,4 @@ jobs:
           python -m venv /tmp/sdist-env
           /tmp/sdist-env/bin/pip install --upgrade pip
           /tmp/sdist-env/bin/pip install dist/*.tar.gz
-          cd /tmp && /tmp/sdist-env/bin/python -c "import electrical.dice_peec, electrical.matrix_free_mpir_fem"
+          cd /tmp && /tmp/sdist-env/bin/python -c "import electrical.dice_peec, electrical.matrix_free_mpir_fem, thermal.matrix_free_mpir_fem, emc.tiled_dipole_superposition, multiphysics.staggered_coupling"
