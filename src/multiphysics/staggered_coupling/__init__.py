@@ -1,0 +1,71 @@
+"""Staggered (partitioned) coupling of the electrical, thermal, and EMC solvers.
+
+The electro-thermal chain iterates the two conduction solves to a
+self-consistent copper temperature with warm starts and Aitken relaxation.
+The emission chains hand a converged current distribution to the dipole
+superposition.  ``run_scenario`` dispatches on the scenario dataclass.
+"""
+
+from .electro_thermal import (
+    COPPER_TEMPERATURE_COEFFICIENT_PER_K,
+    CouplingConfig,
+    CouplingStep,
+    ElectroThermalResult,
+    ElectroThermalScenario,
+    conductivity_at_temperature,
+    electrical_layer_temperature_k,
+    run_electro_thermal,
+    slab_element_temperature_k,
+    via_node_temperature_k,
+)
+from .emission import (
+    EmissionPoint,
+    EmissionResult,
+    EmissionScenario,
+    ScanPlane,
+    evaluate_emission,
+    run_pcb_dc_emission,
+    run_sheet_peec_emission,
+)
+from .scenarios import (
+    ElectricalScenario,
+    ElectroEmissionResult,
+    ElectroEmissionScenario,
+    ElectroThermalEmissionResult,
+    ElectroThermalEmissionScenario,
+    SheetPeecEmissionResult,
+    SheetPeecEmissionScenario,
+    ThermalScenario,
+    run_scenario,
+    run_scenarios,
+)
+
+__all__ = [
+    "COPPER_TEMPERATURE_COEFFICIENT_PER_K",
+    "CouplingConfig",
+    "CouplingStep",
+    "ElectricalScenario",
+    "ElectroEmissionResult",
+    "ElectroEmissionScenario",
+    "ElectroThermalEmissionResult",
+    "ElectroThermalEmissionScenario",
+    "ElectroThermalResult",
+    "ElectroThermalScenario",
+    "EmissionPoint",
+    "EmissionResult",
+    "EmissionScenario",
+    "ScanPlane",
+    "SheetPeecEmissionResult",
+    "SheetPeecEmissionScenario",
+    "ThermalScenario",
+    "conductivity_at_temperature",
+    "electrical_layer_temperature_k",
+    "evaluate_emission",
+    "run_electro_thermal",
+    "run_pcb_dc_emission",
+    "run_scenario",
+    "run_scenarios",
+    "run_sheet_peec_emission",
+    "slab_element_temperature_k",
+    "via_node_temperature_k",
+]
