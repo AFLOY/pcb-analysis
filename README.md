@@ -56,27 +56,26 @@ of a cold or thermally converged current distribution.
 
 ## Installation
 
-### From a GitHub release
+### From PyPI
 
-Each release carries a built wheel, a source distribution, and their SHA-256
-checksums. Install the wheel by URL; replace the version with the release you
-want.
+```bash
+pip install pcb-analysis
+# with CuPy and PyPEEC
+pip install 'pcb-analysis[cuda]'
+```
+
+Each release is uploaded to [PyPI](https://pypi.org/project/pcb-analysis/)
+by the `Release` workflow with Trusted Publishing, and the same wheel, source
+distribution, and SHA-256 checksums are attached to the GitHub release. To
+install a specific release without PyPI, point pip at the release asset or
+at the tag:
 
 ```bash
 pip install https://github.com/AFLOY/pcb-analysis/releases/download/v0.6.0/pcb_analysis-0.6.0-py3-none-any.whl
-# with CuPy and PyPEEC
-pip install 'pcb-analysis[cuda] @ https://github.com/AFLOY/pcb-analysis/releases/download/v0.6.0/pcb_analysis-0.6.0-py3-none-any.whl'
-```
-
-Or let pip build from the repository at a tag, which also works while the
-repository is private for anyone with access to it:
-
-```bash
 pip install 'git+https://github.com/AFLOY/pcb-analysis.git@v0.6.0'
 ```
 
-The `Release` workflow builds, checks, and attaches the files when a GitHub
-release is published; the tag has to match the version in `pyproject.toml`.
+The release tag has to match the version in `pyproject.toml`.
 
 ### From a checkout, CPU only
 

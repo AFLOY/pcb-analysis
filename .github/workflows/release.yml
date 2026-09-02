@@ -1,14 +1,28 @@
 name: Release
 
 # Builds the wheel and source distribution once, checks them, installs the
-# wheel into a clean environment, and attaches both to the GitHub release
-# that triggered the run.  No PyPI: users install straight from the release
-# assets, and the checksum file lets them verify what they downloaded.
+# wheel into a clean environment, then uploads them to PyPI with Trusted
+# Publishing (OIDC) and attaches them to the GitHub release that triggered
+# the run.  No API token is stored in the repo.
+#
+# PyPI side, done once: register this repository as a trusted publisher on
+# PyPI for project "pcb-analysis" with workflow "release.yml" and environment
+# "pypi"; the same on TestPyPI with environment "testpypi".  On GitHub,
+# create the "pypi" and "testpypi" environments under Settings > Environments.
+#
+# A manual run uploads to TestPyPI by default so a release can be rehearsed;
+# choose "pypi" to publish by hand.  Neither manual target touches a GitHub
+# release.
 on:
   release:
     types: [published]
   workflow_dispatch:
-    # A manual run builds and checks but attaches nothing.
+    inputs:
+      target:
+        description: Where to upload
+        type: choice
+        default: testpypi
+        options: [testpypi, pypi]
 
 permissions:
   contents: read
@@ -28,7 +42,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install 'setuptools==69.*' wheel build twine
           python -m build --no-isolation
-          twine check dist/*
+          twine check --strict dist/*
 
       - name: Confirm the release tag matches the package version
         if: github.event_name == 'release'
@@ -46,7 +60,11 @@ jobs:
           python -m venv wheel-env
           wheel-env/bin/pip install --upgrade pip
           wheel-env/bin/pip install "$GITHUB_WORKSPACE"/dist/*.whl
-          wheel-env/bin/python -c "import electrical.dice_peec, electrical.matrix_free_mpir_fem"
+          wheel-env/bin/python -c "
+          import electrical.dice_peec, electrical.matrix_free_mpir_fem
+          import thermal.matrix_free_mpir_fem, emc.tiled_dipole_superposition
+          import multiphysics.staggered_coupling
+          "
           wheel-env/bin/pcb-analysis-calibrate --help > /dev/null
 
       - name: Write checksums
@@ -59,6 +77,43 @@ jobs:
         with:
           name: dist
           path: dist/
+
+  publish-testpypi:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/pcb-analysis
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      # The checksum file is a release asset, not a distribution.
+      - run: rm -f dist/SHA256SUMS.txt
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    needs: build
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pcb-analysis
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - run: rm -f dist/SHA256SUMS.txt
+      - uses: pypa/gh-action-pypi-publish@release/v1
 
   attach:
     needs: build
