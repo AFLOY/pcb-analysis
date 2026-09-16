@@ -166,6 +166,33 @@ contend with the single native thread and the 16,705-unknown ratio drops to
 threads (`PCB_NATIVE_THREADS`) gain another 1.2× at 16,705 unknowns with eight
 threads because Gram-Schmidt stays single-threaded and L3-bound.
 
+Second environment, Intel Core i7-8700 (6 cores, AVX2, no AVX-512), GCC
+14.3.1, NumPy 2.3.5, Python 3.12.14, one operator thread,
+`OPENBLAS_NUM_THREADS=1` (`MAXWELL_NATIVE_I7_8700_RESULTS.json`):
+
+| Unknowns | Operator NumPy | Operator C++ | Operator ratio | Solve NumPy | Solve C++ | Solve ratio | Inner iterations | Solution difference |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 4,369 | 0.249 ms | 0.0402 ms | 6.19× | 1,687 ms | 334 ms | 5.06× | 3,299 / 3,299 | 8.10e-9 |
+| 16,705 | 0.734 ms | 0.117 ms | 6.30× | 4,411 ms | 1,071 ms | 4.12× | 3,300 / 2,900 | 5.60e-9 |
+| 66,049 | 2.31 ms | 0.435 ms | 5.31× | 21,736 ms | 8,484 ms | 2.56× | 4,790 / 4,792 | not converged |
+
+The 66,049-unknown case again stalls on both paths (reached residuals 1.1e-6
+and 1.6e-6). The portable 16,705-unknown solve took one more outer step on this
+AVX2 host than on the Xeon (3,300 versus 2,900 inner iterations); the native
+path took 2,900 on both, and both reached the requested residual, so the
+outer-loop count depends on the host's complex64 rounding rather than on the
+implementation. The relative action difference between the two operators is
+8.4e-8 on every case. With the default OpenBLAS thread pool
+(`MAXWELL_NATIVE_I7_8700_DEFAULT_ENV_RESULTS.json`) the 16,705-unknown ratio
+drops from 4.12× to 3.65× and the largest case from 2.56× to 2.48×. With six
+operator threads (`PCB_NATIVE_THREADS=6`,
+`MAXWELL_NATIVE_I7_8700_THREADS6_RESULTS.json`) the operator alone is 25×
+faster than NumPy and the end-to-end solve gains a further 1.21× at 16,705
+unknowns (886 ms) and 1.20× at 66,049 unknowns (7,059 ms); the remaining time
+is the single-threaded Gram-Schmidt cycle. The adoption criteria hold in this
+environment too, with a smaller margin on the largest case (minimum 2.56×
+against the 4.09× minimum on the Xeon).
+
 Decision recorded in the JSON: the benchmark criteria (every case at least 2×,
 identical convergence outcome, converged solutions within 1e-6) are met. The
 extension is not packaged in the wheel and CUDA execution was not measured in
