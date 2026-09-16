@@ -261,6 +261,31 @@ complex64 rounding, so the 4,369-unknown case takes one outer step fewer and
 the converged solutions differ from the portable path by up to 4.3e-8; both
 paths still reach the requested FP64 residual.
 
+### Fused vector passes (measured, not adopted)
+
+Three rounding-neutral fusions were tried on the MGS cycle: writing
+`Z(col+1) = V(col+1) / diag` in the same pass that scales `V(col+1)`, folding
+the Arnoldi vector norm into the last Gram-Schmidt update, and folding the
+residual norm into the residual update. Together they remove three or four of
+the roughly 65 vector passes per iteration
+(`MAXWELL_NATIVE_I7_8700_FUSED_PASSES_T1_RESULTS.json`,
+`MAXWELL_NATIVE_I7_8700_FUSED_PASSES_T6_RESULTS.json`):
+
+| Unknowns | MGS 1 thread | Fused 1 thread | MGS 6 threads | Fused 6 threads | Inner iterations MGS / fused |
+|---:|---:|---:|---:|---:|---:|
+| 4,369 | 355 ms (0.107 ms/it) | 339 ms (0.117 ms/it) | 122 ms | 113 ms | 3,299 / 2,899 |
+| 16,705 | 1,098 ms (0.379 ms/it) | 1,347 ms (0.408 ms/it) | 275 ms | 334 ms | 2,900 / 3,300 |
+| 66,049 | 8,282 ms (1.73 ms/it) | 8,901 ms (1.86 ms/it) | 2,410 ms | 2,546 ms | 4,792 / 4,792 |
+
+The time per inner iteration rose by 7 to 10 percent on one thread and 5 to
+6 percent on six: the loops that mix a complex64 store with a double
+reduction vectorise worse than the separate passes, and the traffic saved does
+not matter for a compute-bound cycle. The different double summation order in
+the fused norms also changes the complex64 rounding, so two of the three cases
+took one outer step more or fewer; the FP64 residual was still reached in
+both converged cases. The change was reverted; the wall-clock gain at 4,369
+unknowns is the shorter iteration count, not the fusion.
+
 Decision recorded in the JSON: the benchmark criteria (every case at least 2×,
 identical convergence outcome, converged solutions within 1e-6) are met. The
 extension is not packaged in the wheel and CUDA execution was not measured in
