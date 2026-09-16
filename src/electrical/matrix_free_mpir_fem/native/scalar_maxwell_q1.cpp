@@ -369,7 +369,8 @@ struct alignas(64) Partial {
 py::tuple gmres_q1(ArrC128 rhs_high, ArrC64 diagonal, ArrC64 inverse_mu, ArrC64 reaction,
                    ArrC64 stiffness, ArrC64 mass, ArrU8 free_nodes, ArrF32 free_mask,
                    int element_rows, int element_columns, double inner_relative_tolerance,
-                   int max_inner_iterations, int restart, int threads, bool cgs2) {
+                   int max_inner_iterations, int restart, int threads, bool cgs2,
+                   bool float_dots) {
     const Q1Operator op = make_operator(inverse_mu, reaction, stiffness, mass, free_nodes,
                                         free_mask, element_rows, element_columns, threads);
     const py::ssize_t n = op.node_count();
@@ -442,13 +443,36 @@ py::tuple gmres_q1(ArrC128 rhs_high, ArrC64 diagonal, ArrC64 inverse_mu, ArrC64 
             auto local_vdot = [&](const c64* a, const c64* b, double& re, double& im) {
                 const float* fa = reinterpret_cast<const float*>(a + lo);
                 const float* fb = reinterpret_cast<const float*>(b + lo);
-                double sr = 0.0, si = 0.0;
+                if (!float_dots) {
+                    double sr = 0.0, si = 0.0;
 #pragma omp simd reduction(+ : sr, si)
-                for (py::ssize_t i = 0; i < len; ++i) {
-                    const double ar = fa[2 * i], ai = fa[2 * i + 1];
-                    const double br = fb[2 * i], bi = fb[2 * i + 1];
-                    sr += ar * br + ai * bi;
-                    si += ar * bi - ai * br;
+                    for (py::ssize_t i = 0; i < len; ++i) {
+                        const double ar = fa[2 * i], ai = fa[2 * i + 1];
+                        const double br = fb[2 * i], bi = fb[2 * i + 1];
+                        sr += ar * br + ai * bi;
+                        si += ar * bi - ai * br;
+                    }
+                    re = sr;
+                    im = si;
+                    return;
+                }
+                // Float accumulation per cache block, blocks summed in double:
+                // twice the SIMD width and no float-to-double conversion in
+                // the inner loop; the block sum error is about sqrt(kBlock)
+                // ulp of the partial, far below the complex64 rounding of h.
+                double sr = 0.0, si = 0.0;
+                for (py::ssize_t i0 = 0; i0 < len; i0 += kBlock) {
+                    const py::ssize_t m = std::min(kBlock, len - i0);
+                    float br_acc = 0.0f, bi_acc = 0.0f;
+#pragma omp simd reduction(+ : br_acc, bi_acc)
+                    for (py::ssize_t i = 0; i < m; ++i) {
+                        const float ar = fa[2 * (i0 + i)], ai = fa[2 * (i0 + i) + 1];
+                        const float br = fb[2 * (i0 + i)], bi = fb[2 * (i0 + i) + 1];
+                        br_acc += ar * br + ai * bi;
+                        bi_acc += ar * bi - ai * br;
+                    }
+                    sr += br_acc;
+                    si += bi_acc;
                 }
                 re = sr;
                 im = si;
@@ -642,7 +666,8 @@ PYBIND11_MODULE(_scalar_maxwell_native, m) {
           py::arg("reaction"), py::arg("stiffness"), py::arg("mass"), py::arg("free_nodes"),
           py::arg("free_mask"), py::arg("element_rows"), py::arg("element_columns"),
           py::arg("inner_relative_tolerance"), py::arg("max_inner_iterations"),
-          py::arg("restart"), py::arg("threads") = 1, py::arg("cgs2") = false);
+          py::arg("restart"), py::arg("threads") = 1, py::arg("cgs2") = false,
+          py::arg("float_dots") = false);
     m.def("default_threads", &default_threads);
     m.attr("openmp") =
 #ifdef _OPENMP
