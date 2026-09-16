@@ -165,6 +165,20 @@ def _inner_gmres(
     if getattr(system.runtime, "is_cuda", False):
         return _inner_gmres_cuda(system, rhs_high, config)
 
+    # A system may run the whole restarted cycle natively (fused C++ operator,
+    # Gram-Schmidt, and Givens updates).  It returns ``None`` to decline.
+    native = getattr(system, "native_inner_gmres", None)
+    if native is not None:
+        native_result = native(rhs_high, config)
+        if native_result is not None:
+            correction, iterations, relative_residual, applications = native_result
+            return (
+                np.asarray(correction),
+                iterations,
+                relative_residual,
+                applications,
+            )
+
     runtime = system.runtime
     rhs = runtime.from_host(rhs_high)
     correction = runtime.zeros_like(rhs)

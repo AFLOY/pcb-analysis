@@ -18,3 +18,8 @@ experiments/*
 !experiments/maxwell_cuda_benchmark.py
 !experiments/peec_fem_comparison.py
 !experiments/peec_fem_comparison_report.sql
+
+# In-place build of the optional C++ extension
+*.so
+!experiments/maxwell_native_benchmark.py
+!experiments/maxwell_native_benchmark.py
