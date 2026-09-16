@@ -122,6 +122,56 @@ about `8.5e-8`; the 16,705-unknown reliable solutions differ by `4.4e-9` and
 both meet the requested complex128 residual tolerance. Raw measurements are in
 `MAXWELL_CUDA_RESULTS.json` and `MAXWELL_CUDA_SCALE_RESULTS.json`.
 
+## Fused C++ host path (measured on `exp/cpp-inner-krylov`)
+
+The portable NumPy low path spends about half of each inner iteration in the
+Q1 operator, which expands the 4-by-4 tensor into roughly eighty whole-array
+passes, and the rest in Python-level Gram-Schmidt bookkeeping, a per-iteration
+`lstsq`, and temporary allocation. The experiment keeps the Python front end,
+the `MatrixFreeMPIRSystem` contract, and the FP64 outer loop, and moves only
+the complex64 inner work into one pybind11 extension:
+
+- a node-owned gather Q1 operator with the same ordering as the CUDA kernel,
+  written as a branch-free 16-term interior stencil so it vectorises;
+- the whole restarted right-Jacobi GMRES cycle (modified Gram-Schmidt, Givens
+  rotations on a complex128 Hessenberg, back substitution) per outer step;
+- flush-to-zero for subnormal complex64 values during the native call only.
+  Subnormal corrections made FP32 SIMD arithmetic several times slower on the
+  66,049-unknown case; the FP64 residual remains the acceptance criterion.
+
+The path is opt-in: `MatrixFreeScalarMaxwellOperator(problem, native=True)`
+after `python -m electrical.matrix_free_mpir_fem.native.build`. Without the
+build, `native=True` raises and the default behaviour is unchanged. The solver
+dispatches through the optional `native_inner_gmres` hook; `precondition_low`
+systems and the CUDA runtime keep their existing paths.
+
+Measured on an Intel Xeon Platinum 8581C, GCC 14.2.1, NumPy 2.3.5, one
+operator thread, `OPENBLAS_NUM_THREADS=1`, same fixture and `MPIRConfig` as
+the CUDA benchmark (`experiments/maxwell_native_benchmark.py`,
+`MAXWELL_NATIVE_RESULTS.json`):
+
+| Unknowns | Operator NumPy | Operator C++ | Operator ratio | Solve NumPy | Solve C++ | Solve ratio | Inner iterations | Solution difference |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 4,369 | 0.253 ms | 0.0417 ms | 6.07× | 1,830 ms | 316 ms | 5.79× | 3,299 / 3,299 | 1.15e-8 |
+| 16,705 | 0.692 ms | 0.114 ms | 6.06× | 3,990 ms | 976 ms | 4.09× | 2,900 / 2,900 | 9.70e-10 |
+| 66,049 | 3.31 ms | 0.430 ms | 7.68× | 27,929 ms | 6,397 ms | 4.37× | 4,790 / 4,792 | not converged |
+
+The 66,049-unknown case stalls on both paths at the 12-outer/400-inner limit
+(reached relative residuals 4.9e-7 and 1.6e-6), so its solution difference is
+not a correctness statement; the Jacobi-preconditioned inner solve, not the
+implementation language, limits that size. With the default OpenBLAS thread
+pool (`MAXWELL_NATIVE_DEFAULT_ENV_RESULTS.json`) the spinning BLAS threads
+contend with the single native thread and the 16,705-unknown ratio drops to
+2.94×; the other two cases are within noise of the table above. Operator
+threads (`PCB_NATIVE_THREADS`) gain another 1.2× at 16,705 unknowns with eight
+threads because Gram-Schmidt stays single-threaded and L3-bound.
+
+Decision recorded in the JSON: the benchmark criteria (every case at least 2×,
+identical convergence outcome, converged solutions within 1e-6) are met. The
+extension is not packaged in the wheel and CUDA execution was not measured in
+this environment, so integration into `feature/` requires the packaging and
+CI work described in `AGENTS.md` before the default path changes.
+
 ## Tenstorrent Blackhole migration
 
 The intended first Blackhole port keeps FP64 outer refinement on the host and
