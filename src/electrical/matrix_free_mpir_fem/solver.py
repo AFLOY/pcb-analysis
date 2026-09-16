@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -272,33 +274,134 @@ def _inner_gmres(
     )
 
 
+class _CudaGmresKernels:
+    """cuBLAS handles and the small device kernels of the CUDA inner cycle."""
+
+    def __init__(self, xp: Any) -> None:
+        self.xp = xp
+        self.cublas = importlib.import_module("cupy_backends.cuda.libs.cublas")
+        self.runtime_api = xp.cuda.runtime
+        self.handle = xp.cuda.device.get_cublas_handle()
+        self.one = np.ones(1, dtype=np.complex64)
+        self.zero = np.zeros(1, dtype=np.complex64)
+        self.minus_one = -np.ones(1, dtype=np.complex64)
+        self.nrm2 = importlib.import_module(f"{xp.__name__}.cublas").nrm2
+        # out = src * (1 / norm) with the norm read from device memory, so the
+        # next Arnoldi column can be enqueued before the host sees the norm.
+        self.normalise = xp.ElementwiseKernel(
+            "raw T src, raw float32 scratch, int32 slot",
+            "T out",
+            "out = src[i] * (1.0f / scratch[slot])",
+            "mpir_gmres_normalise",
+        )
+
+    def gemv_conj(self, basis: Any, active: int, size: int, vector: Any, out: Any) -> None:
+        """out = conj(basis[:active]) . vector, reading the basis in place."""
+
+        self.cublas.cgemv(
+            self.handle, self.cublas.CUBLAS_OP_C, size, active,
+            self.one.ctypes.data, basis.data.ptr, size,
+            vector.data.ptr, 1, self.zero.ctypes.data, out.data.ptr, 1,
+        )
+
+    def gemv_update(
+        self, basis: Any, active: int, size: int, coefficients: Any, vector: Any, sign: np.ndarray
+    ) -> None:
+        """vector += sign * basis[:active].T . coefficients, in place."""
+
+        self.cublas.cgemv(
+            self.handle, self.cublas.CUBLAS_OP_N, size, active,
+            sign.ctypes.data, basis.data.ptr, size,
+            coefficients.data.ptr, 1, self.one.ctypes.data, vector.data.ptr, 1,
+        )
+
+
 def _inner_gmres_cuda(
     system: MatrixFreeMPIRSystem,
     rhs_high: np.ndarray,
     config: MPIRConfig,
 ) -> tuple[np.ndarray, int, float, int]:
-    """CUDA GMRES with device-resident bases and batched CGS2 projection.
+    """CUDA GMRES with device-resident bases and pipelined CGS2 columns.
 
     Modified Gram-Schmidt maps poorly to a GPU because Arnoldi column ``j``
     performs ``j`` separate dot products and host-visible scalar decisions.
     Two-pass classical Gram-Schmidt (CGS2) provides comparable orthogonality
-    using four GEMV operations per column.  Only the small Hessenberg column is
-    copied to the host for the complex128 least-squares problem.
+    using four cuBLAS GEMV calls per column on the stored basis, read in
+    place without a conjugated copy or temporaries.  The candidate is
+    normalised on the device from the device-resident norm, so the GPU work of
+    column ``j+1`` is enqueued before the host waits for column ``j``'s
+    projections; the host then reduces column ``j`` with complex128 Givens
+    rotations while the device runs column ``j+1``.  Each column has its own
+    scratch row and event, and the pinned host copy of that row is the only
+    host-device synchronisation per column.  A column enqueued after the
+    cycle has already converged is discarded; its operator application is
+    still counted because it ran.
     """
 
     runtime = system.runtime
     xp = runtime.namespace
+    kernels = _CudaGmresKernels(xp)
     rhs = runtime.from_host(rhs_high)
     correction = runtime.zeros_like(rhs)
-    precondition = _low_preconditioner(system)
+    size = int(rhs.size)
     rhs_norm = runtime.norm(rhs)
     if rhs_norm == 0.0:
         return np.zeros_like(rhs_high), 0, 0.0, 0
+
+    custom_precondition = getattr(system, "precondition_low", None)
+    diagonal = None if custom_precondition is not None else system.diagonal_low()
+
+    restart = config.gmres_restart
+    basis = xp.empty((restart + 1, size), dtype=runtime.dtype)
+    preconditioned_basis = xp.empty((restart, size), dtype=runtime.dtype)
+    # Per column: first-pass projections, second-pass projections, then the
+    # candidate norm in the real part of the last complex64 slot.
+    row_length = 2 * (restart + 1) + 1
+    second_offset = restart + 1
+    norm_slot = 2 * (restart + 1)
+    scratch = xp.empty((restart, row_length), dtype=runtime.dtype)
+    scratch_real = scratch.view(xp.float32)
+    pinned = xp.cuda.alloc_pinned_memory(scratch.nbytes)
+    # The pinned allocation is rounded up; view only the used prefix.
+    host_scratch = np.frombuffer(
+        pinned, dtype=np.complex64, count=restart * row_length
+    ).reshape(restart, row_length)
+    events = [xp.cuda.Event(block=False, disable_timing=True) for _ in range(restart)]
+    stream = xp.cuda.get_current_stream()
+    eps32 = float(np.finfo(np.float32).eps)
 
     residual = runtime.copy(rhs)
     applications = 0
     total_iterations = 0
     relative_residual = 1.0
+
+    def enqueue(column: int) -> None:
+        """Queue all device work of one Arnoldi column; no host wait."""
+
+        active = column + 1
+        if diagonal is not None:
+            xp.divide(basis[column], diagonal, out=preconditioned_basis[column])
+        else:
+            preconditioned_basis[column] = custom_precondition(basis[column])
+        candidate = system.apply_low(preconditioned_basis[column])
+        row = scratch[column]
+        first = row[:active]
+        second = row[second_offset : second_offset + active]
+        kernels.gemv_conj(basis, active, size, candidate, first)
+        kernels.gemv_update(basis, active, size, first, candidate, kernels.minus_one)
+        kernels.gemv_conj(basis, active, size, candidate, second)
+        kernels.gemv_update(basis, active, size, second, candidate, kernels.minus_one)
+        norm_view = scratch_real[column, 2 * norm_slot : 2 * norm_slot + 1].reshape(())
+        kernels.nrm2(candidate, out=norm_view)
+        kernels.normalise(candidate, scratch_real[column], np.int32(2 * norm_slot), basis[active])
+        kernels.runtime_api.memcpyAsync(
+            pinned.ptr + column * row_length * 8,
+            row.data.ptr,
+            row_length * 8,
+            kernels.runtime_api.memcpyDeviceToHost,
+            stream.ptr,
+        )
+        events[column].record(stream)
 
     while total_iterations < config.max_inner_iterations:
         if total_iterations:
@@ -310,71 +413,78 @@ def _inner_gmres_cuda(
         if relative_residual <= config.inner_relative_tolerance:
             break
 
-        cycle = min(
-            config.gmres_restart,
-            config.max_inner_iterations - total_iterations,
-        )
-        basis = xp.empty((cycle + 1, rhs.size), dtype=runtime.dtype)
-        preconditioned_basis = xp.empty(
-            (cycle, rhs.size), dtype=runtime.dtype
-        )
-        basis[0] = runtime.axpy(
-            1.0 / beta, residual, runtime.zeros_like(residual)
-        )
-        hessenberg = np.zeros((cycle + 1, cycle), dtype=np.complex64)
-        right_hand = np.zeros(cycle + 1, dtype=np.complex64)
-        right_hand[0] = np.complex64(beta)
+        cycle = min(restart, config.max_inner_iterations - total_iterations)
+        xp.multiply(residual, np.float32(1.0 / beta), out=basis[0])
+        hessenberg = np.zeros((cycle + 1, cycle), dtype=np.complex128)
+        givens_c: list[complex] = [0j] * cycle
+        givens_s: list[float] = [0.0] * cycle
+        right_hand: list[complex] = [0j] * (cycle + 1)
+        right_hand[0] = complex(float(np.float32(beta)))
         accepted = 0
-        coefficients = np.zeros(0, dtype=np.complex128)
+        breakdown = False
 
+        enqueue(0)
+        applications += 1
         for column in range(cycle):
-            preconditioned_basis[column] = precondition(basis[column])
-            candidate = system.apply_low(preconditioned_basis[column])
-            applications += 1
+            active = column + 1
+            if active < cycle:
+                enqueue(active)
+                applications += 1
+            events[column].synchronize()
+            host_row = host_scratch[column]
 
-            active_basis = basis[: column + 1]
-            first_projection = xp.matmul(active_basis.conj(), candidate)
-            candidate = candidate - xp.matmul(first_projection, active_basis)
-            second_projection = xp.matmul(active_basis.conj(), candidate)
-            candidate = candidate - xp.matmul(second_projection, active_basis)
-            projection = runtime.to_host(first_projection + second_projection)
-            hessenberg[: column + 1, column] = np.asarray(
-                projection, dtype=np.complex64
-            )
+            projection = (
+                host_row[:active] + host_row[second_offset : second_offset + active]
+            ).astype(np.complex64)
+            next_norm = float(np.float32(host_row[norm_slot].real))
+            breakdown = not (next_norm > eps32 * beta)
 
-            next_norm = runtime.norm(candidate)
-            hessenberg[column + 1, column] = np.complex64(next_norm)
-            if next_norm > np.finfo(np.float32).eps * beta:
-                basis[column + 1] = runtime.axpy(
-                    1.0 / next_norm,
-                    candidate,
-                    runtime.zeros_like(candidate),
-                )
+            # Givens rotations on the new column in plain complex arithmetic.
+            values = projection.astype(np.complex128).tolist() + [complex(next_norm)]
+            for row in range(column):
+                a = values[row]
+                b = values[row + 1]
+                values[row] = givens_c[row].conjugate() * a + givens_s[row] * b
+                values[row + 1] = -givens_s[row] * a + givens_c[row] * b
+            a = values[column]
+            b = values[active]
+            norm_a = abs(a)
+            radius = float(np.hypot(norm_a, abs(b)))
+            if radius == 0.0:
+                givens_c[column] = 1.0 + 0j
+                givens_s[column] = 0.0
+            elif norm_a == 0.0:
+                givens_c[column] = 0j
+                givens_s[column] = 1.0
+            else:
+                givens_c[column] = (a / norm_a) * (norm_a / radius)
+                givens_s[column] = abs(b) / radius
+            values[column] = givens_c[column].conjugate() * a + givens_s[column] * b
+            values[active] = 0j
+            hessenberg[: active + 1, column] = values
+            g0 = right_hand[column]
+            right_hand[column] = givens_c[column].conjugate() * g0
+            right_hand[active] = -givens_s[column] * g0
 
-            accepted = column + 1
-            coefficients, *_ = np.linalg.lstsq(
-                hessenberg[: accepted + 1, :accepted].astype(np.complex128),
-                right_hand[: accepted + 1].astype(np.complex128),
-                rcond=None,
-            )
-            estimate = right_hand[: accepted + 1] - (
-                hessenberg[: accepted + 1, :accepted] @ coefficients
-            )
-            relative_residual = float(np.linalg.norm(estimate)) / rhs_norm
+            accepted = active
+            relative_residual = abs(right_hand[accepted]) / rhs_norm
             total_iterations += 1
-            if (
-                relative_residual <= config.inner_relative_tolerance
-                or next_norm <= np.finfo(np.float32).eps * beta
-            ):
+            if relative_residual <= config.inner_relative_tolerance or breakdown:
                 break
 
-        coefficients_low = runtime.from_host(
-            np.asarray(coefficients, dtype=np.complex64)
+        # Back substitution R y = g, then correction += Z y in one GEMV.  Wait
+        # for any speculative column first so its writes do not overlap ours.
+        stream.synchronize()
+        coefficients = np.zeros(accepted, dtype=np.complex128)
+        for row in range(accepted - 1, -1, -1):
+            acc = right_hand[row]
+            for col in range(row + 1, accepted):
+                acc -= hessenberg[row, col] * coefficients[col]
+            coefficients[row] = acc / hessenberg[row, row]
+        coefficients_low = runtime.from_host(np.asarray(coefficients, dtype=np.complex64))
+        kernels.gemv_update(
+            preconditioned_basis, accepted, size, coefficients_low, correction, kernels.one
         )
-        update = xp.matmul(
-            coefficients_low, preconditioned_basis[:accepted]
-        )
-        correction = runtime.axpy(1.0, update, correction)
         if relative_residual <= config.inner_relative_tolerance:
             break
 
