@@ -169,6 +169,7 @@ class MatrixFreeScalarMaxwellOperator:
         backend: RuntimeBackend | None = None,
         device_id: int = 0,
         native: bool = False,
+        native_orthogonalization: str | None = None,
     ) -> None:
         if runtime is not None and backend is not None:
             raise ValueError("pass either runtime or backend, not both")
@@ -242,6 +243,7 @@ class MatrixFreeScalarMaxwellOperator:
                 self._mass_high,
                 self.free_nodes,
                 diagonal,
+                orthogonalization=native_orthogonalization,
             )
             self.low_operator_backend = self._native.kernel_name
 

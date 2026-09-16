@@ -33,6 +33,18 @@ def native_requested() -> bool:
     return flag in {"1", "true", "yes", "on"} and native_available()
 
 
+ORTHOGONALIZATIONS = ("mgs", "cgs2")
+
+
+def native_orthogonalization() -> str:
+    """Inner Gram-Schmidt variant; ``PCB_NATIVE_ORTHO`` selects ``mgs`` or ``cgs2``."""
+
+    value = os.environ.get("PCB_NATIVE_ORTHO", "").strip().lower() or "mgs"
+    if value not in ORTHOGONALIZATIONS:
+        raise ValueError(f"PCB_NATIVE_ORTHO must be one of {ORTHOGONALIZATIONS}, got {value!r}")
+    return value
+
+
 def native_threads() -> int:
     """Thread count for the fused operator; ``PCB_NATIVE_THREADS`` overrides."""
 
@@ -58,6 +70,7 @@ class NativeScalarMaxwellQ1:
         diagonal: np.ndarray,
         *,
         threads: int | None = None,
+        orthogonalization: str | None = None,
     ) -> None:
         if _native is None:
             raise ImportError(
@@ -68,6 +81,14 @@ class NativeScalarMaxwellQ1:
         self.element_columns = int(element_shape[1])
         self.size = (self.element_rows + 1) * (self.element_columns + 1)
         self.threads = threads if threads is not None else native_threads()
+        self.orthogonalization = (
+            orthogonalization if orthogonalization is not None else native_orthogonalization()
+        )
+        if self.orthogonalization not in ORTHOGONALIZATIONS:
+            raise ValueError(
+                f"orthogonalization must be one of {ORTHOGONALIZATIONS}, "
+                f"got {self.orthogonalization!r}"
+            )
         self._inverse_mu = np.ascontiguousarray(inverse_mu, dtype=np.complex64).reshape(-1)
         self._reaction = np.ascontiguousarray(reaction, dtype=np.complex64).reshape(-1)
         self._stiffness = np.ascontiguousarray(stiffness, dtype=np.complex64).reshape(-1)
@@ -119,6 +140,7 @@ class NativeScalarMaxwellQ1:
             int(max_inner_iterations),
             int(restart),
             self.threads,
+            self.orthogonalization == "cgs2",
         )
         return (
             np.asarray(correction, dtype=np.complex64),

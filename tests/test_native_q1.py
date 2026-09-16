@@ -67,11 +67,15 @@ def test_native_apply_matches_portable_complex64(shape, conductive) -> None:
     np.testing.assert_array_equal(actual[dirichlet], vector[dirichlet])
 
 
-def test_native_inner_gmres_reaches_the_same_fp64_solution() -> None:
+@pytest.mark.parametrize("orthogonalization", ["mgs", "cgs2"])
+def test_native_inner_gmres_reaches_the_same_fp64_solution(orthogonalization) -> None:
     problem = _problem(12, 48, conductive=True)
     portable = MatrixFreeScalarMaxwellOperator(problem, runtime=NumpyComplex64Runtime())
     native = MatrixFreeScalarMaxwellOperator(
-        problem, runtime=NumpyComplex64Runtime(), native=True
+        problem,
+        runtime=NumpyComplex64Runtime(),
+        native=True,
+        native_orthogonalization=orthogonalization,
     )
     rhs = portable.build_rhs()
     config = MPIRConfig(
