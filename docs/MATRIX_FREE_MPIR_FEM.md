@@ -193,6 +193,45 @@ is the single-threaded Gram-Schmidt cycle. The adoption criteria hold in this
 environment too, with a smaller margin on the largest case (minimum 2.56×
 against the 4.09× minimum on the Xeon).
 
+### Threaded inner GMRES (SPMD region)
+
+With only the operator threaded, the modified Gram-Schmidt cycle, norms,
+Jacobi division and correction update were about ninety percent of an inner
+iteration on six threads: at 16,705 unknowns the iteration took 0.305 ms of
+which the operator was 0.029 ms. The restart-32 cycle streams about 65 vector
+lengths per iteration against two or three for the operator. `gmres_q1` now
+runs the whole solve inside one OpenMP parallel region. Each thread owns a
+static range of node rows and applies every vector operation to that range;
+the stencil reads neighbouring rows after a barrier; reductions are written
+per thread and summed in thread order, so a fixed thread count gives bitwise
+reproducible results (checked with two 6-thread solves at 16,705 unknowns);
+the 32-by-32 Hessenberg bookkeeping is repeated on thread-private copies.
+Flush-to-zero is set per thread, which the earlier version did only on the
+calling thread. Convergence is unchanged: inner iterations 3,299 / 2,900 /
+4,792 and the same reached residuals at every thread count.
+
+Core i7-8700, `OPENBLAS_NUM_THREADS=1`, `PCB_NATIVE_THREADS` swept
+(`MAXWELL_NATIVE_I7_8700_SPMD_T{1,2,3,4,6,12}_RESULTS.json`; T1 and T6 use
+five repeats, the others three):
+
+| Threads | Solve C++ 16,705 | Ratio vs NumPy | Solve C++ 66,049 | Ratio vs NumPy | Operator C++ 16,705 | Operator C++ 66,049 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1,098 ms | 4.14× | 8,282 ms | 2.64× | 0.111 ms | 0.401 ms |
+| 2 | 599 ms | 7.27× | 4,713 ms | 4.59× | 0.0610 ms | 0.212 ms |
+| 3 | 423 ms | 10.42× | 3,596 ms | 6.04× | 0.0432 ms | 0.147 ms |
+| 4 | 359 ms | 12.31× | 2,991 ms | 7.16× | 0.0360 ms | 0.116 ms |
+| 6 | 275 ms | 16.29× | 2,410 ms | 8.95× | 0.0275 ms | 0.0833 ms |
+| 12 | 285 ms | 15.59× | 2,549 ms | 8.73× | 0.0313 ms | 0.0831 ms |
+
+Against the operator-only threading above (886 ms and 7,059 ms on six
+threads) the SPMD cycle is 3.2× and 2.9× faster; the single-thread times are
+within noise of the earlier build (1,071 ms and 8,484 ms). Scaling is close to
+linear up to three threads and flattens at the six physical cores; the twelve
+hyper-threads gain nothing because the cycle is bound by L3 and DRAM bandwidth,
+not by issue rate. The 4,369-unknown case reaches 122 ms on six threads
+(14.2×). The default remains one thread; a caller who wants the parallel
+cycle sets `PCB_NATIVE_THREADS` to the physical core count.
+
 Decision recorded in the JSON: the benchmark criteria (every case at least 2×,
 identical convergence outcome, converged solutions within 1e-6) are met. The
 extension is not packaged in the wheel and CUDA execution was not measured in
