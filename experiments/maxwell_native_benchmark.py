@@ -34,6 +34,7 @@ from electrical.matrix_free_mpir_fem import (  # noqa: E402
 )
 from electrical.matrix_free_mpir_fem.native_q1 import (  # noqa: E402
     native_available,
+    native_dot_accumulation,
     native_orthogonalization,
     native_threads,
 )
@@ -84,7 +85,9 @@ def _compiler() -> str:
         return "unknown"
 
 
-def _case(rows: int, columns: int, repeats: int, orthogonalization: str) -> dict[str, Any]:
+def _case(
+    rows: int, columns: int, repeats: int, orthogonalization: str, dot_accumulation: str
+) -> dict[str, Any]:
     problem = _problem(rows, columns)
     portable = MatrixFreeScalarMaxwellOperator(problem, runtime=NumpyComplex64Runtime())
     native = MatrixFreeScalarMaxwellOperator(
@@ -92,6 +95,7 @@ def _case(rows: int, columns: int, repeats: int, orthogonalization: str) -> dict
         runtime=NumpyComplex64Runtime(),
         native=True,
         native_orthogonalization=orthogonalization,
+        native_dot_accumulation=dot_accumulation,
     )
     rhs = portable.build_rhs()
     rng = np.random.default_rng(0)
@@ -151,13 +155,18 @@ def _case(rows: int, columns: int, repeats: int, orthogonalization: str) -> dict
     }
 
 
-def run(shapes: list[tuple[int, int]], repeats: int, orthogonalization: str) -> dict[str, Any]:
+def run(
+    shapes: list[tuple[int, int]], repeats: int, orthogonalization: str, dot_accumulation: str
+) -> dict[str, Any]:
     if not native_available():
         raise SystemExit(
             "native extension not built; run "
             "python -m electrical.matrix_free_mpir_fem.native.build"
         )
-    cases = [_case(rows, columns, repeats, orthogonalization) for rows, columns in shapes]
+    cases = [
+        _case(rows, columns, repeats, orthogonalization, dot_accumulation)
+        for rows, columns in shapes
+    ]
     speedups = [case["speedup_portable_over_native"] for case in cases]
     all_converged = all(
         case["portable_mpir"]["converged"] == case["native_mpir"]["converged"]
@@ -192,6 +201,7 @@ def run(shapes: list[tuple[int, int]], repeats: int, orthogonalization: str) -> 
             "compiler": _compiler(),
             "native_threads": native_threads(),
             "native_orthogonalization": orthogonalization,
+            "native_dot_accumulation": dot_accumulation,
             "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"),
             "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS"),
             "device": "cpu",
@@ -212,6 +222,12 @@ def run(shapes: list[tuple[int, int]], repeats: int, orthogonalization: str) -> 
                 "stays in L1, two reductions per column; coefficients rounded to complex64 "
                 "per pass",
             }[orthogonalization],
+            "native_dot_accumulation": {
+                "float64": "every dot-product term accumulated in double, as in the "
+                "portable runtime",
+                "float32": "1,024-element blocks accumulated in float, blocks summed in "
+                "double; the norms stay in double",
+            }[dot_accumulation],
         },
         "config": {
             "relative_tolerance": CONFIG.relative_tolerance,
@@ -254,10 +270,17 @@ def main() -> None:
         default=None,
         help="native Gram-Schmidt variant; default follows PCB_NATIVE_ORTHO or mgs",
     )
+    parser.add_argument(
+        "--dot-accumulation",
+        choices=("float64", "float32"),
+        default=None,
+        help="native dot-product accumulation; default follows PCB_NATIVE_DOT or float64",
+    )
     args = parser.parse_args()
     shapes = [tuple(int(v) for v in item.split("x")) for item in args.shapes.split(",")]
     orthogonalization = args.orthogonalization or native_orthogonalization()
-    report = run(shapes, args.repeats, orthogonalization)
+    dot_accumulation = args.dot_accumulation or native_dot_accumulation()
+    report = run(shapes, args.repeats, orthogonalization, dot_accumulation)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     for case in report["cases"]:

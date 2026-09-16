@@ -45,6 +45,23 @@ def native_orthogonalization() -> str:
     return value
 
 
+DOT_ACCUMULATIONS = ("float64", "float32")
+
+
+def native_dot_accumulation() -> str:
+    """Gram-Schmidt dot-product accumulation; ``PCB_NATIVE_DOT`` selects it.
+
+    ``float64`` accumulates every term in double like the portable runtime;
+    ``float32`` accumulates 1,024-element blocks in float and sums the blocks
+    in double.
+    """
+
+    value = os.environ.get("PCB_NATIVE_DOT", "").strip().lower() or "float64"
+    if value not in DOT_ACCUMULATIONS:
+        raise ValueError(f"PCB_NATIVE_DOT must be one of {DOT_ACCUMULATIONS}, got {value!r}")
+    return value
+
+
 def native_threads() -> int:
     """Thread count for the fused operator; ``PCB_NATIVE_THREADS`` overrides."""
 
@@ -71,6 +88,7 @@ class NativeScalarMaxwellQ1:
         *,
         threads: int | None = None,
         orthogonalization: str | None = None,
+        dot_accumulation: str | None = None,
     ) -> None:
         if _native is None:
             raise ImportError(
@@ -88,6 +106,14 @@ class NativeScalarMaxwellQ1:
             raise ValueError(
                 f"orthogonalization must be one of {ORTHOGONALIZATIONS}, "
                 f"got {self.orthogonalization!r}"
+            )
+        self.dot_accumulation = (
+            dot_accumulation if dot_accumulation is not None else native_dot_accumulation()
+        )
+        if self.dot_accumulation not in DOT_ACCUMULATIONS:
+            raise ValueError(
+                f"dot_accumulation must be one of {DOT_ACCUMULATIONS}, "
+                f"got {self.dot_accumulation!r}"
             )
         self._inverse_mu = np.ascontiguousarray(inverse_mu, dtype=np.complex64).reshape(-1)
         self._reaction = np.ascontiguousarray(reaction, dtype=np.complex64).reshape(-1)
@@ -141,6 +167,7 @@ class NativeScalarMaxwellQ1:
             int(restart),
             self.threads,
             self.orthogonalization == "cgs2",
+            self.dot_accumulation == "float32",
         )
         return (
             np.asarray(correction, dtype=np.complex64),
