@@ -287,6 +287,47 @@ inline void divide_into(const c64* v, const c64* d, c64* z, py::ssize_t n) {
     }
 }
 
+// Fused dot products conj(V_k) . w for k < rows on [lo, lo+len), accumulated in
+// double.  w is visited one cache block at a time so it stays in L1 while the
+// basis vectors stream past once each.
+constexpr py::ssize_t kBlock = 1024;  // complex64 elements, 8 KiB
+
+void block_dots(const c64* basis, py::ssize_t n, const c64* w, int rows, py::ssize_t lo,
+                py::ssize_t len, std::vector<double>& re, std::vector<double>& im) {
+    for (int k = 0; k < rows; ++k) {
+        re[k] = 0.0;
+        im[k] = 0.0;
+    }
+    for (py::ssize_t i0 = lo; i0 < lo + len; i0 += kBlock) {
+        const py::ssize_t m = std::min(kBlock, lo + len - i0);
+        const float* fb = reinterpret_cast<const float*>(w + i0);
+        for (int k = 0; k < rows; ++k) {
+            const float* fa = reinterpret_cast<const float*>(basis + static_cast<size_t>(k) * n + i0);
+            double sr = 0.0, si = 0.0;
+#pragma omp simd reduction(+ : sr, si)
+            for (py::ssize_t i = 0; i < m; ++i) {
+                const double ar = fa[2 * i], ai = fa[2 * i + 1];
+                const double br = fb[2 * i], bi = fb[2 * i + 1];
+                sr += ar * br + ai * bi;
+                si += ar * bi - ai * br;
+            }
+            re[k] += sr;
+            im[k] += si;
+        }
+    }
+}
+
+// w -= sum_k h_k V_k on [lo, lo+len), blocked the same way.
+void block_axpy_neg(const c64* basis, py::ssize_t n, const c64* h, int rows, c64* w,
+                    py::ssize_t lo, py::ssize_t len) {
+    for (py::ssize_t i0 = lo; i0 < lo + len; i0 += kBlock) {
+        const py::ssize_t m = std::min(kBlock, lo + len - i0);
+        for (int k = 0; k < rows; ++k) {
+            axpy_neg(h[k], basis + static_cast<size_t>(k) * n + i0, w + i0, m);
+        }
+    }
+}
+
 }  // namespace
 
 ArrC64 apply_q1(ArrC64 vector, ArrC64 inverse_mu, ArrC64 reaction, ArrC64 stiffness,
@@ -328,7 +369,7 @@ struct alignas(64) Partial {
 py::tuple gmres_q1(ArrC128 rhs_high, ArrC64 diagonal, ArrC64 inverse_mu, ArrC64 reaction,
                    ArrC64 stiffness, ArrC64 mass, ArrU8 free_nodes, ArrF32 free_mask,
                    int element_rows, int element_columns, double inner_relative_tolerance,
-                   int max_inner_iterations, int restart, int threads) {
+                   int max_inner_iterations, int restart, int threads, bool cgs2) {
     const Q1Operator op = make_operator(inverse_mu, reaction, stiffness, mass, free_nodes,
                                         free_mask, element_rows, element_columns, threads);
     const py::ssize_t n = op.node_count();
@@ -354,9 +395,15 @@ py::tuple gmres_q1(ArrC128 rhs_high, ArrC64 diagonal, ArrC64 inverse_mu, ArrC64 
         std::vector<c64> rhs(n), residual(n), w(n);
         std::vector<c64> basis(static_cast<size_t>(max_cycle + 1) * n);
         std::vector<c64> zbasis(static_cast<size_t>(max_cycle) * n);
-        // Slot 0: rhs norm and cycle residual norm; slot 1+row: vdot for row;
-        // slot max_cycle+1: Arnoldi vector norm.
-        std::vector<Partial> partials(static_cast<size_t>(max_cycle + 2) * team);
+        // Reduction slots.  A slot may be rewritten only after every thread has
+        // passed at least one barrier since it last read the slot, so each
+        // reduction inside a column has its own slot: 0 is the rhs and cycle
+        // residual norm, 1+row the Gram-Schmidt coefficient of row (first
+        // CGS2 pass or MGS), max_cycle+2+row the second CGS2 pass, and
+        // 2*max_cycle+3 the Arnoldi vector norm.
+        const int second_pass_slot = max_cycle + 2;
+        const int norm_slot = 2 * max_cycle + 3;
+        std::vector<Partial> partials(static_cast<size_t>(norm_slot + 1) * team);
         auto V = [&](int k) { return basis.data() + static_cast<size_t>(k) * n; };
         auto Z = [&](int k) { return zbasis.data() + static_cast<size_t>(k) * n; };
 
@@ -411,6 +458,8 @@ py::tuple gmres_q1(ArrC128 rhs_high, ArrC64 diagonal, ArrC64 inverse_mu, ArrC64 
             std::vector<c128> hess(static_cast<size_t>(max_cycle + 1) * max_cycle);
             std::vector<c128> g(max_cycle + 1), cs(max_cycle), y(max_cycle);
             std::vector<double> sn(max_cycle);
+            std::vector<double> hre(max_cycle), him(max_cycle);
+            std::vector<c64> hcoef(max_cycle);
             auto H = [&](int r, int c) -> c128& { return hess[static_cast<size_t>(r) * max_cycle + c]; };
             int iterations = 0;
             int applied = 0;
@@ -469,21 +518,46 @@ py::tuple gmres_q1(ArrC128 rhs_high, ArrC64 diagonal, ArrC64 inverse_mu, ArrC64 
                         op.apply_rows(z, w.data(), row_begin, row_end);
                         ++applied;
 
-                        // Modified Gram-Schmidt in complex64 with complex64-rounded
-                        // coefficients, matching the portable runtime.
-                        for (int row = 0; row <= col; ++row) {
-                            local_vdot(V(row), w.data(), slot(1 + row).a, slot(1 + row).b);
+                        if (!cgs2) {
+                            // Modified Gram-Schmidt in complex64 with complex64-rounded
+                            // coefficients, matching the portable runtime.
+                            for (int row = 0; row <= col; ++row) {
+                                local_vdot(V(row), w.data(), slot(1 + row).a, slot(1 + row).b);
 #pragma omp barrier
-                            double re, im;
-                            reduce(1 + row, re, im);
-                            const c64 h(static_cast<float>(re), static_cast<float>(im));
-                            H(row, col) = c128(h.real(), h.imag());
-                            axpy_neg(h, V(row) + lo, w.data() + lo, len);
+                                double re, im;
+                                reduce(1 + row, re, im);
+                                const c64 h(static_cast<float>(re), static_cast<float>(im));
+                                H(row, col) = c128(h.real(), h.imag());
+                                axpy_neg(h, V(row) + lo, w.data() + lo, len);
+                            }
+                        } else {
+                            // Classical Gram-Schmidt with one reorthogonalisation
+                            // (CGS2).  Each pass reads w once per cache block and
+                            // every basis vector once, and needs one barrier
+                            // instead of col+1.  Coefficients are rounded to
+                            // complex64 per pass like the MGS path; H keeps the
+                            // complex128 sum of both passes.
+                            for (int pass = 0; pass < 2; ++pass) {
+                                const int base = pass == 0 ? 1 : second_pass_slot;
+                                block_dots(basis.data(), n, w.data(), col + 1, lo, len, hre, him);
+                                for (int row = 0; row <= col; ++row) {
+                                    slot(base + row).a = hre[row];
+                                    slot(base + row).b = him[row];
+                                }
+#pragma omp barrier
+                                for (int row = 0; row <= col; ++row) {
+                                    double re, im;
+                                    reduce(base + row, re, im);
+                                    hcoef[row] = c64(static_cast<float>(re), static_cast<float>(im));
+                                    H(row, col) += c128(hcoef[row].real(), hcoef[row].imag());
+                                }
+                                block_axpy_neg(basis.data(), n, hcoef.data(), col + 1, w.data(), lo, len);
+                            }
                         }
-                        slot(max_cycle + 1).a = local_norm2(w.data());
+                        slot(norm_slot).a = local_norm2(w.data());
 #pragma omp barrier
                         double next_sq;
-                        reduce(max_cycle + 1, next_sq, unused);
+                        reduce(norm_slot, next_sq, unused);
                         const double next_norm = std::sqrt(next_sq);
                         const float next_norm32 = static_cast<float>(next_norm);
                         H(col + 1, col) = c128(next_norm32, 0.0);
@@ -568,7 +642,7 @@ PYBIND11_MODULE(_scalar_maxwell_native, m) {
           py::arg("reaction"), py::arg("stiffness"), py::arg("mass"), py::arg("free_nodes"),
           py::arg("free_mask"), py::arg("element_rows"), py::arg("element_columns"),
           py::arg("inner_relative_tolerance"), py::arg("max_inner_iterations"),
-          py::arg("restart"), py::arg("threads") = 1);
+          py::arg("restart"), py::arg("threads") = 1, py::arg("cgs2") = false);
     m.def("default_threads", &default_threads);
     m.attr("openmp") =
 #ifdef _OPENMP

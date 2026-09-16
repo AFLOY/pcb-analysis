@@ -34,6 +34,7 @@ from electrical.matrix_free_mpir_fem import (  # noqa: E402
 )
 from electrical.matrix_free_mpir_fem.native_q1 import (  # noqa: E402
     native_available,
+    native_orthogonalization,
     native_threads,
 )
 from maxwell_cuda_benchmark import _problem  # noqa: E402
@@ -83,11 +84,14 @@ def _compiler() -> str:
         return "unknown"
 
 
-def _case(rows: int, columns: int, repeats: int) -> dict[str, Any]:
+def _case(rows: int, columns: int, repeats: int, orthogonalization: str) -> dict[str, Any]:
     problem = _problem(rows, columns)
     portable = MatrixFreeScalarMaxwellOperator(problem, runtime=NumpyComplex64Runtime())
     native = MatrixFreeScalarMaxwellOperator(
-        problem, runtime=NumpyComplex64Runtime(), native=True
+        problem,
+        runtime=NumpyComplex64Runtime(),
+        native=True,
+        native_orthogonalization=orthogonalization,
     )
     rhs = portable.build_rhs()
     rng = np.random.default_rng(0)
@@ -147,13 +151,13 @@ def _case(rows: int, columns: int, repeats: int) -> dict[str, Any]:
     }
 
 
-def run(shapes: list[tuple[int, int]], repeats: int) -> dict[str, Any]:
+def run(shapes: list[tuple[int, int]], repeats: int, orthogonalization: str) -> dict[str, Any]:
     if not native_available():
         raise SystemExit(
             "native extension not built; run "
             "python -m electrical.matrix_free_mpir_fem.native.build"
         )
-    cases = [_case(rows, columns, repeats) for rows, columns in shapes]
+    cases = [_case(rows, columns, repeats, orthogonalization) for rows, columns in shapes]
     speedups = [case["speedup_portable_over_native"] for case in cases]
     all_converged = all(
         case["portable_mpir"]["converged"] == case["native_mpir"]["converged"]
@@ -187,6 +191,7 @@ def run(shapes: list[tuple[int, int]], repeats: int) -> dict[str, Any]:
             "cpu": _cpu_model(),
             "compiler": _compiler(),
             "native_threads": native_threads(),
+            "native_orthogonalization": orthogonalization,
             "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"),
             "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS"),
             "device": "cpu",
@@ -198,7 +203,15 @@ def run(shapes: list[tuple[int, int]], repeats: int) -> dict[str, Any]:
             "outer_precision": "host complex128",
             "inner_precision": "complex64 on both paths",
             "native_path": "fused node-gather Q1 operator plus restarted right-Jacobi GMRES "
-            "(MGS, Givens) in C++, FTZ/DAZ enabled during the native call",
+            "(Givens) in C++, one SPMD OpenMP region per solve, FTZ/DAZ enabled during "
+            "the native call",
+            "native_orthogonalization": {
+                "mgs": "modified Gram-Schmidt, one reduction per basis vector, "
+                "complex64-rounded coefficients as in the portable runtime",
+                "cgs2": "classical Gram-Schmidt with one reorthogonalisation, blocked so w "
+                "stays in L1, two reductions per column; coefficients rounded to complex64 "
+                "per pass",
+            }[orthogonalization],
         },
         "config": {
             "relative_tolerance": CONFIG.relative_tolerance,
@@ -235,9 +248,16 @@ def main() -> None:
         default="16x256,64x256,256x256",
         help="comma separated rows x columns element shapes",
     )
+    parser.add_argument(
+        "--orthogonalization",
+        choices=("mgs", "cgs2"),
+        default=None,
+        help="native Gram-Schmidt variant; default follows PCB_NATIVE_ORTHO or mgs",
+    )
     args = parser.parse_args()
     shapes = [tuple(int(v) for v in item.split("x")) for item in args.shapes.split(",")]
-    report = run(shapes, args.repeats)
+    orthogonalization = args.orthogonalization or native_orthogonalization()
+    report = run(shapes, args.repeats, orthogonalization)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     for case in report["cases"]:
