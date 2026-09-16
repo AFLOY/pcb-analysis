@@ -286,6 +286,30 @@ took one outer step more or fewer; the FP64 residual was still reached in
 both converged cases. The change was reverted; the wall-clock gain at 4,369
 unknowns is the shorter iteration count, not the fusion.
 
+### Float-accumulated dot products (measured, criteria met, opt-in)
+
+Following the CGS2 finding, the Gram-Schmidt dot products can accumulate
+1,024-element blocks in float and sum the blocks in double
+(`PCB_NATIVE_DOT=float32`, `native_dot_accumulation="float32"`,
+`--dot-accumulation float32`). Norms stay in double. Same fixture and
+`MPIRConfig` (`MAXWELL_NATIVE_I7_8700_FLOAT_DOTS_T1_RESULTS.json`,
+`MAXWELL_NATIVE_I7_8700_FLOAT_DOTS_T6_RESULTS.json`):
+
+| Unknowns | MGS float64 1 thread | float32 1 thread | MGS float64 6 threads | float32 6 threads | Inner iterations float64 / float32 (1 thread) | float32 solution difference |
+|---:|---:|---:|---:|---:|---:|---:|
+| 4,369 | 355 ms (0.107 ms/it) | 289 ms (0.087 ms/it) | 122 ms (0.037 ms/it) | 107 ms (0.032 ms/it) | 3,299 / 3,299 | 1.28e-8 |
+| 16,705 | 1,098 ms (0.379 ms/it) | 977 ms (0.296 ms/it) | 275 ms (0.095 ms/it) | 227 ms (0.078 ms/it) | 2,900 / 3,300 | 4.02e-9 (1 thread), 2.42e-8 (6 threads) |
+| 66,049 | 8,282 ms (1.73 ms/it) | 7,153 ms (1.49 ms/it) | 2,410 ms (0.503 ms/it) | 2,310 ms (0.482 ms/it) | 4,792 / 4,792 | not converged |
+
+The inner iteration is 14 to 22 percent shorter on one thread and 4 to
+18 percent on six; the gain shrinks where the cycle becomes bandwidth bound.
+The benchmark's criteria against the portable path hold (minimum end-to-end
+ratio 3.04× on one thread, converged solutions within 2.4e-8). Because the
+complex64 rounding of the coefficients changes, the outer iteration count can
+differ by one from the float64 path and the result depends on the thread
+count's block boundaries; the default stays `float64`, which reproduces the
+portable rounding, and switching the default is a separate decision.
+
 Decision recorded in the JSON: the benchmark criteria (every case at least 2×,
 identical convergence outcome, converged solutions within 1e-6) are met. The
 extension is not packaged in the wheel and CUDA execution was not measured in
