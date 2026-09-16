@@ -122,6 +122,55 @@ about `8.5e-8`; the 16,705-unknown reliable solutions differ by `4.4e-9` and
 both meet the requested complex128 residual tolerance. Raw measurements are in
 `MAXWELL_CUDA_RESULTS.json` and `MAXWELL_CUDA_SCALE_RESULTS.json`.
 
+### Pipelined CUDA inner GMRES (measured on `exp/cpp-inner-krylov`)
+
+Profiling one Arnoldi column of the CuPy implementation at 16,705 unknowns
+gave about 530 µs, of which the operator was 20 µs. The rest was host-side:
+`basis.conj()` copied the whole active basis twice per column (43 µs each),
+`norm` and `to_host` each synchronised, the normalising `axpy` was three
+kernels, the per-column `lstsq` took 57 µs, and every step waited for the
+previous one because the host needed the column before launching the next.
+The rewritten `_inner_gmres_cuda` keeps CGS2 and the device-resident bases
+and changes the schedule:
+
+- the four projections per column are raw cuBLAS `cgemv` calls on the stored
+  basis (`CUBLAS_OP_C` for the conjugate dot products, `CUBLAS_OP_N` with
+  `beta = 1` for the in-place updates), so no basis copy or temporary exists;
+- the candidate norm is written to device memory by `nrm2`, and an
+  elementwise kernel normalises the next basis vector from that device value,
+  so column `j+1` is enqueued before the host has seen column `j`;
+- each column has its own scratch row, pinned host copy and event; the host
+  waits on the event of column `j`, reduces the column with complex128 Givens
+  rotations in plain Python complex arithmetic, and decides convergence while
+  the device runs column `j+1`. A column enqueued after convergence is
+  discarded; its operator application is still counted;
+- the correction update `Z y` is one GEMV per cycle.
+
+NVIDIA GeForce GTX 1650 (compute capability 7.5, CuPy 14.1.1, CUDA runtime
+13.2), same fixture and `MPIRConfig` as above, five repeats, baseline measured
+on the same day with the previous implementation
+(`MAXWELL_CUDA_GTX1650_BASELINE_{16x256,64x256,256x256}_RESULTS.json`,
+`MAXWELL_CUDA_GTX1650_PIPELINED_{16x256,64x256,256x256}_RESULTS.json`):
+
+| Unknowns | CPU NumPy | CUDA before | CUDA after | Before / after | Per inner iteration after | Inner iterations before / after | Solution difference vs CPU after |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 4,369 | 1,719 ms | 1,988 ms | 637 ms | 3.12× | 0.193 ms | 3,299 / 3,299 | 3.96e-8 |
+| 16,705 | 4,547 ms | 2,166 ms | 697 ms | 3.11× | 0.211 ms | 3,300 / 3,300 | 1.62e-8 |
+| 66,049 | 22,067 ms | 5,703 ms | 2,471 ms | 2.31× | 0.516 ms | 4,790 / 4,791 | not converged (2.2e-6 reached) |
+
+Both CUDA variants converge alike; the converged solutions differ from the
+CPU path by at most 4e-8 (the Givens reduction replaces `lstsq`, so the
+rounding is not identical to before). The remaining column time is split
+between the four GEMV passes over the basis, which stream about 2.3 MB per
+call at 16,705 unknowns and are bandwidth bound on this device (each about
+25 µs), and roughly 150 µs of Python launch overhead that now overlaps with
+them. At 66,049 unknowns the GEMV passes dominate (36 MB per column) and the
+device is the limit. Against the threaded C++ host path on the same machine
+(122 / 275 / 2,410 ms on six cores) the GTX 1650 is slower at the two smaller
+sizes and level at the largest; a fused three-pass CGS2 kernel that reads the
+basis three times instead of four, and fusing the Jacobi division into the
+operator launch, are the remaining device-side items.
+
 ## Fused C++ host path (measured on `exp/cpp-inner-krylov`)
 
 The portable NumPy low path spends about half of each inner iteration in the
