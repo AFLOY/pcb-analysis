@@ -19,6 +19,7 @@ from .runtime import (
     RuntimeBackend,
     make_complex64_runtime,
 )
+from .native_q1 import NativeScalarMaxwellQ1, native_available, native_requested
 from .solver import MPIRConfig, MPIRResult, solve_mpir
 
 
@@ -167,6 +168,7 @@ class MatrixFreeScalarMaxwellOperator:
         runtime: LowPrecisionRuntime | None = None,
         backend: RuntimeBackend | None = None,
         device_id: int = 0,
+        native: bool = False,
     ) -> None:
         if runtime is not None and backend is not None:
             raise ValueError("pass either runtime or backend, not both")
@@ -217,14 +219,31 @@ class MatrixFreeScalarMaxwellOperator:
             raise ValueError("Jacobi diagonal is singular at this frequency")
         self._diagonal_low = self.runtime.from_host(diagonal)
         self._cuda_apply = None
+        self._native: NativeScalarMaxwellQ1 | None = None
         self.low_operator_backend = "portable-array-q1"
         if getattr(self.runtime, "is_cuda", False):
+            if native:
+                raise ValueError("native=True requires the CPU runtime")
             from .cuda import CudaScalarMaxwellQ1Apply
 
             self._cuda_apply = CudaScalarMaxwellQ1Apply(
                 self.runtime, self.mesh.element_shape
             )
             self.low_operator_backend = self._cuda_apply.kernel_name
+        elif native or (native is None and native_requested()):
+            # Fused C++ host path.  It is opt-in: ``native=True`` demands it
+            # and ``PCB_NATIVE_Q1=1`` selects it for every CPU operator, so the
+            # portable NumPy path stays the default contract.
+            self._native = NativeScalarMaxwellQ1(
+                self.mesh.element_shape,
+                self._inverse_mu_high,
+                self._reaction_high,
+                self._stiffness_high,
+                self._mass_high,
+                self.free_nodes,
+                diagonal,
+            )
+            self.low_operator_backend = self._native.kernel_name
 
     @staticmethod
     def _views(grid: Any) -> tuple[Any, Any, Any, Any]:
@@ -311,7 +330,23 @@ class MatrixFreeScalarMaxwellOperator:
             self.free_nodes,
         )
 
+    def native_inner_gmres(
+        self, rhs_high: np.ndarray, config: MPIRConfig
+    ) -> tuple[np.ndarray, int, float, int] | None:
+        """Whole inner GMRES in C++; ``None`` when the native path is off."""
+
+        if self._native is None:
+            return None
+        return self._native.inner_gmres(
+            rhs_high,
+            inner_relative_tolerance=config.inner_relative_tolerance,
+            max_inner_iterations=config.max_inner_iterations,
+            restart=config.gmres_restart,
+        )
+
     def apply_low(self, vector: Any) -> Any:
+        if self._native is not None:
+            return self._native.apply(vector)
         if self._cuda_apply is not None:
             vector = self.runtime.namespace.asarray(
                 vector, dtype=self.runtime.dtype
