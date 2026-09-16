@@ -80,6 +80,29 @@ struct Q1Operator {
     // mask enters as a 0/1 multiplier, which is the same arithmetic as
     // skipping the column.  Dirichlet rows copy x.
     void apply(const c64* x, c64* y) const {
+#pragma omp parallel num_threads(threads) if (threads > 1)
+        {
+            int row_begin = 0, row_end = element_rows + 1;
+            thread_rows(element_rows + 1, row_begin, row_end);
+            apply_rows(x, y, row_begin, row_end);
+        }
+    }
+
+    // Static row partition of ``rows`` node rows for the calling OpenMP thread.
+    static void thread_rows(int rows, int& row_begin, int& row_end) {
+#ifdef _OPENMP
+        const int t = omp_get_num_threads();
+        const int id = omp_get_thread_num();
+#else
+        const int t = 1, id = 0;
+#endif
+        row_begin = static_cast<int>(static_cast<long long>(rows) * id / t);
+        row_end = static_cast<int>(static_cast<long long>(rows) * (id + 1) / t);
+    }
+
+    // y[rows row_begin..row_end) = (A x)[same rows].  Reads x on neighbouring
+    // rows, so callers must finish writing x before entering.
+    void apply_rows(const c64* x, c64* y, int row_begin, int row_end) const {
         const int N = node_columns();
         const int C = element_columns;
         const int nrows = element_rows + 1;
@@ -102,8 +125,8 @@ struct Q1Operator {
             Mi[i] = mass[i].imag();
         }
 
-#pragma omp parallel for schedule(static) num_threads(threads) if (threads > 1)
-        for (int node_y = 0; node_y < nrows; ++node_y) {
+        (void)nrows;
+        for (int node_y = row_begin; node_y < row_end; ++node_y) {
             if (node_y == 0 || node_y == element_rows) {
                 for (int node_x = 0; node_x < N; ++node_x) {
                     y[node_y * N + node_x] = gather(x, node_y, node_x);
@@ -285,6 +308,23 @@ ArrC64 apply_q1(ArrC64 vector, ArrC64 inverse_mu, ArrC64 reaction, ArrC64 stiffn
 // Restarted right-Jacobi GMRES in complex64 with a complex128 Hessenberg.
 // Returns (correction complex64, total_iterations, relative_residual,
 // operator_applications) with the same control flow as solver._inner_gmres.
+// One cache line per thread for deterministic two-stage reductions.
+struct alignas(64) Partial {
+    double a, b;
+    double pad[6];
+};
+
+// Restarted right-Jacobi GMRES in complex64 with a complex128 Hessenberg.
+// Returns (correction complex64, total_iterations, relative_residual,
+// operator_applications) with the same control flow as solver._inner_gmres.
+//
+// Threads run SPMD over one static node-row partition for the whole solve:
+// every vector operation touches only the owned rows, the operator reads the
+// neighbouring rows after a barrier, and each reduction is written per thread
+// and summed by every thread in thread order, so the result does not depend on
+// scheduling for a fixed thread count.  The 32x32 Hessenberg bookkeeping is
+// repeated redundantly on private copies, which keeps all threads on the same
+// control path without broadcasts.
 py::tuple gmres_q1(ArrC128 rhs_high, ArrC64 diagonal, ArrC64 inverse_mu, ArrC64 reaction,
                    ArrC64 stiffness, ArrC64 mass, ArrU8 free_nodes, ArrF32 free_mask,
                    int element_rows, int element_columns, double inner_relative_tolerance,
@@ -306,127 +346,210 @@ py::tuple gmres_q1(ArrC128 rhs_high, ArrC64 diagonal, ArrC64 inverse_mu, ArrC64 
 
     {
         py::gil_scoped_release release;
-        FlushSubnormals flush;
 
+        const int max_cycle = restart;
+        const int node_rows = element_rows + 1;
+        const int ncols = op.node_columns();
+        const int team = std::max(1, std::min(op.threads, node_rows));
         std::vector<c64> rhs(n), residual(n), w(n);
-        for (py::ssize_t i = 0; i < n; ++i) {
-            rhs[i] = c64(static_cast<float>(rhs_in[i].real()),
-                         static_cast<float>(rhs_in[i].imag()));
-            correction[i] = c64(0.0f, 0.0f);
-        }
-        const double rhs_norm = norm2(rhs.data(), n);
-        if (rhs_norm == 0.0) {
-            relative_residual = 0.0;
-        } else {
-            const float eps32 = std::numeric_limits<float>::epsilon();
-            const int max_cycle = restart;
-            std::vector<c64> basis(static_cast<size_t>(max_cycle + 1) * n);
-            std::vector<c64> zbasis(static_cast<size_t>(max_cycle) * n);
+        std::vector<c64> basis(static_cast<size_t>(max_cycle + 1) * n);
+        std::vector<c64> zbasis(static_cast<size_t>(max_cycle) * n);
+        // Slot 0: rhs norm and cycle residual norm; slot 1+row: vdot for row;
+        // slot max_cycle+1: Arnoldi vector norm.
+        std::vector<Partial> partials(static_cast<size_t>(max_cycle + 2) * team);
+        auto V = [&](int k) { return basis.data() + static_cast<size_t>(k) * n; };
+        auto Z = [&](int k) { return zbasis.data() + static_cast<size_t>(k) * n; };
+
+#pragma omp parallel num_threads(team) if (team > 1)
+        {
+            FlushSubnormals flush;  // MXCSR is per thread
+#ifdef _OPENMP
+            const int tid = omp_get_thread_num();
+            const int nt = omp_get_num_threads();
+#else
+            const int tid = 0, nt = 1;
+#endif
+            int row_begin = 0, row_end = node_rows;
+            Q1Operator::thread_rows(node_rows, row_begin, row_end);
+            const py::ssize_t lo = static_cast<py::ssize_t>(row_begin) * ncols;
+            const py::ssize_t len = static_cast<py::ssize_t>(row_end - row_begin) * ncols;
+            auto slot = [&](int s) -> Partial& { return partials[static_cast<size_t>(s) * nt + tid]; };
+            auto reduce = [&](int s, double& a, double& b) {
+                a = 0.0;
+                b = 0.0;
+                for (int t = 0; t < nt; ++t) {
+                    a += partials[static_cast<size_t>(s) * nt + t].a;
+                    b += partials[static_cast<size_t>(s) * nt + t].b;
+                }
+            };
+            // Local reductions on the owned range (double accumulation).
+            auto local_norm2 = [&](const c64* v) {
+                const float* f = reinterpret_cast<const float*>(v + lo);
+                double acc = 0.0;
+#pragma omp simd reduction(+ : acc)
+                for (py::ssize_t i = 0; i < 2 * len; ++i) {
+                    acc += static_cast<double>(f[i]) * static_cast<double>(f[i]);
+                }
+                return acc;
+            };
+            auto local_vdot = [&](const c64* a, const c64* b, double& re, double& im) {
+                const float* fa = reinterpret_cast<const float*>(a + lo);
+                const float* fb = reinterpret_cast<const float*>(b + lo);
+                double sr = 0.0, si = 0.0;
+#pragma omp simd reduction(+ : sr, si)
+                for (py::ssize_t i = 0; i < len; ++i) {
+                    const double ar = fa[2 * i], ai = fa[2 * i + 1];
+                    const double br = fb[2 * i], bi = fb[2 * i + 1];
+                    sr += ar * br + ai * bi;
+                    si += ar * bi - ai * br;
+                }
+                re = sr;
+                im = si;
+            };
+
+            // Thread-private Hessenberg bookkeeping, identical on every thread.
             std::vector<c128> hess(static_cast<size_t>(max_cycle + 1) * max_cycle);
             std::vector<c128> g(max_cycle + 1), cs(max_cycle), y(max_cycle);
             std::vector<double> sn(max_cycle);
-            auto V = [&](int k) { return basis.data() + static_cast<size_t>(k) * n; };
-            auto Z = [&](int k) { return zbasis.data() + static_cast<size_t>(k) * n; };
             auto H = [&](int r, int c) -> c128& { return hess[static_cast<size_t>(r) * max_cycle + c]; };
+            int iterations = 0;
+            int applied = 0;
+            double rel = 1.0;
 
-            residual = rhs;
-            while (total_iterations < max_inner_iterations) {
-                if (total_iterations) {
-                    op.apply(correction, w.data());
-                    ++applications;
-                    {
-                        const float* fr = reinterpret_cast<const float*>(rhs.data());
-                        const float* fw = reinterpret_cast<const float*>(w.data());
-                        float* fo = reinterpret_cast<float*>(residual.data());
+            for (py::ssize_t i = lo; i < lo + len; ++i) {
+                rhs[i] = c64(static_cast<float>(rhs_in[i].real()),
+                             static_cast<float>(rhs_in[i].imag()));
+                correction[i] = c64(0.0f, 0.0f);
+                residual[i] = rhs[i];
+            }
+            slot(0).a = local_norm2(rhs.data());
+            slot(0).b = 0.0;
+#pragma omp barrier
+            double rhs_sq, unused;
+            reduce(0, rhs_sq, unused);
+            const double rhs_norm = std::sqrt(rhs_sq);
+            if (rhs_norm == 0.0) {
+                rel = 0.0;
+            } else {
+                const float eps32 = std::numeric_limits<float>::epsilon();
+                while (iterations < max_inner_iterations) {
+                    if (iterations) {
+                        // All threads finished correction += Z y (barrier at
+                        // the end of the previous cycle) before this read.
+                        op.apply_rows(correction, w.data(), row_begin, row_end);
+                        ++applied;
+                        const float* fr = reinterpret_cast<const float*>(rhs.data() + lo);
+                        const float* fw = reinterpret_cast<const float*>(w.data() + lo);
+                        float* fo = reinterpret_cast<float*>(residual.data() + lo);
 #pragma omp simd
-                        for (py::ssize_t i = 0; i < 2 * n; ++i) fo[i] = fr[i] - fw[i];
+                        for (py::ssize_t i = 0; i < 2 * len; ++i) fo[i] = fr[i] - fw[i];
                     }
-                }
-                const double beta = norm2(residual.data(), n);
-                relative_residual = beta / rhs_norm;
-                if (relative_residual <= inner_relative_tolerance) break;
+                    slot(0).a = local_norm2(residual.data());
+#pragma omp barrier
+                    double beta_sq;
+                    reduce(0, beta_sq, unused);
+                    const double beta = std::sqrt(beta_sq);
+                    rel = beta / rhs_norm;
+                    if (rel <= inner_relative_tolerance) break;
 
-                const int cycle = std::min(restart, max_inner_iterations - total_iterations);
-                const float inv_beta = static_cast<float>(1.0 / beta);
-                scale_into(inv_beta, residual.data(), V(0), n);
-                std::fill(hess.begin(), hess.end(), c128(0.0, 0.0));
-                std::fill(g.begin(), g.end(), c128(0.0, 0.0));
-                g[0] = c128(static_cast<float>(beta), 0.0);
-                int accepted = 0;
-                bool breakdown = false;
+                    const int cycle = std::min(restart, max_inner_iterations - iterations);
+                    const float inv_beta = static_cast<float>(1.0 / beta);
+                    scale_into(inv_beta, residual.data() + lo, V(0) + lo, len);
+                    std::fill(hess.begin(), hess.end(), c128(0.0, 0.0));
+                    std::fill(g.begin(), g.end(), c128(0.0, 0.0));
+                    g[0] = c128(static_cast<float>(beta), 0.0);
+                    int accepted = 0;
+                    bool breakdown = false;
 
-                for (int col = 0; col < cycle; ++col) {
-                    c64* z = Z(col);
-                    const c64* v = V(col);
-                    divide_into(v, diag, z, n);
-                    op.apply(z, w.data());
-                    ++applications;
+                    for (int col = 0; col < cycle; ++col) {
+                        c64* z = Z(col);
+                        const c64* v = V(col);
+                        divide_into(v + lo, diag + lo, z + lo, len);
+#pragma omp barrier  // z complete on every row before the stencil reads it
+                        op.apply_rows(z, w.data(), row_begin, row_end);
+                        ++applied;
 
-                    // Modified Gram-Schmidt in complex64 with complex64-rounded
-                    // coefficients, matching the portable runtime.
-                    for (int row = 0; row <= col; ++row) {
-                        const c64 h = vdot(V(row), w.data(), n);
-                        H(row, col) = c128(h.real(), h.imag());
-                        axpy_neg(h, V(row), w.data(), n);
-                    }
-                    const double next_norm = norm2(w.data(), n);
-                    const float next_norm32 = static_cast<float>(next_norm);
-                    H(col + 1, col) = c128(next_norm32, 0.0);
-                    breakdown = !(next_norm32 > eps32 * static_cast<float>(beta));
-                    if (!breakdown) {
-                        scale_into(1.0f / next_norm32, w.data(), V(col + 1), n);
-                    }
-
-                    // Givens rotations: apply the earlier ones, then zero the
-                    // subdiagonal of this column.  Equivalent to the NumPy
-                    // least-squares solve on the same Hessenberg.
-                    for (int row = 0; row < col; ++row) {
-                        const c128 a = H(row, col), b = H(row + 1, col);
-                        H(row, col) = std::conj(cs[row]) * a + sn[row] * b;
-                        H(row + 1, col) = -sn[row] * a + cs[row] * b;
-                    }
-                    {
-                        const c128 a = H(col, col), b = H(col + 1, col);
-                        const double na = std::abs(a), nb = std::abs(b);
-                        const double r = std::hypot(na, nb);
-                        if (r == 0.0) {
-                            cs[col] = c128(1.0, 0.0);
-                            sn[col] = 0.0;
-                        } else if (na == 0.0) {
-                            cs[col] = c128(0.0, 0.0);
-                            sn[col] = 1.0;
-                        } else {
-                            cs[col] = (a / na) * (na / r);
-                            sn[col] = nb / r;
+                        // Modified Gram-Schmidt in complex64 with complex64-rounded
+                        // coefficients, matching the portable runtime.
+                        for (int row = 0; row <= col; ++row) {
+                            local_vdot(V(row), w.data(), slot(1 + row).a, slot(1 + row).b);
+#pragma omp barrier
+                            double re, im;
+                            reduce(1 + row, re, im);
+                            const c64 h(static_cast<float>(re), static_cast<float>(im));
+                            H(row, col) = c128(h.real(), h.imag());
+                            axpy_neg(h, V(row) + lo, w.data() + lo, len);
                         }
-                        H(col, col) = std::conj(cs[col]) * a + sn[col] * b;
-                        H(col + 1, col) = c128(0.0, 0.0);
-                        const c128 g0 = g[col];
-                        g[col] = std::conj(cs[col]) * g0;
-                        g[col + 1] = -sn[col] * g0;
-                    }
-                    accepted = col + 1;
-                    relative_residual = std::abs(g[accepted]) / rhs_norm;
-                    ++total_iterations;
-                    if (relative_residual <= inner_relative_tolerance || breakdown) break;
-                }
+                        slot(max_cycle + 1).a = local_norm2(w.data());
+#pragma omp barrier
+                        double next_sq;
+                        reduce(max_cycle + 1, next_sq, unused);
+                        const double next_norm = std::sqrt(next_sq);
+                        const float next_norm32 = static_cast<float>(next_norm);
+                        H(col + 1, col) = c128(next_norm32, 0.0);
+                        breakdown = !(next_norm32 > eps32 * static_cast<float>(beta));
+                        if (!breakdown) {
+                            scale_into(1.0f / next_norm32, w.data() + lo, V(col + 1) + lo, len);
+                        }
 
-                // Back substitution R y = g, then correction += Z y.
-                for (int row = accepted - 1; row >= 0; --row) {
-                    c128 s = g[row];
-                    for (int c = row + 1; c < accepted; ++c) s -= H(row, c) * y[c];
-                    y[row] = s / H(row, row);
+                        // Givens rotations: apply the earlier ones, then zero the
+                        // subdiagonal of this column.  Equivalent to the NumPy
+                        // least-squares solve on the same Hessenberg.
+                        for (int row = 0; row < col; ++row) {
+                            const c128 a = H(row, col), b = H(row + 1, col);
+                            H(row, col) = std::conj(cs[row]) * a + sn[row] * b;
+                            H(row + 1, col) = -sn[row] * a + cs[row] * b;
+                        }
+                        {
+                            const c128 a = H(col, col), b = H(col + 1, col);
+                            const double na = std::abs(a), nb = std::abs(b);
+                            const double r = std::hypot(na, nb);
+                            if (r == 0.0) {
+                                cs[col] = c128(1.0, 0.0);
+                                sn[col] = 0.0;
+                            } else if (na == 0.0) {
+                                cs[col] = c128(0.0, 0.0);
+                                sn[col] = 1.0;
+                            } else {
+                                cs[col] = (a / na) * (na / r);
+                                sn[col] = nb / r;
+                            }
+                            H(col, col) = std::conj(cs[col]) * a + sn[col] * b;
+                            H(col + 1, col) = c128(0.0, 0.0);
+                            const c128 g0 = g[col];
+                            g[col] = std::conj(cs[col]) * g0;
+                            g[col + 1] = -sn[col] * g0;
+                        }
+                        accepted = col + 1;
+                        rel = std::abs(g[accepted]) / rhs_norm;
+                        ++iterations;
+                        if (rel <= inner_relative_tolerance || breakdown) break;
+                    }
+
+                    // Back substitution R y = g, then correction += Z y.
+                    for (int row = accepted - 1; row >= 0; --row) {
+                        c128 acc = g[row];
+                        for (int c = row + 1; c < accepted; ++c) acc -= H(row, c) * y[c];
+                        y[row] = acc / H(row, row);
+                    }
+                    for (int k = 0; k < accepted; ++k) {
+                        const c64 yk(static_cast<float>(y[k].real()), static_cast<float>(y[k].imag()));
+                        axpy_add(yk, Z(k) + lo, correction + lo, len);
+                    }
+#pragma omp barrier  // correction complete before the next residual stencil
+                    if (rel <= inner_relative_tolerance) break;
                 }
-                for (int k = 0; k < accepted; ++k) {
-                    const c64 yk(static_cast<float>(y[k].real()), static_cast<float>(y[k].imag()));
-                    axpy_add(yk, Z(k), correction, n);
-                }
-                if (relative_residual <= inner_relative_tolerance) break;
+            }
+            if (tid == 0) {
+                total_iterations = iterations;
+                applications = applied;
+                relative_residual = rel;
             }
         }
     }
     return py::make_tuple(correction_out, total_iterations, relative_residual, applications);
 }
+
 
 int default_threads() {
 #ifdef _OPENMP
