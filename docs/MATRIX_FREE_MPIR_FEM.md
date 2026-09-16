@@ -232,6 +232,35 @@ not by issue rate. The 4,369-unknown case reaches 122 ms on six threads
 (14.2×). The default remains one thread; a caller who wants the parallel
 cycle sets `PCB_NATIVE_THREADS` to the physical core count.
 
+### CGS2 orthogonalisation (measured, not adopted)
+
+The restart-32 MGS cycle streams each basis vector twice per column (dot
+product, then update). Classical Gram-Schmidt with one reorthogonalisation
+reads the new vector once per cache block and each basis vector once per pass,
+and needs two barriers per column instead of one per basis vector. It is
+available as `PCB_NATIVE_ORTHO=cgs2` (`native_orthogonalization="cgs2"`) and
+was measured with `--orthogonalization cgs2` on the same fixture
+(`MAXWELL_NATIVE_I7_8700_CGS2_T1_RESULTS.json`,
+`MAXWELL_NATIVE_I7_8700_CGS2_T6_RESULTS.json`):
+
+| Unknowns | MGS 1 thread | CGS2 1 thread | MGS 6 threads | CGS2 6 threads | Inner iterations MGS / CGS2 | CGS2 solution difference |
+|---:|---:|---:|---:|---:|---:|---:|
+| 4,369 | 355 ms | 595 ms | 122 ms | 152 ms | 3,299 / 2,899 | 4.31e-8 |
+| 16,705 | 1,098 ms | 2,201 ms | 275 ms | 457 ms | 2,900 / 2,900 | 1.99e-9 |
+| 66,049 | 8,282 ms | 16,692 ms | 2,410 ms | 5,411 ms | 4,792 / 4,792 | not converged |
+
+CGS2 is 2.0× slower on one thread and 1.7× slower on six. The traffic model
+behind the idea was wrong for this size range: a single-core micro-benchmark
+of the complex64 dot product with double accumulation runs at about 24 GB/s at
+all three sizes, well below L2 and L3 bandwidth, so the MGS cycle is bound by
+the float-to-double conversions and double FMAs, not by memory, and the second
+CGS2 pass doubles exactly that work. The same micro-benchmark gives 43 to
+53 GB/s when the dot product accumulates in float per 1,024-element block and
+sums the blocks in double, which is the next candidate. CGS2 changes the
+complex64 rounding, so the 4,369-unknown case takes one outer step fewer and
+the converged solutions differ from the portable path by up to 4.3e-8; both
+paths still reach the requested FP64 residual.
+
 Decision recorded in the JSON: the benchmark criteria (every case at least 2×,
 identical convergence outcome, converged solutions within 1e-6) are met. The
 extension is not packaged in the wheel and CUDA execution was not measured in
