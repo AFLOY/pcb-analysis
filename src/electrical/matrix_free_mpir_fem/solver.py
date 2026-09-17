@@ -106,6 +106,20 @@ def _inner_pcg(
 ) -> tuple[np.ndarray, int, float, int]:
     """Approximately solve one correction equation entirely in FP32."""
 
+    # A system may run the whole PCG natively (fused operator, preconditioner
+    # and vector updates in C++).  It returns ``None`` to decline.
+    native = getattr(system, "native_inner_pcg", None)
+    if native is not None:
+        native_result = native(rhs_high, config)
+        if native_result is not None:
+            correction, iterations, relative_residual, applications = native_result
+            return (
+                np.asarray(correction),
+                iterations,
+                relative_residual,
+                applications,
+            )
+
     runtime = system.runtime
     rhs = runtime.from_host(rhs_high)
     correction = runtime.zeros_like(rhs)
