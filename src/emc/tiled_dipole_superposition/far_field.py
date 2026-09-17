@@ -30,6 +30,7 @@ from .fields import (
     to_host,
     wavenumber_per_m,
 )
+from .native_dipole import far_field_pattern_native, use_native
 
 
 def db_microvolt_per_m(field_v_per_m: np.ndarray | float) -> np.ndarray | float:
@@ -136,30 +137,16 @@ class FarFieldPattern:
         )
 
 
-def far_field_pattern(
+def _array_pattern(
     sources: CurrentDipoles,
-    frequency_hz: float,
-    *,
-    distance_m: float = 10.0,
-    sampling: SphereSampling | None = None,
-    backend: Backend = "cpu",
-    tile_directions: int = 1024,
-    dtype: Any = np.complex128,
-) -> FarFieldPattern:
-    """Evaluate the far-zone field on a sphere and integrate the radiated power.
+    sampling: SphereSampling,
+    k: float,
+    backend: Backend,
+    tile_directions: int,
+    dtype: Any,
+) -> np.ndarray:
+    """``F(n)`` for every sampled direction, one matmul per direction tile."""
 
-    The phase reference is the coordinate origin.  Directions are processed in
-    tiles against all sources.  ``distance_m`` only scales the reported field
-    by ``1/r``; it has to be in the far zone of the source for the numbers to
-    mean what a test site measures.
-    """
-
-    k = wavenumber_per_m(frequency_hz)
-    if k == 0.0:
-        raise ValueError("a far field needs a positive frequency")
-    if distance_m <= 0.0:
-        raise ValueError("distance_m must be positive")
-    sampling = sampling or SphereSampling.gauss_legendre()
     xp = array_namespace(backend)
     real_dtype = xp.dtype(dtype).type(0).real.dtype
     src_pos = xp.asarray(sources.position_m, dtype=real_dtype)
@@ -174,6 +161,45 @@ def far_field_pattern(
         radial = xp.sum(n * weighted, axis=-1, keepdims=True)
         transverse = weighted - n * radial                                   # (n×p)×n = p - n(n·p)
         pattern[start:stop] = to_host(transverse)
+    return pattern
+
+
+def far_field_pattern(
+    sources: CurrentDipoles,
+    frequency_hz: float,
+    *,
+    distance_m: float = 10.0,
+    sampling: SphereSampling | None = None,
+    backend: Backend = "cpu",
+    tile_directions: int = 1024,
+    dtype: Any = np.complex128,
+    native: bool | None = None,
+    native_threads: int | None = None,
+) -> FarFieldPattern:
+    """Evaluate the far-zone field on a sphere and integrate the radiated power.
+
+    The phase reference is the coordinate origin.  Directions are processed in
+    tiles against all sources.  ``distance_m`` only scales the reported field
+    by ``1/r``; it has to be in the far zone of the source for the numbers to
+    mean what a test site measures.  ``native=True`` sums the phase-weighted
+    moments in the optional C++ extension (CPU, complex128); ``None`` follows
+    ``PCB_NATIVE_EMC``.
+    """
+
+    k = wavenumber_per_m(frequency_hz)
+    if k == 0.0:
+        raise ValueError("a far field needs a positive frequency")
+    if distance_m <= 0.0:
+        raise ValueError("distance_m must be positive")
+    if tile_directions < 1:
+        raise ValueError("tile_directions must be positive")
+    sampling = sampling or SphereSampling.gauss_legendre()
+    if use_native(native, backend, dtype):
+        pattern = far_field_pattern_native(
+            sampling.direction, sources.position_m, sources.moment_a_m, k, threads=native_threads
+        )
+    else:
+        pattern = _array_pattern(sources, sampling, k, backend, tile_directions, dtype)
 
     eta = FREE_SPACE_IMPEDANCE_OHM
     field = (1j * eta * k / (4.0 * np.pi)) * np.exp(-1j * k * distance_m) / distance_m * pattern

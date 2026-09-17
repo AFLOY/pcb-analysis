@@ -28,6 +28,8 @@ from typing import Any, Literal
 
 import numpy as np
 
+from .native_dipole import evaluate_fields_native, use_native
+
 
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
 MU_0_H_PER_M = 1.25663706212e-6
@@ -162,6 +164,8 @@ def evaluate_fields(
     backend: Backend = "cpu",
     tile_points: int = 2048,
     dtype: Any = np.complex128,
+    native: bool | None = None,
+    native_threads: int | None = None,
 ) -> FieldSamples:
     """Sum the exact dipole fields of every source at every observation point.
 
@@ -169,6 +173,10 @@ def evaluate_fields(
     once, so peak memory is ``tile_points × sources × 3`` complex values.  Use
     ``dtype=np.complex64`` on a GPU whose FP64 throughput is limited when the
     near field, which does not rely on cancellation, is what is wanted.
+
+    ``native=True`` sums the pairs in the optional C++ extension (CPU,
+    complex128 only, ``native_threads`` OpenMP threads); ``None`` follows
+    ``PCB_NATIVE_EMC``.  The result is the same sum in a different order.
     """
 
     points = np.asarray(points_m, dtype=np.float64)
@@ -181,6 +189,22 @@ def evaluate_fields(
         raise ValueError(
             "the electric field of a current distribution is undefined at zero "
             "frequency; pass electric=False for the Biot-Savart magnetic field"
+        )
+
+    if use_native(native, backend, dtype):
+        magnetic, electric_field = evaluate_fields_native(
+            points,
+            sources.position_m,
+            sources.moment_a_m,
+            k,
+            electric=electric,
+            threads=native_threads,
+        )
+        return FieldSamples(
+            point_m=points,
+            frequency_hz=float(frequency_hz),
+            electric_v_per_m=electric_field,
+            magnetic_a_per_m=magnetic,
         )
 
     xp = array_namespace(backend)
