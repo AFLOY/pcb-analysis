@@ -23,3 +23,5 @@ experiments/*
 *.so
 !experiments/maxwell_native_benchmark.py
 !experiments/maxwell_native_benchmark.py
+!experiments/thermal_native_benchmark.py
+!experiments/emc_native_benchmark.py
