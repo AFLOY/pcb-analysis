@@ -1,10 +1,10 @@
-"""Build the optional C++ extension in place.
+"""Build the optional C++ extensions in place.
 
 Usage: ``python -m electrical.matrix_free_mpir_fem.native.build [--no-openmp]``
 
-The compiled module is written next to this file and is not tracked by Git.
-It is an experiment-branch build step; packaging it as a wheel extension is a
-separate decision.
+The compiled module is written next to the package and is not tracked by Git.
+``compile_extension`` is shared by the thermal and emc packages, whose build
+modules pass their own source file and module name.
 """
 
 from __future__ import annotations
@@ -16,13 +16,20 @@ import sysconfig
 from pathlib import Path
 
 
-def build(*, openmp: bool = True, verbose: bool = True) -> Path:
+def compile_extension(
+    source: Path,
+    module_name: str,
+    output_dir: Path,
+    *,
+    openmp: bool = True,
+    verbose: bool = True,
+) -> Path:
+    """Compile one pybind11 source into ``output_dir/<module_name><EXT_SUFFIX>``."""
+
     import pybind11
 
-    here = Path(__file__).resolve().parent
-    source = here / "scalar_maxwell_q1.cpp"
     suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
-    output = here.parent / f"_scalar_maxwell_native{suffix}"
+    output = Path(output_dir) / f"{module_name}{suffix}"
     command = [
         "g++",
         "-O3",
@@ -47,6 +54,17 @@ def build(*, openmp: bool = True, verbose: bool = True) -> Path:
         print(" ".join(command))
     subprocess.run(command, check=True)
     return output
+
+
+def build(*, openmp: bool = True, verbose: bool = True) -> Path:
+    here = Path(__file__).resolve().parent
+    return compile_extension(
+        here / "scalar_maxwell_q1.cpp",
+        "_scalar_maxwell_native",
+        here.parent,
+        openmp=openmp,
+        verbose=verbose,
+    )
 
 
 def main() -> None:
