@@ -131,6 +131,40 @@ test agrees with NumPy to `1e-10`. The complex128 default is right for the
 far field, which relies on cancellation between elements; `dtype=complex64`
 is adequate for the magnetic near field on a GPU without fast FP64.
 
+### C++ direct summation (measured on `exp/cpp-thermal-emc`)
+
+The tiled array path materialises `(tile × sources × 3)` complex temporaries
+about thirty times per tile, so it is memory bound.  `native=True` on
+`evaluate_fields` and `far_field_pattern` (or `PCB_NATIVE_EMC=1`, after
+`python -m emc.tiled_dipole_superposition.native.build`) sums the pairs point
+by point in C++ with the same complex128 formulas; OpenMP threads own disjoint
+observation points (`native_threads`, default `PCB_NATIVE_THREADS` or one), so
+the result is the array path's sum in another order and does not depend on the
+thread count.  CPU and complex128 only; CuPy and complex64 keep the array path.
+
+Measured on an Intel Xeon Platinum 8581C (16 cores / 32 threads), GCC 14.2.1,
+NumPy 2.3.5, `OPENBLAS_NUM_THREADS=1`, random elements in a 4 cm cube with
+complex moments at 300 MHz, a scan plane 5 cm above them, the default
+2,048-direction sphere; medians of three runs
+(`experiments/emc_native_benchmark.py`, `EMC_NATIVE_XEON_8581C_RESULTS.json`):
+
+| Sources | Points | Array near field | C++ 1 thread | 4 | 8 | 16 | Array far field | C++ 1 thread | 16 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2,000 | 1,764 | 1,383 ms | 102 ms (13.6×) | 30 ms | 14 ms | 7.3 ms (189×) | 79 ms | 44 ms (1.8×) | 4.1 ms (19.4×) |
+| 8,000 | 4,096 | 14,023 ms | 932 ms (15.1×) | 234 ms | 121 ms | 67 ms (209×) | 406 ms | 180 ms (2.3×) | 16 ms (24.9×) |
+
+Near-field results agree with the array path to 3.1e-15 (relative, E and H),
+far-field patterns and radiated power to the same level.  The near field
+gains most because the array path is memory bound while the direct sum is
+compute bound (one `sincos` and a few dozen flops per pair) and scales
+linearly to the sixteen cores.  The far field was already one complex matmul
+per tile, so the single-thread gain is small; the threaded sum still wins
+because the matmul in the array path runs on one BLAS thread here.
+
+Decision recorded in the JSON: criteria met (near field at least 2× on every
+case, far field not slower, results within 1e-10).  The default stays the
+array path.
+
 ## Software boundary
 
 | Module | Responsibility |
@@ -140,3 +174,4 @@ is adequate for the magnetic near field on a GPU without fast FP64.
 | `limits.py` | CISPR 32 and FCC Part 15 tables, distance rescaling, margins |
 | `moments.py` | electric and magnetic dipole moments and their radiated powers |
 | `sources.py` | adapters from `PCBConductionSolution` and `SheetSolution`, terminal closure |
+| `native_dipole.py`, `native/` | opt-in C++ direct summation for both field evaluations (built in place) |

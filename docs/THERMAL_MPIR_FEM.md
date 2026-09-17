@@ -180,6 +180,58 @@ the solution to `1e-12` but needs 1.4–1.9× the inner iterations and never win
 The matrix-free action and the dense coarse inverse stay. The coarse-space cap
 remains the open item for boards beyond a few hundred thousand nodes.
 
+## Fused C++ host path (measured on `exp/cpp-thermal-emc`)
+
+The array-corner-product action issues 64 whole-grid products per
+application and the two-level PCG spends the rest of an inner iteration in
+NumPy vector calls, the patch restriction and a `(n_c × n_c)` matmul.  The
+opt-in native path (`MatrixFreeThermalOperator(native=True)` or
+`solve_thermal_conduction(native=True, native_threads=...)`,
+`PCB_NATIVE_THERMAL=1` for the process, after
+`python -m thermal.matrix_free_mpir_fem.native.build`) moves the float32 inner
+work into one pybind11 extension:
+
+- the node-owned gather of the hexahedral Q1 action in the CUDA kernel's
+  ordering, written per node line with the two x-neighbour elements and the
+  eight local columns unrolled so the x-loop vectorises;
+- the whole inner PCG with the same two-level preconditioner (Jacobi
+  scaling, patch restriction, the dense float32 coarse inverse applied as a
+  row-partitioned matvec, prolongation) in one SPMD OpenMP region; each
+  thread owns a static range of node lines, reductions are per-thread
+  partials summed in thread order, FTZ/DAZ is set per thread.
+
+The preconditioner construction (27 FP64 applications and the dense coarse
+inverse) and the FP64 outer residual stay in NumPy.  The solver dispatches
+through the optional `native_inner_pcg` hook; the CUDA runtime keeps its path.
+
+Measured on an Intel Xeon Platinum 8581C (16 cores / 32 threads, AVX-512),
+GCC 14.2.1, NumPy 2.3.5, `OPENBLAS_NUM_THREADS=1`, the 4-slab fixture of the
+CUDA table above, default `MPIRConfig(max_outer_iterations=16)`, default
+two-level preconditioner; solve medians of three runs, operator construction
+excluded (`experiments/thermal_native_benchmark.py`,
+`THERMAL_NATIVE_XEON_8581C_RESULTS.json`):
+
+| Nodes | Coarse size | NumPy solve | Construction | C++ 1 thread | 2 | 4 | 8 | 16 | Inner NumPy / C++ |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 13,005 | 845 | 812 ms | 187 ms | 222 ms (3.66×) | 124 ms | 81 ms | 54 ms | 45 ms (17.9×) | 584 / 585 |
+| 51,005 | 1,445 | 2,807 ms | 585 ms | 933 ms (3.01×) | 505 ms | 304 ms | 191 ms | 142 ms (19.8×) | 807 / 794 |
+| 202,005 | 1,805 | 14,849 ms | 1,606 ms | 3,158 ms (4.70×) | 1,736 ms | 1,095 ms | 717 ms | 524 ms (28.3×) | 1,025 / 1,020 |
+
+The operator alone is 9.8× to 15.3× faster than the corner products on one
+thread and 54× to 85× on sixteen.  Converged solutions differ from the NumPy
+path by at most 1.6e-12 (relative), and the heat balance closes to the same
+FP64 level.  The inner iteration counts differ by a few because the float32
+rounding of the coarse matvec differs.  On sixteen threads the largest case
+runs 6.0× faster than on one; the 13,005-node case flattens at eight threads
+because its per-iteration barriers (six per PCG step) cost as much as the
+vector work.  The preconditioner construction, still NumPy, is now the larger
+part of a cold solve at every size and is the next candidate for the native
+path.
+
+Decision recorded in the JSON: the benchmark criteria (every case at least 2×
+on one thread, identical convergence outcome, converged solutions within 1e-6)
+are met.  The default stays the array path and one thread.
+
 ## Electrothermal coupling
 
 `solve_pcb_dc` now reports `element_joule_loss_w` (the exact element
@@ -205,11 +257,14 @@ board with a via field.
 | `conduction.py` | mesh, boundary and source dataclasses, matrix-free hex Q1 operator, heat budget |
 | `two_level.py` | Jacobi + aggregation coarse correction on a layered node grid |
 | `cuda.py` | fused node-owned gather kernel for the float32 action |
+| `native_hex.py`, `native/` | opt-in C++ action and two-level inner PCG (built in place) |
 | `coupling.py` | Joule loss of a `PCBConductionSolution` as thermal load |
 
-The MPIR solver gained one optional hook: a system may define
+The MPIR solver gained optional hooks: a system may define
 `precondition_low(vector)`, which replaces Jacobi scaling in the inner PCG and
-GMRES. Systems without it behave exactly as before.
+GMRES, and `native_inner_pcg(rhs, config)`, which runs the whole inner PCG
+natively and returns `None` to decline. Systems without them behave exactly as
+before.
 
 ## Limitations and next increments
 
