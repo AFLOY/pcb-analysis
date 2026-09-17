@@ -281,6 +281,54 @@ not by issue rate. The 4,369-unknown case reaches 122 ms on six threads
 (14.2×). The default remains one thread; a caller who wants the parallel
 cycle sets `PCB_NATIVE_THREADS` to the physical core count.
 
+### Threaded inner GMRES on the Xeon Platinum 8581C
+
+The SPMD cycle was re-measured on the first environment, Intel Xeon Platinum
+8581C (16 physical cores, 32 hyper-threads, AVX-512, one socket), GCC 14.2.1,
+NumPy 2.3.5, Python 3.12.9, `OPENBLAS_NUM_THREADS=1`, runs sequential,
+`PCB_NATIVE_THREADS` swept
+(`MAXWELL_NATIVE_XEON_8581C_SPMD_T{1,2,4,8,16,32}_RESULTS.json`; T1 and T16
+use five repeats, the others three). Solve medians, NumPy ratio in brackets:
+
+| Threads | 4,369 | 16,705 | 66,049 | Operator C++ 16,705 | Operator C++ 66,049 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 234 ms (5.46×) | 719 ms (4.24×) | 4,926 ms (4.33×) | 0.0686 ms | 0.258 ms |
+| 2 | 147 ms (8.86×) | 409 ms (7.43×) | 2,520 ms (8.92×) | 0.0374 ms | 0.125 ms |
+| 4 | 114 ms (11.59×) | 242 ms (12.55×) | 1,450 ms (15.21×) | 0.0224 ms | 0.0685 ms |
+| 8 | 104 ms (12.68×) | 176 ms (17.48×) | 852 ms (25.74×) | 0.0160 ms | 0.0388 ms |
+| 16 | 132 ms (9.91×) | 180 ms (16.99×) | 659 ms (33.31×) | 0.0160 ms | 0.0258 ms |
+| 32 | 130 ms (10.02×) | 220 ms (13.88×) | 745 ms (28.74×) | 0.0172 ms | 0.0310 ms |
+
+Inner iteration counts are 3,299 / 2,900 / 4,792 at every thread count, as on
+the Core i7-8700. The one-thread times match the earlier Xeon build (316 /
+976 / 6,397 ms were measured on a busier machine; the portable path also ran
+faster in this session, so the ratios are the comparable figures). Scaling
+continues to eight threads on all three sizes and to sixteen only on the
+largest case, where the 66,049-unknown cycle reaches 7.5× over one thread;
+the 4,369-unknown case is best at eight threads and loses ground beyond
+because its per-column barriers cost as much as the vector work. The
+hyper-threads (32) are slower than sixteen cores everywhere. Reached
+residuals differ between thread counts at the double-rounding level (the
+4,369-unknown case reaches 9.1e-12 on sixteen threads against 4.2e-12 on the
+others) while the converged solutions agree with the portable path within
+1.6e-8.
+
+Float-accumulated dot products on the same host
+(`MAXWELL_NATIVE_XEON_8581C_FLOAT_DOTS_T{1,16}_RESULTS.json`):
+
+| Unknowns | float64 1 thread | float32 1 thread | float64 16 threads | float32 16 threads | Inner iterations float64 / float32 (1 thread) |
+|---:|---:|---:|---:|---:|---:|
+| 4,369 | 234 ms | 185 ms | 132 ms | 124 ms | 3,299 / 3,299 |
+| 16,705 | 719 ms | 725 ms | 180 ms | 161 ms | 2,900 / 3,300 |
+| 66,049 | 4,926 ms | 4,372 ms | 659 ms | 589 ms | 4,792 / 4,792 |
+
+On this AVX-512 host the float32 accumulation gains 11 to 21 percent on one
+thread where the iteration count is unchanged, and 6 to 11 percent on sixteen
+threads; the 16,705-unknown one-thread case took one more outer step and
+ended level. The criteria hold for both settings (minimum ratio 4.23× on one
+thread, 10.51× on sixteen; converged solutions within 1.7e-8). The default
+stays `float64` and one thread, as recorded above.
+
 ### CGS2 orthogonalisation (measured, not adopted)
 
 The restart-32 MGS cycle streams each basis vector twice per column (dot
