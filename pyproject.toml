@@ -56,8 +56,8 @@ include = ["electrical*", "thermal*", "emc*", "multiphysics*"]
 
 [tool.setuptools.package-data]
 electrical = ["py.typed", "matrix_free_mpir_fem/native/*.cpp"]
-thermal = ["py.typed"]
-emc = ["py.typed"]
+thermal = ["py.typed", "matrix_free_mpir_fem/native/*.cpp"]
+emc = ["py.typed", "tiled_dipole_superposition/native/*.cpp"]
 multiphysics = ["py.typed"]
 
 [tool.pytest.ini_options]
