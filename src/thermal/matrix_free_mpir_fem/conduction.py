@@ -34,6 +34,7 @@ from electrical.matrix_free_mpir_fem.solver import (
 )
 
 from .two_level import AggregationCoarseCorrection
+from .native_hex import NativeThermalHexQ1, native_requested
 
 
 COPPER_THERMAL_CONDUCTIVITY_W_PER_M_K = 385.0
@@ -349,6 +350,8 @@ class MatrixFreeThermalOperator:
         device_id: int = 0,
         preconditioner: Preconditioner = "two-level",
         coarse_block_nodes: int | None = None,
+        native: bool | None = None,
+        native_threads: int | None = None,
     ) -> None:
         if runtime is not None and backend is not None:
             raise ValueError("pass either runtime or backend, not both")
@@ -435,8 +438,11 @@ class MatrixFreeThermalOperator:
         self._diagonal_low = self.runtime.from_host(diagonal)
 
         self._cuda_apply = None
+        self._native: NativeThermalHexQ1 | None = None
         self.low_operator_backend = "array-corner-products"
         if getattr(self.runtime, "is_cuda", False):
+            if native:
+                raise ValueError("native=True requires the CPU runtime")
             from .cuda import CudaThermalHexQ1Apply
 
             self._cuda_apply = CudaThermalHexQ1Apply(
@@ -467,6 +473,25 @@ class MatrixFreeThermalOperator:
                 runtime=self.runtime,
                 block=coarse_block_nodes,
             )
+        if self._cuda_apply is None and (native or (native is None and native_requested())):
+            # Opt-in fused C++ host path: operator plus the whole inner PCG
+            # with the same preconditioner.  ``native=True`` demands it and
+            # ``PCB_NATIVE_THERMAL=1`` selects it for every CPU operator.
+            coarse = self.coarse_correction
+            self._native = NativeThermalHexQ1(
+                mesh.element_grid_shape,
+                self._in_plane_high,
+                self._through_high,
+                self._local_in_plane_high,
+                self._local_through_high,
+                self._robin_total_high,
+                self.free_nodes,
+                diagonal,
+                coarse_block=None if coarse is None else coarse.block,
+                coarse_inverse=None if coarse is None else coarse._coarse_inverse_high,
+                threads=native_threads,
+            )
+            self.low_operator_backend = self._native.kernel_name
 
     # ------------------------------------------------------------------ views
     @staticmethod
@@ -567,7 +592,22 @@ class MatrixFreeThermalOperator:
             self.free_nodes,
         )
 
+    def native_inner_pcg(
+        self, rhs_high: np.ndarray, config: MPIRConfig
+    ) -> tuple[np.ndarray, int, float, int] | None:
+        """Whole inner PCG in C++; ``None`` when the native path is off."""
+
+        if self._native is None:
+            return None
+        return self._native.inner_pcg(
+            rhs_high,
+            inner_relative_tolerance=config.inner_relative_tolerance,
+            max_inner_iterations=config.max_inner_iterations,
+        )
+
     def apply_low(self, vector: Any) -> Any:
+        if self._native is not None:
+            return self._native.apply(vector)
         if self._cuda_apply is not None:
             return self._cuda_apply(
                 vector,
@@ -752,6 +792,8 @@ def solve_thermal_conduction(
     preconditioner: Preconditioner = "two-level",
     coarse_block_nodes: int | None = None,
     reference_temperature_k: float | None = None,
+    native: bool | None = None,
+    native_threads: int | None = None,
 ) -> ThermalConductionSolution:
     """Solve steady heat conduction in a layered PCB with matrix-free MPIR.
 
@@ -770,6 +812,8 @@ def solve_thermal_conduction(
         device_id=device_id,
         preconditioner=preconditioner,
         coarse_block_nodes=coarse_block_nodes,
+        native=native,
+        native_threads=native_threads,
     )
     reference = (
         operator.default_reference_temperature()
