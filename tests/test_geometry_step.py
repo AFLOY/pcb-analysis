@@ -454,8 +454,9 @@ def test_graded_raster_conserves_copper_area_and_builds_a_graded_thermal_mesh(mo
     assert thermal.mesh.element_grid_shape[1:] == grid.shape
     np.testing.assert_array_equal(thermal.mesh.pitch_x_m, grid.pitch_x_m)
     np.testing.assert_array_equal(thermal.mesh.pitch_y_m, grid.pitch_y_m)
-    with pytest.raises(ValueError, match="uniform"):
-        plane_opt_problem_mapping(graded, terminals=())
+    mapping = plane_opt_problem_mapping(graded, terminals=())
+    assert mapping["schema"].endswith("/v2") and "pitch_mm" not in mapping["grid"]
+    assert len(mapping["grid"]["x_edges_mm"]) == grid.shape[1] + 1
     # y-down storage reverses the row heights with the rows.
     flipped = rasterize_board(resolved, body_map.board, grid=grid, method="section", y_down=True)
     np.testing.assert_array_equal(flipped.pitch_y_m, grid.pitch_y_m[::-1])
