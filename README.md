@@ -498,7 +498,10 @@ above also produces `_voxelize_native`, the C++ point classification that
 makes sampling a board about 80× faster than the per-point OpenCASCADE
 classifier on one thread (`docs/GEOMETRY_CLASSIFY_RESULTS.json`). The body map that
 names which solid is the board, copper, via or body is the caller's, see
-[docs/GEOMETRY_STEP_VOXELIZE.md](docs/GEOMETRY_STEP_VOXELIZE.md). `geometry`
+[docs/GEOMETRY_STEP_VOXELIZE.md](docs/GEOMETRY_STEP_VOXELIZE.md). For a
+KiCad board, `geometry.step_voxelize.kicad` runs the `kicad-cli` export with
+copper and builds that map from the stackup by z window, since KiCad gives
+the solids no usable names. `geometry`
 is a new top-level package; nothing in the existing packages moved.
 
 ## Documentation

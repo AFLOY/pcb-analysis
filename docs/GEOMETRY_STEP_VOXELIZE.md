@@ -48,8 +48,8 @@ classification is accepted only as a hint that the caller confirms in the
 map, because EDA exporters do not agree on colours.
 
 Copper is the weak point of mechanical STEP. Most exporters emit the board
-outline and component bodies only; KiCad 8 can include tracks, pads, vias and
-zones as solids when asked. The front end therefore accepts copper from three
+outline and component bodies only; KiCad 8 and later include tracks, pads,
+vias and zones as solids when asked (see "KiCad exports"). The front end therefore accepts copper from three
 places, in this precedence: the `plane-opt-current-field-problem/v1` mapping,
 an occupancy array given directly, or copper solids in the STEP. Mixing is
 allowed per layer. Without any copper, only the thermal path runs, with the
@@ -95,6 +95,69 @@ g++ (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)); the adopted run is `GEOMETRY_CLAS
 
 Decision: adopted (`native` is the default when built); the `occ` path stays
 as the exact reference for curved solids and for tests.
+
+## KiCad exports
+
+`kicad-cli pcb export step --include-tracks --include-pads --include-zones
+--include-inner-copper --no-extra-pad-thickness` (KiCad 8 and later) writes
+copper as solids, but names every solid after its assembly node
+(`board 1/=>[0:1:1:3]`), so a body map by name cannot sort them. In a KiCad
+export z is unambiguous instead: the board body spans the laminate from the
+top of the bottom copper (`z = 0`) to the bottom of the top copper, each
+copper layer is its own sheet (`B.Cu` at `[-t, 0]`, inner layers at the
+dielectric boundaries, `F.Cu` on top), and a via or through-hole barrel runs
+from inside the lowest layer to inside the highest. `geometry.step_voxelize.kicad`
+therefore
+
+- runs the export (`export_kicad_step`), reads the `(stackup ...)` section of
+  the `.kicad_pcb` (`read_kicad_stackup`, `layers_from_kicad_stackup`) and
+  builds a body map whose selectors are z windows: the body must *span* the
+  laminate (`z_span_mm`), copper must lie *within* its layer's window
+  (`z_range_mm`), a barrel must span from the lowest to the highest layer
+  centre; every selector is available on the ordinary `BodyMap` entries too;
+- maps a KiCad y-down grid onto the STEP frame, where KiCad negates y
+  (`kicad_grid_origin_mm`, `rasterize_board(..., shape=, y_down=True)`). The
+  origin is `(min_x, -(min_y + rows·pitch))`: a board height that is not a
+  multiple of the pitch would otherwise shift every row by the remainder.
+
+Through-hole pads come out physically: an annulus on each outer layer, a
+plating barrel through the hole, and the hole itself open. Pads with the
+extra thickness KiCad adds by default would sit in a different z window, hence
+the `--no-extra-pad-thickness` flag.
+
+### Acceptance 5 against plane_opt
+
+`experiments/kicad_step_acceptance.py` exports the three boards of the
+`plane_opt_refactor` checkout (`power_module` and `bldc_driver`, two layers;
+`drone`, four layers), rasterises each layer onto plane_opt's own grid at
+0.25 mm and compares with plane_opt's `CopperGrid` built from the
+`.kicad_pcb` with every net in one role. plane_opt samples the cell centre
+against the primitives with an inclusive edge rule and paints drill holes as
+copper, so the cells are split three ways: interior (no differing
+4-neighbour in either mask), drill hole (within a drill radius plus half a
+cell diagonal), boundary (the rest). The adopted run is
+`KICAD_STEP_RESULTS.json`:
+
+| Board | Layers | Solids / triangles | Grid | Export / load / raster (s) | Layer | Interior step-only | Interior plane_opt-only (% of copper) | Hole cells step / plane_opt only | Boundary disagreement |
+|---|---|---|---|---|---|---|---|---|---|
+| `power_module` | 2 | 82 / 36656 | 139×139 @ 0.25 mm | 0.5 / 1.1 / 0.2 | B.Cu | 0 | 0 (0.00) | 0 / 108 | 45 / 799 |
+| | | | | | F.Cu | 0 | 0 (0.00) | 0 / 108 | 5 / 2233 |
+| `bldc_driver` | 2 | 171 / 49340 | 268×189 @ 0.25 mm | 0.8 / 0.8 / 1.1 | B.Cu | 0 | 0 (0.00) | 0 / 287 | 330 / 2013 |
+| | | | | | F.Cu | 0 | 0 (0.00) | 0 / 287 | 53 / 4777 |
+| `drone` | 4 | 6198 / 3936108 | 441×389 @ 0.25 mm | 21.1 / 42.0 / 165.5 | B.Cu | 0 | 0 (0.00) | 0 / 2728 | 45 / 25577 |
+| | | | | | In2.Cu | 0 | 0 (0.00) | 2197 / 1622 | 90 / 13174 |
+| | | | | | In1.Cu | 0 | 0 (0.00) | 1746 / 1921 | 49 / 16191 |
+| | | | | | F.Cu | 0 | 184 (0.25) | 0 / 2750 | 1243 / 40229 |
+Measured with KiCad 10.0.5, OCP 8.0.1.0.0, 6 threads for the winding-number kernel, one sample per cell (the three-sample raster of `drone`, 6.2 million points, is skipped above `--max-points`; on the two small boards it changes no interior cell). Decision: adopted; the largest interior plane_opt-only share is 0.25 % and the largest boundary disagreement 16 % of boundary cells.
+
+
+Interior cells agree exactly on every layer of every board. Drill-hole
+disagreements are all plane_opt copper over an open hole in the export.
+Boundary disagreements are largest where a 0.25 mm track runs exactly along
+a cell edge: plane_opt's `distance <= radius` rule paints both rows, the
+sampler one, and neither is wrong at that resolution. `tests/test_kicad_step.py`
+checks the same on `power_module` and is skipped where `kicad-cli`, `OCP` or
+the checkout is missing.
 
 ## Board path (2.5D)
 
@@ -198,6 +261,7 @@ requested.
 |---|---|
 | `geometry/step_voxelize/reader.py` | STEP load through `STEPCAFControl`, assembly flattening into named solids, point-in-solid tests, synthetic boxes and cylinders, `write_step` (the only module importing `OCP`) |
 | `geometry/step_voxelize/bodymap.py` | `BodyMap` (board stackup, copper, vias, bodies, ignore) and its exhaustive resolution against the model |
+| `geometry/step_voxelize/kicad.py` | `kicad-cli` STEP export, stackup reading, z-window body map, y-down grid origin |
 | `geometry/step_voxelize/mesh.py` | `TriangleMesh`, NumPy winding number, path selection |
 | `geometry/step_voxelize/native/point_in_mesh.cpp` | C++ winding number over points (OpenMP), module `_voxelize_native` |
 | `geometry/step_voxelize/section.py` | per-layer sampling of the board outline and copper onto the routing grid (`BoardRaster`) |
@@ -253,7 +317,7 @@ for the current path and the candidate, with the numbers written to
 | active-element mask, `VoxelThermalMesh`, exposed-face convection, per-face ambient (acceptance 2, 3) | `feature/thermal-voxel-mesh` | done; `tests/test_thermal_voxel.py`, array, C++ and CUDA paths |
 | `ContactMap`, `nodal_heat_w`, `BoardEnclosureThermalScenario` (acceptance 4) | `feature/board-enclosure-coupling` | done; `tests/test_board_enclosure_coupling.py`, numbers in `MULTIPHYSICS_SCENARIOS.md` and `BOARD_ENCLOSURE_ACCEPTANCE_RESULTS.json` |
 | `geometry.step_voxelize`, `cad` extra, packaging and CI (acceptance 1, 5 on a synthetic STEP) | `feature/geometry-step-voxelize` | done; `tests/test_geometry_step.py` |
-| acceptance 5 on a KiCad export with copper enabled | — | not started; needs a real export as fixture |
+| acceptance 5 on KiCad exports with copper (`power_module`, `bldc_driver`, `drone`) | `feature/kicad-step-acceptance` | done; `tests/test_kicad_step.py`, `KICAD_STEP_RESULTS.json` |
 | electro-thermal `σ(T)` loop around the interface iteration | — | not started |
 | tessellation and C++ winding-number classification | `feature/geometry-native-classify` | done; `tests/test_native_geometry.py`, `GEOMETRY_CLASSIFY_RESULTS.json` |
 
