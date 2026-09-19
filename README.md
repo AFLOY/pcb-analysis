@@ -9,7 +9,7 @@ analysis, radiated-emission evaluation for EMC, and PDN optimization.
 
 The repository holds two solver families under the `electrical` package, one
 under the `thermal` package, one evaluation front end under `emc`, and the
-coupled scenarios that chain them under `multiphysics`. `electrical.dice_peec` provides exact incremental
+coupled scenarios that chain them under `multiphysics`. `electrical.sheet_peec` solves the 2.5D sheet PEEC, `electrical.voxel_peec` the 3D voxel PEEC through PyPEEC, and `electrical.dice_peec` provides exact incremental
 delta-scoring for local PCB reroutes, a 2.5D multilayer interaction operator, a
 thin-sheet PEEC field solver, and an adaptive runtime controller for
 topology-optimization loops. `electrical.matrix_free_mpir_fem` provides a
@@ -91,6 +91,17 @@ After 0.7.0 `cadquery-ocp` and `pypeec` became base dependencies and the
 `cuda` extra carries CuPy only. `pip install 'pcb-analysis[cuda]'` still
 installs everything it did; `[cad]` is an empty alias.
 
+Also after 0.7.0 the electrical package was split by method: the sheet PEEC
+(`sheet_peec`, `sheet_operator`, `sheet_inductance`, `sheet_results`,
+`sheet_cuda`, `skin_filaments`, `skin_screen`, `plane_opt_contract`) moved to
+`electrical.sheet_peec`; the PyPEEC wrapper (`cuda_pypeec`, `pypeec_memory`)
+and the voxel contract (`voxel_peec` → `contract`) moved to
+`electrical.voxel_peec`; `electrical.dice_peec` keeps the delta scorer,
+`layout_ops`, `controller`, `backends`, `Stackup` and the CLI. The old paths
+are not re-exported; update imports as
+`from electrical.sheet_peec import solve_sheet_case` and
+`from electrical.voxel_peec import CudaPyPeecExecutor`.
+
 ### From a checkout, CPU only
 
 ```bash
@@ -105,7 +116,7 @@ pip install -e '.[cuda]'
 
 > **Note**: Requires an NVIDIA driver and CUDA 13.x. Verify with `nvidia-smi`.
 > The package is installed as `electrical`; the former top-level
-> `peec_fastopt` package now lives at `electrical.dice_peec`, and the thermal
+> `peec_fastopt` package now lives under `electrical` (split into `sheet_peec`, `dice_peec` and `voxel_peec`), and the thermal
 > and EMC front ends and the coupled scenarios are the separate top-level
 > packages `thermal`, `emc`, and `multiphysics`. Re-run the editable install
 > after pulling these changes so the new packages are importable and the old
@@ -386,7 +397,9 @@ set; `run_scenarios` runs a list. See
 ```text
 src/
   electrical/                         Analysis target
-    dice_peec/                         PEEC + DICE/2.5D FFT acceleration
+    sheet_peec/                        2.5D sheet PEEC, skin filaments, plane-opt contract
+    dice_peec/                         DICE delta scoring, layout ops, runtime controller
+    voxel_peec/                        3D voxel PEEC through PyPEEC, CUDA executor, memory model
     matrix_free_mpir_fem/              FEM + matrix-free/MPIR acceleration
   thermal/                            Analysis target
     matrix_free_mpir_fem/              Heat-conduction FEM + matrix-free/MPIR acceleration

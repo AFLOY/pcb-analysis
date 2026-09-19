@@ -152,7 +152,7 @@ def dipoles_from_sheet_peec(mesh, solution) -> CurrentDipoles:
     """Branch currents of a sheet-PEEC solve as current elements.
 
     ``mesh`` is a ``SheetMesh`` and ``solution`` a ``SheetSolution`` from
-    ``electrical.dice_peec.sheet_peec``.  An in-plane branch is one pitch
+    ``electrical.sheet_peec.sheet_peec``.  An in-plane branch is one pitch
     long between cell centres; its element sits midway, on the layer's
     ``z_m``.  A via branch spans the two layers' heights.  Branch currents
     are positive from the leaving node to the entering node, which is ``+x``,

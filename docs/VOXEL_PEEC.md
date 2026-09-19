@@ -2,7 +2,7 @@
 
 ## Scope
 
-`electrical.dice_peec.voxel_peec` solves conductors that are too thick for a
+`electrical.voxel_peec` solves conductors that are too thick for a
 2.5D sheet (busbars, terminal blocks, heavy copper that `skin_report` marks
 `3d`) with PyPEEC's voxel PEEC. The module owns the mapping from arrays to
 PyPEEC's `geometry`, `problem` and `tolerance` and back; PyPEEC owns the
@@ -67,8 +67,8 @@ does not offer; the coarse solve remains a lower bound on the loss.
 
 | Module | Responsibility |
 |---|---|
-| `electrical/dice_peec/voxel_peec.py` | `VoxelConductorProblem`, `VoxelTerminal`, PyPEEC mappings, `solve_voxel_peec`, `VoxelPeecSolution` |
-| `electrical/dice_peec/cuda_pypeec.py` | CUDA executor the `cuda` backend uses (unchanged) |
+| `electrical/voxel_peec/contract.py` | `VoxelConductorProblem`, `VoxelTerminal`, PyPEEC mappings, `solve_voxel_peec`, `VoxelPeecSolution` |
+| `electrical/voxel_peec/cuda_pypeec.py`, `pypeec_memory.py` | CUDA executor the `cuda` backend uses and the memory prediction |
 | `geometry/step_voxelize/conductors.py` | solids to problem, terminal regions, loss to thermal load |
 
 Import direction unchanged: `geometry` imports `electrical` and `thermal`;

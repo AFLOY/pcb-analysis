@@ -16,8 +16,13 @@
 
 ## 安定した責務境界
 
-- `src/electrical/dice_peec/`: PEEC。delta scoring、2.5D多層、sheet PEEC、CUDA backend、
-  runtime controller、`plane_opt`向け契約。
+- `src/electrical/sheet_peec/`: 2.5D sheet PEEC。sheet mesh・演算子・CUDA solve、板厚方向の
+  skin filamentsと厚さ判定、`plane_opt`向け契約(`plane_opt_contract`)。
+- `src/electrical/dice_peec/`: DICEのdelta scoring(2.5D多層proxy)、router向け`layout_ops`、
+  runtime controllerとbackend、`Stackup`、CLI。電流や電位は解かない。
+- `src/electrical/voxel_peec/`: PyPEECの3D voxel PEEC。配列契約(`contract`)、CUDA実行方針と
+  計測(`cuda_pypeec`)、memory予測(`pypeec_memory`)。PyPEECが組立てとsolveを所有する。
+  計測型2つを`dice_peec.controller`からimportする以外に`electrical`内の依存は持たない。
 - `src/electrical/matrix_free_mpir_fem/`: MPIR solverとNumPy/CuPy runtime、Q1 DC伝導、
   2D周波数領域Maxwell、fused CUDA kernel。solverとruntimeはここが唯一の所有者である。
 - `src/thermal/matrix_free_mpir_fem/`: 定常熱伝導の離散化、二段preconditioner、CUDA

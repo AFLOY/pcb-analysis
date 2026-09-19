@@ -6,7 +6,7 @@ Source code is grouped first by analysis target and then by numerical method
 plus acceleration strategy:
 
 ```text
-src/electrical/dice_peec/
+src/electrical/{sheet_peec,dice_peec,voxel_peec}/
 src/electrical/matrix_free_mpir_fem/
 src/thermal/matrix_free_mpir_fem/
 src/emc/tiled_dipole_superposition/

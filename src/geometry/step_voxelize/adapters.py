@@ -9,7 +9,7 @@ import numpy as np
 
 from electrical.dice_peec import Stackup, ViaSet
 from electrical.dice_peec import ViaSpec as PeecViaSpec
-from electrical.dice_peec.plane_opt_contract import PLANE_OPT_PROBLEM_SCHEMA
+from electrical.sheet_peec.plane_opt_contract import PLANE_OPT_PROBLEM_SCHEMA
 from thermal.matrix_free_mpir_fem import HeatSource, LayeredThermalMesh, VoxelSolidModel, VoxelThermalMesh
 
 from .bodymap import BodySpec, ResolvedBodies

@@ -181,7 +181,7 @@ def run_sheet_peec_emission(
     result's moments reports what that omission is worth.
     """
 
-    from electrical.dice_peec.sheet_peec import solve_sheet_case
+    from electrical.sheet_peec.sheet_peec import solve_sheet_case
 
     solutions = []
     dipoles = []

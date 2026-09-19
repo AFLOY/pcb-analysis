@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from electrical.dice_peec.sheet_operator import SheetInductanceOperator, SheetLayer, SheetStackup
-from electrical.dice_peec.sheet_peec import SheetMesh, Terminal, ViaBranch
+from electrical.sheet_peec.sheet_operator import SheetInductanceOperator, SheetLayer, SheetStackup
+from electrical.sheet_peec.sheet_peec import SheetMesh, Terminal, ViaBranch
 from electrical.matrix_free_mpir_fem import (
     CurrentTerminal,
     LayeredPCBMesh,

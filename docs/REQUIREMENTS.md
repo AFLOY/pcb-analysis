@@ -176,7 +176,7 @@ DC では誘導が落ち、残るのは純粋な抵抗網である。**独立に
 ソルバは、与えられた解像度で何割の精度が期待できるかを**呼び出し前に**報告できな
 ければならない。利用者が後から原因不明の不足として発見する状態は要求違反とする。
 
-`electrical.dice_peec.skin_filaments.discretisation_note()` がこれを担う。
+`electrical.sheet_peec.skin_filaments.discretisation_note()` がこれを担う。
 
 ---
 
@@ -204,7 +204,7 @@ voxel の箱に導体は 29,006 しかない。
 | 3次元 voxel、dz=35µm、nz=114 | 1.65 GiB |
 | 2.5次元 sheet、フィラメント 11 本 | 122.7 MiB |
 
-`electrical.dice_peec.pypeec_memory.estimate_pypeec_memory()` が 3次元経路の事前判定を
+`electrical.voxel_peec.pypeec_memory.estimate_pypeec_memory()` が 3次元経路の事前判定を
 担う。計上できない量（cuFFT の workspace）は明示した係数として分離すること。無言
 で丸め込んではならない。
 
@@ -306,7 +306,7 @@ L^{\mathrm p}_{ij}
 \]
 
 である。FR-4 と銅を非磁性とする本モデルでは \(\mu=\mu_0\) である。実装は
-`src/electrical/dice_peec/sheet_inductance.py` の `closed_form_mutual_inductance()` と
+`src/electrical/sheet_peec/sheet_inductance.py` の `closed_form_mutual_inductance()` と
 `self_partial_inductance()` に対応する。この定義は Ruehli の PEEC 導出に基づく。[^ruehli]
 
 通常のループインダクタンスは、往路と復路を一組にしなければ定義できない。一方、部分インダクタンスは各導体片が作るベクトルポテンシャルへの寄与を、復路を仮定せずに保持する。枝の向きを表すループベクトルを \(\boldsymbol c\) とすれば、閉ループのインダクタンスは後から

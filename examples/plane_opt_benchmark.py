@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 
-from electrical.dice_peec._bench_utils import (
+from electrical.dice_peec.benchmark import (
     _select_candidate,
     ranking_consistent,
     relative_difference,

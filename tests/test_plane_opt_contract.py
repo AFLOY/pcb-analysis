@@ -4,14 +4,14 @@ import math
 
 import pytest
 
-from electrical.dice_peec.plane_opt_contract import (
+from electrical.sheet_peec.plane_opt_contract import (
     PLANE_OPT_PROBLEM_SCHEMA,
     PLANE_OPT_RESULT_SCHEMA,
     PlaneOptProblem,
     build_plane_opt_sheet_inputs,
     solve_plane_opt_problem,
 )
-from electrical.dice_peec.sheet_cuda import CudaSheetTelemetry
+from electrical.sheet_peec.sheet_cuda import CudaSheetTelemetry
 
 
 def _problem(*, frequency_hz: float = 0.0) -> dict:

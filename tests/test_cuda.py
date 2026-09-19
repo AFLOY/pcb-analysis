@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from electrical.dice_peec.cuda_delta import CudaDeltaQuadraticScorer
-from electrical.dice_peec.cuda_pypeec import (
+from electrical.voxel_peec.cuda_pypeec import (
     CudaPeecConfig,
     CudaPeecMemoryError,
     CudaPeecSolveError,
@@ -15,7 +15,7 @@ from electrical.dice_peec.cuda_pypeec import (
     voxel_cache_bytes,
 )
 from electrical.dice_peec.delta_peec import SparseDelta
-from dice_bench_utils import (  # tests-only helpers, next to this file
+from electrical.dice_peec.benchmark import (
     _select_candidate,
     ranking_consistent,
     relative_difference,

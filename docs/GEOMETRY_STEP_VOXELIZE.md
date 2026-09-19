@@ -104,7 +104,7 @@ guard it:
 
 A layer or body that `skin_report` classifies as `3d` leaves the stackup and
 goes to the voxel PEEC: `conductor_problem_from_solids` voxelises its solids,
-marks the terminal voxels from solids or boxes, and `electrical.dice_peec.solve_voxel_peec`
+marks the terminal voxels from solids or boxes, and `electrical.voxel_peec.solve_voxel_peec`
 solves it with PyPEEC (CPU or CUDA); `conductor_heat_w` returns the Joule
 loss on the same voxel grid for the thermal solve. The contract, the
 acceptance on a busbar and the pitch-versus-skin-depth caveat are in
@@ -236,7 +236,7 @@ faces, and rasterises them onto the routing grid:
 - Terminals are named cells: either from the plane-opt mapping or from
   component pins the body map names.
 
-Outputs are exactly the objects `electrical.dice_peec` and
+Outputs are exactly the objects `electrical.dice_peec`, `electrical.sheet_peec` and
 `thermal.matrix_free_mpir_fem` consume today: `Stackup`, occupancy `x0` of
 shape `(n_layers, ny, nx)`, `ViaSet`, and a `LayeredThermalMesh` whose slab
 conductivities are the copper/laminate blend by fill fraction. The electrical

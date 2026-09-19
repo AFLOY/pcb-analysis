@@ -5,7 +5,7 @@ thickness into graded filaments (:mod:`.skin_filaments`).  Below one skin
 depth the current is uniform and a single filament is enough; up to
 ``sheet_limit_ratio`` skin depths the filaments resolve the profile; beyond
 that, or above ``sheet_limit_mm`` outright, the conductor is a 3D body and
-belongs to the voxel PEEC (:mod:`.voxel_peec`).  The classification is
+belongs to the voxel PEEC (:mod:`electrical.voxel_peec`).  The classification is
 physics, so it lives here; the geometry front end only supplies thicknesses.
 """
 

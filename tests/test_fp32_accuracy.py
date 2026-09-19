@@ -10,7 +10,7 @@ from experiments.fp32_accuracy import (
     fp64_residuals,
     terminal_impedance,
 )
-from electrical.dice_peec.sheet_peec import solve_sheet_case
+from electrical.sheet_peec.sheet_peec import solve_sheet_case
 
 
 def test_distributed_terminal_impedance_uses_every_pad_cell() -> None:

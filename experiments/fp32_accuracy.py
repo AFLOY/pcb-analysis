@@ -47,7 +47,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from electrical.dice_peec.sheet_inductance import (
+from electrical.sheet_peec.sheet_inductance import (
     _AXIS_SIGNS,
     _MU0_OVER_4PI,
     NEAR_RADIUS_CELLS,
@@ -56,8 +56,8 @@ from electrical.dice_peec.sheet_inductance import (
     closed_form_precision,
     far_field_mutual_inductance,
 )
-from electrical.dice_peec.sheet_operator import SheetInductanceOperator, SheetLayer, SheetStackup
-from electrical.dice_peec.sheet_peec import (
+from electrical.sheet_peec.sheet_operator import SheetInductanceOperator, SheetLayer, SheetStackup
+from electrical.sheet_peec.sheet_peec import (
     SheetMesh,
     SheetSolution,
     Terminal,
@@ -70,7 +70,7 @@ from electrical.dice_peec.sheet_peec import (
     solve_sheet_case,
     via_resistance,
 )
-from electrical.dice_peec.sheet_results import sheet_fields
+from electrical.sheet_peec.sheet_results import sheet_fields
 
 
 # --------------------------------------------------------------------------

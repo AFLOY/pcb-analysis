@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from electrical.dice_peec.plane_opt_contract import PlaneOptProblem
+from electrical.sheet_peec.plane_opt_contract import PlaneOptProblem
 from geometry.step_voxelize import (
     BoardRaster,
     BoardSpec,
@@ -325,7 +325,7 @@ def test_measured_thickness_and_skin_screening(model) -> None:
 
 def test_thick_conductor_goes_to_the_3d_voxel_peec() -> None:
     pypeec = pytest.importorskip("pypeec")
-    from electrical.dice_peec import solve_voxel_peec
+    from electrical.voxel_peec import solve_voxel_peec
     from geometry.step_voxelize import TerminalRegion, conductor_heat_w, conductor_problem_from_solids
     from thermal.matrix_free_mpir_fem import ExposedFaceConvection, ThermalConductionProblem, solve_thermal_conduction
 

@@ -3,7 +3,7 @@ import unittest
 
 import numpy as np
 
-from electrical.dice_peec.skin_filaments import (
+from electrical.sheet_peec.skin_filaments import (
     FilamentStack,
     filament_links,
     graded_filaments,

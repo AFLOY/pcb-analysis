@@ -1,7 +1,7 @@
 """Acceptance of the 3D voxel PEEC path for thick conductors.
 
 A copper busbar (20 x 4 x 2 mm) solved with PyPEEC through
-electrical.dice_peec.solve_voxel_peec: DC resistance against the analytic
+electrical.voxel_peec.solve_voxel_peec: DC resistance against the analytic
 value at several voxel pitches, AC resistance rising with frequency as the
 skin depth shrinks below the bar, and the CUDA executor against the CPU
 solve.  Writes a JSON with ``environment`` and ``decision``; the adopted copy
@@ -26,8 +26,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from electrical.dice_peec import VoxelConductorProblem, VoxelTerminal, solve_voxel_peec  # noqa: E402
-from electrical.dice_peec.skin_filaments import skin_depth_m  # noqa: E402
+from electrical.voxel_peec import VoxelConductorProblem, VoxelTerminal, solve_voxel_peec  # noqa: E402
+from electrical.sheet_peec.skin_filaments import skin_depth_m  # noqa: E402
 
 RHO = 1.68e-8
 LENGTH, WIDTH, THICK = 20.0e-3, 4.0e-3, 2.0e-3

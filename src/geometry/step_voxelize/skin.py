@@ -1,6 +1,6 @@
 """Skin-effect screening of a board raster's layers.
 
-The classification itself is :func:`electrical.dice_peec.skin_screen.classify_layer_thickness`;
+The classification itself is :func:`electrical.sheet_peec.skin_screen.classify_layer_thickness`;
 this module only feeds it the layers' thicknesses (stackup or measured) and
 collects the report the plane-opt mapping warns from.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 
-from electrical.dice_peec.skin_screen import LayerSkin, SkinClass, classify_layer_thickness
+from electrical.sheet_peec.skin_screen import LayerSkin, SkinClass, classify_layer_thickness
 
 from .section import BoardRaster
 

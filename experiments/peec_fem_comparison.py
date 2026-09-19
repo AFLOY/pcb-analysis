@@ -25,7 +25,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from electrical.dice_peec import (
+from electrical.sheet_peec import (
     SheetInductanceOperator,
     SheetLayer,
     SheetMesh,
@@ -34,7 +34,7 @@ from electrical.dice_peec import (
     solve_sheet_case,
     solve_sheet_case_cuda,
 )
-from electrical.dice_peec.skin_filaments import (
+from electrical.sheet_peec.skin_filaments import (
     FilamentStack,
     filament_links,
     graded_filaments,

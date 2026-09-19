@@ -1,6 +1,6 @@
 """CUDA execution for the layered sheet-PEEC system.
 
-The physical discretisation is shared with :mod:`electrical.dice_peec.sheet_peec`.
+The physical discretisation is shared with :mod:`electrical.sheet_peec.sheet_peec`.
 Only the prepared convolution spectra, sparse incidence products, Krylov
 vectors, and preconditioner solves move to CuPy.  There is deliberately no CPU
 fallback in this module: a requested CUDA solve either reports a CUDA backend

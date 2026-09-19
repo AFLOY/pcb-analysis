@@ -2,13 +2,13 @@ import unittest
 
 import numpy as np
 
-from electrical.dice_peec.sheet_operator import (
+from electrical.sheet_peec.sheet_operator import (
     SheetInductanceOperator,
     SheetLayer,
     SheetStackup,
 )
-from electrical.dice_peec.sheet_peec import SheetMesh, Terminal, ViaBranch, solve_sheet_case
-from electrical.dice_peec.sheet_results import (
+from electrical.sheet_peec.sheet_peec import SheetMesh, Terminal, ViaBranch, solve_sheet_case
+from electrical.sheet_peec.sheet_results import (
     cell_current_density,
     sheet_fields,
     vertical_currents,

@@ -7,13 +7,13 @@ import pytest
 
 pypeec = pytest.importorskip("pypeec")
 
-from electrical.dice_peec import (  # noqa: E402
+from electrical.voxel_peec import (  # noqa: E402
     VoxelConductorProblem,
     VoxelTerminal,
     build_pypeec_inputs,
     solve_voxel_peec,
 )
-from electrical.dice_peec.skin_filaments import skin_depth_m  # noqa: E402
+from electrical.sheet_peec.skin_filaments import skin_depth_m  # noqa: E402
 
 RHO = 1.68e-8
 PITCH = 0.5e-3

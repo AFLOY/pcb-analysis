@@ -17,7 +17,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
-from .controller import ExecutionReport, HardwareTelemetry
+from ..dice_peec.controller import ExecutionReport, HardwareTelemetry
 from .pypeec_memory import (
     DEFAULT_UNMEASURED_FRACTION,
     MemoryEstimate,

@@ -1,4 +1,4 @@
-"""DICE-PEEC benchmark helpers shared by the CUDA tests (not part of the package)."""
+"""Benchmark helpers for the DICE-PEEC delta scorer, shared by the examples and the CUDA tests."""
 
 from __future__ import annotations
 

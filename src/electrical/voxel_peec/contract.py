@@ -4,9 +4,9 @@ A busbar, a terminal block or heavy copper carries current through its
 thickness, and above a few skin depths a sheet cannot represent it.  Such a
 conductor is voxelised (by ``geometry.step_voxelize`` from CAD, or directly
 as arrays) and solved with PyPEEC's voxel PEEC, which this module wraps in
-the same way :mod:`.plane_opt_contract` wraps the sheet solve: the caller
+the same way :mod:`electrical.sheet_peec.plane_opt_contract` wraps the sheet solve: the caller
 gives arrays, this module owns the PyPEEC geometry/problem/tolerance
-mappings, runs the solve on the CPU or through :class:`.CudaPyPeecExecutor`,
+mappings, runs the solve on the CPU or through :class:`.cuda_pypeec.CudaPyPeecExecutor`,
 and returns arrays.  PyPEEC keeps ownership of the assembly and the solve.
 
 Voxel arrays follow the thermal convention ``(nz, ny, nx)`` with ``x`` the
@@ -21,7 +21,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from .skin_filaments import COPPER_RESISTIVITY_OHM_M
+from ..sheet_peec.skin_filaments import COPPER_RESISTIVITY_OHM_M
 
 _SOLVER_LOCK = threading.Lock()
 

@@ -3,7 +3,7 @@
 A layer that ``skin_report`` classifies as ``3d``, a busbar or a terminal
 block is not a sheet.  Its solids are voxelised on their own grid, the port
 regions are named by solids (or boxes) of the same model, and the result is
-a ``VoxelConductorProblem`` for ``electrical.dice_peec.solve_voxel_peec``.
+a ``VoxelConductorProblem`` for ``electrical.voxel_peec.solve_voxel_peec``.
 The Joule loss of that solve maps back onto a ``VoxelThermalMesh`` of the
 same grid as ``element_heat_w``.
 """
@@ -16,8 +16,8 @@ from typing import Sequence
 
 import numpy as np
 
-from electrical.dice_peec import VoxelConductorProblem, VoxelPeecSolution, VoxelTerminal
-from electrical.dice_peec.skin_filaments import skin_depth_m
+from electrical.voxel_peec import VoxelConductorProblem, VoxelPeecSolution, VoxelTerminal
+from electrical.sheet_peec.skin_filaments import skin_depth_m
 from thermal.matrix_free_mpir_fem import VoxelMaterial, VoxelSolidModel
 
 from .reader import StepSolid
