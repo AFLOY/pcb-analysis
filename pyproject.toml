@@ -61,7 +61,7 @@ where = ["src"]
 include = ["electrical*", "thermal*", "emc*", "multiphysics*", "geometry*"]
 
 [tool.setuptools.package-data]
-electrical = ["py.typed", "matrix_free_mpir_fem/native/*.cpp"]
+electrical = ["py.typed", "matrix_free_mpir_fem/native/*.cpp", "sheet_peec/native/*.cpp"]
 thermal = ["py.typed", "matrix_free_mpir_fem/native/*.cpp"]
 emc = ["py.typed", "tiled_dipole_superposition/native/*.cpp"]
 multiphysics = ["py.typed"]

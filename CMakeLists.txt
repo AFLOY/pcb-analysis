@@ -68,3 +68,5 @@ pcb_native_module(_dipole_native emc/tiled_dipole_superposition
   src/emc/tiled_dipole_superposition/native/dipole_fields.cpp)
 pcb_native_module(_voxelize_native geometry/cad_import
   src/geometry/cad_import/native/point_in_mesh.cpp)
+pcb_native_module(_sheet_pfft_native electrical/sheet_peec
+  src/electrical/sheet_peec/native/pfft_near.cpp)

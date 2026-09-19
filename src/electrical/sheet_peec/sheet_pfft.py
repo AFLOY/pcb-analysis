@@ -29,6 +29,7 @@ branches (vias, filament links) get the same treatment on their level pairs.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -40,6 +41,22 @@ from electrical.matrix_free_mpir_fem.grid import TensorGrid
 from .sheet_inductance import _MU0_OVER_4PI, closed_form_mutual_inductance_arrays
 from .sheet_operator import SheetStackup
 from .sheet_peec import SheetMesh
+
+try:  # pragma: no cover - depends on the local build
+    from . import _sheet_pfft_native as _native
+except ImportError:  # pragma: no cover
+    _native = None
+
+
+def native_available() -> bool:
+    """True when the C++ near-field kernel is built (``python -m electrical.sheet_peec.native.build``)."""
+
+    return _native is not None
+
+
+def native_threads() -> int:
+    value = os.environ.get("PCB_NATIVE_THREADS")
+    return max(1, int(value)) if value else 0
 
 
 def lagrange_stencil(coordinate: np.ndarray, origin: float, pitch: float, count: int, order: int) -> tuple[np.ndarray, np.ndarray]:
@@ -149,6 +166,7 @@ class PfftSheetInductanceOperator:
         grid_pitch_m: float | None = None,
         order: int = 3,
         near_radius_cells: int = 3,
+        native: bool | None = None,
     ) -> None:
         if order < 1 or order > 5:
             raise ValueError("order must lie in [1, 5]")
@@ -161,6 +179,10 @@ class PfftSheetInductanceOperator:
         self.stackup: SheetStackup = mesh.stackup
         self.order = int(order)
         self.near_radius_cells = int(near_radius_cells)
+        # The C++ near-field kernel when built, unless native=False; native=True demands it.
+        if native and _native is None:
+            raise ImportError("the sheet pFFT native extension is not built; run python -m electrical.sheet_peec.native.build")
+        self.use_native = bool(_native is not None and native is not False)
         # The projection grid defaults to twice the finest cell: fine enough that
         # a bar's Gauss samples resolve its extent, coarse enough that the FFT
         # stays small; the near radius is measured in its cells.
@@ -258,6 +280,14 @@ class PfftSheetInductanceOperator:
         table = self.grid.kernel_table(separation)
         rows, cols = self.grid.padded
         p = projection.tocsr()
+        if _native is not None and self.use_native:
+            return np.asarray(
+                _native.grid_pair_coupling(
+                    p.indptr.astype(np.int32), p.indices.astype(np.int32), p.data.astype(np.float64),
+                    int(self.grid.nodes_x), np.ascontiguousarray(table), np.ascontiguousarray(i, dtype=np.int64),
+                    np.ascontiguousarray(j, dtype=np.int64), native_threads(),
+                )
+            )
         out = np.zeros(i.size)
         width = int(np.max(np.diff(p.indptr))) if p.indptr.size > 1 else 0
         chunk = max(1, int(4.0e6 // max(1, width * width)))
@@ -274,11 +304,24 @@ class PfftSheetInductanceOperator:
 
     @staticmethod
     def _unique_rows(columns: Sequence[np.ndarray], quantum: float) -> tuple[np.ndarray, np.ndarray]:
-        """Indices of one representative per distinct quantised row, and each row's representative."""
+        """Indices of one representative per distinct quantised row, and each row's representative.
 
-        keys = np.stack([np.round(np.asarray(c, dtype=np.float64) / quantum).astype(np.int64) for c in columns], axis=1)
-        _unique, first, inverse = np.unique(keys, axis=0, return_index=True, return_inverse=True)
-        return first, inverse.reshape(-1)
+        A lexicographic sort of the quantised integer columns; ``np.unique``
+        over rows goes through a structured view and is several times slower.
+        """
+
+        keys = [np.round(np.asarray(c, dtype=np.float64) / quantum).astype(np.int64) for c in columns]
+        order = np.lexsort(keys[::-1])
+        sorted_keys = [k[order] for k in keys]
+        change = np.zeros(order.size, dtype=bool)
+        change[0] = True
+        for k in sorted_keys:
+            change[1:] |= k[1:] != k[:-1]
+        group = np.cumsum(change) - 1
+        first = order[change]
+        inverse = np.empty(order.size, dtype=np.int64)
+        inverse[order] = group
+        return first, inverse
 
     def _pair_structure(self, cx: np.ndarray, cy: np.ndarray, half_x: np.ndarray, half_y: np.ndarray) -> dict[str, np.ndarray]:
         """Near pairs of one branch family and the representatives of their repeated configurations."""
@@ -516,4 +559,4 @@ class PfftSheetInductanceOperator:
         return matrix
 
 
-__all__ = ["PfftSheetInductanceOperator", "ProjectionGrid", "lagrange_stencil"]
+__all__ = ["PfftSheetInductanceOperator", "ProjectionGrid", "lagrange_stencil", "native_available"]

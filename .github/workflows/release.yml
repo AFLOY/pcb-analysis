@@ -71,6 +71,7 @@ jobs:
           import zipfile, glob
           names = zipfile.ZipFile(glob.glob('$GITHUB_WORKSPACE/dist/*.whl')[0]).namelist()
           assert any(n.endswith('point_in_mesh.cpp') for n in names)
+          assert any(n.endswith('pfft_near.cpp') for n in names)
           assert not any(n.endswith('.so') for n in names)
           "
           wheel-env/bin/pcb-analysis-calibrate --help > /dev/null
