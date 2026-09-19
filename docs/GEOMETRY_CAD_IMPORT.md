@@ -223,6 +223,11 @@ the uniform path bitwise). `BoardRaster.grid` holds the lines; `pitch_x_m` /
 `y_down`), `pitch_mm` is `None` on a graded grid, and `board_thermal_mesh`
 hands the per-cell pitches to the thermal mesh.
 
+`plane_opt_problem_mapping` writes schema `v2` (grid lines in `x_edges_mm` /
+`y_edges_mm`, top-down with `y_down`) for a graded raster and `v1` for a
+uniform one; the sheet PEEC solves the former with its pFFT operator
+(`SHEET_PEEC.md`).
+
 `geometry.cad_import.refinement` makes the grid from the parts:
 `component_boxes(kicad_component_solids(model), min_size_m=)` is the in-plane
 box of every component's solids, `board_refined_grid(board, coarse_pitch_mm=,
@@ -463,7 +468,7 @@ for the current path and the candidate, with the numbers written to
 | thick conductors to the 3D voxel PEEC (PyPEEC) with Joule loss to the voxel thermal mesh | `feature/voxel-peec-3d` | done; `tests/test_voxel_peec.py`, `VOXEL_PEEC_RESULTS.json` |
 | electro-thermal `σ(T)` loop around the interface iteration | `feature/enclosure-electrothermal-radiation` | done; `tests/test_electro_thermal_enclosure.py`, `ELECTROTHERMAL_ENCLOSURE_RESULTS.json` |
 | graded tensor grids in the rasteriser, component-driven refinement | `feature/tensor-grid-geometry` | done; `tests/test_geometry_step.py`, `tests/test_kicad_step.py`, `KICAD_REFINEMENT_RESULTS.json` |
-| sheet PEEC on graded grids (pFFT) and the plane-opt grid contract | — | not started; `plane_opt_problem_mapping` refuses graded rasters |
+| sheet PEEC on graded grids (pFFT) and the plane-opt grid contract v2 | `feature/sheet-peec-pfft` | done; `tests/test_sheet_pfft.py`, `SHEET_PFFT_RESULTS.json`; `plane_opt_problem_mapping` emits v2 grid lines for graded rasters |
 | tessellation and C++ winding-number classification | `feature/geometry-native-classify` | done; `tests/test_native_geometry.py`, `GEOMETRY_CLASSIFY_RESULTS.json` |
 
 Measured on the synthetic fixture of `tests/test_geometry_step.py` (a 20 × 12 ×

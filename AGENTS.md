@@ -16,8 +16,9 @@
 
 ## 安定した責務境界
 
-- `src/electrical/sheet_peec/`: 2.5D sheet PEEC。sheet mesh・演算子・CUDA solve、板厚方向の
-  skin filamentsと厚さ判定、`plane_opt`向け契約(`plane_opt_contract`)。
+- `src/electrical/sheet_peec/`: 2.5D sheet PEEC。sheet mesh(等間隔・tensor格子)、畳み込み演算子と
+  pFFT演算子(`sheet_pfft`)、CUDA solve、板厚方向のskin filamentsと厚さ判定、`plane_opt`向け
+  契約(`plane_opt_contract`、v1は`pitch_mm`、v2は格子線)。
 - `src/electrical/dice_peec/`: DICEのdelta scoring(2.5D多層proxy)、router向け`layout_ops`、
   runtime controllerとbackend、`Stackup`、CLI。電流や電位は解かない。
 - `src/electrical/voxel_peec/`: PyPEECの3D voxel PEEC。配列契約(`contract`)、CUDA実行方針と

@@ -271,6 +271,81 @@ statement about resolution, not about the formulation. Whether 23% is
 acceptable is a question for whoever reads the gate; it is not a question this
 module can settle.
 
+## Graded grids: precorrected FFT
+
+The convolution operator above needs one pitch: the coupling of two branches
+then depends on their offset alone.  A graded tensor grid
+(`electrical.matrix_free_mpir_fem.grid`, fine under the parts and along
+narrow traces, coarse elsewhere) has branches of different lengths and widths
+at irregular positions, and no convolution exists.  `sheet_pfft` keeps the
+transform with the precorrected FFT:
+
+1. each branch's current-length product `I_b l_b` is projected onto a
+   uniform grid of the coarse pitch through a tensor-product Lagrange
+   stencil of `order + 1` points per axis (moments matched to that order);
+2. the grid sources are convolved by FFT with `mu0 / (4 pi r)` between grid
+   points, one table per layer separation;
+3. the vector potential is interpolated back to the branch centres with the
+   same stencil and scaled by `l_b`;
+4. for pairs within `near_radius_cells` grid cells the grid contribution is
+   subtracted and the exact Hoer–Love partial inductance of the two bars
+   (per-pair dimensions, `closed_form_mutual_inductance_arrays`) is added, as
+   one sparse precorrection built once.  The self terms are therefore exact
+   and the preconditioner reads them per branch.
+
+Vertical branches (barrels and filament links) get the same treatment on
+their level pairs.  `SheetMesh` takes the grid (`grid=`, `pitch_m=None`),
+gives every branch its bar (`branch_geometry`), scales resistances by
+`length / width` and current densities by the cell's transverse extent; the
+plane-opt contract gained schema `v2` whose `grid` carries `x_edges_mm` and
+`y_edges_mm` instead of `pitch_mm` (`build_plane_opt_sheet_inputs` picks the
+pFFT operator for a graded grid, `operator="pfft"` forces it), and the CUDA
+solve has the same operator on the device (`CudaPfftSheetInductanceOperator`).
+
+Measured (`SHEET_PFFT_RESULTS.json`, `experiments/sheet_pfft_acceptance.py`,
+Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz). Operator accuracy as the relative Frobenius error of the dense
+in-plane operator (x / y) against the convolution operator on a uniform
+8 × 10 mesh at 0.2 mm and against the closed form for every pair on a graded
+0.1–0.5 mm mesh; the diagonals agree to `1e-12` in every case:
+
+| Order | Near radius (cells) | Uniform x / y | Graded x / y | Build, graded (ms) |
+|---|---|---|---|---|
+| 1 | 2 | 2.5e-03 / 2.4e-03 | 3.0e-03 / 3.8e-03 | 380 |
+| 2 | 3 | 1.4e-04 / 2.0e-04 | 3.7e-04 / 5.2e-04 | 933 |
+| 3 | 3 | 1.2e-04 / 1.4e-04 | 3.3e-04 / 4.5e-04 | 1491 |
+| 3 | 4 | 3.0e-10 / 2.8e-10 | 6.7e-05 / 1.3e-04 | 2089 |
+| 3 | 5 | 3.0e-10 / 2.8e-10 | 2.7e-05 / 5.0e-05 | 2519 |
+| 4 | 5 | 3.0e-10 / 2.8e-10 | 5.7e-06 / 1.2e-05 | 4200 |
+
+The default is order 3, radius 4. A 12 × 1 mm strip line at 1e+06 Hz
+(F.Cu go, B.Cu return, 35 µm copper cut into filaments), loss relative to the
+uniform 0.1 mm convolution solve:
+
+| Grid | Operator | Branches | Kernel (MB) | Build (ms) | Apply (ms) | Solve (ms) | GMRES | Loss rel. diff |
+|---|---|---|---|---|---|---|---|---|
+| uniform 0.1 mm | SheetInductanceOperator | 4550 | 0.27 | 76 | 0.5 | 1224 | 221 | +0.00e+00 |
+| uniform 0.5 mm | SheetInductanceOperator | 142 | 0.01 | 51 | 0.2 | 64 | 69 | -1.15e-01 |
+| uniform 0.1 mm, pFFT | PfftSheetInductanceOperator | 4550 | 15.00 | 1646 | 2.3 | 2127 | 227 | -2.10e-04 |
+| graded 0.1 mm at the ends, 0.5 mm between | PfftSheetInductanceOperator | 1928 | 4.17 | 1581 | 1.2 | 989 | 216 | -2.54e-04 |
+
+`power_module` from KiCad (fused copper, y-down raster, terminals at the two
+ends of the largest B.Cu copper piece, barrels off the copper dropped),
+through `solve_plane_opt_problem`:
+
+| Grid | f (Hz) | Schema | Operator | Cells | Branches | Kernel (MB) | Wall (s) | J max (A/mm²) | J p99 (A/mm²) |
+|---|---|---|---|---|---|---|---|---|---|
+| uniform 0.25 mm (v1) | 0e+00 | v1 | SheetInductanceOperator | 19321 | 23230 | 4.4 | 0.3 | 77.270 | 12.482 |
+| uniform 0.25 mm (v1) | 1e+06 | v1 | SheetInductanceOperator | 19321 | 23230 | 4.4 | 82.0 | 75.704 | 15.175 |
+| graded 0.1 mm under components (v2) | 0e+00 | v2 | PfftSheetInductanceOperator | 32200 | 51545 | 659.3 | 209.4 | 45.047 | 12.992 |
+| graded 0.1 mm under components (v2) | 1e+06 | v2 | PfftSheetInductanceOperator | 32200 | 51545 | 659.3 | 629.4 | 44.247 | 19.577 |
+
+Decision: adopted. The pFFT build is dominated by the near
+precorrection (one closed form per near pair); its application is one
+coarse-grid FFT pair per layer pair and axis plus two sparse products, so the
+cost of the AC solve follows the branch count of the graded grid, not the
+fine pitch.  The uniform convolution operator stays the choice for uniform
+grids: it is exact to its 24-cell seam and cheaper to build.
+
 ## What is not done
 
 - The barrel's partial self inductance is taken as a given scalar. Nothing
