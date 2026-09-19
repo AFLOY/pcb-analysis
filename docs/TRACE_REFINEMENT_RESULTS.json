@@ -1,0 +1,86 @@
+{
+  "generated_at": "2026-09-19T20:57:32+00:00",
+  "environment": {
+    "platform": "Linux-6.12.0-211.54.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "cpu": "Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz",
+    "cpu_count": 12,
+    "kicad_cli": "10.0.5",
+    "PCB_NATIVE_THREADS": "6"
+  },
+  "board": "power_module",
+  "frequency_hz": 1000000.0,
+  "thresholds": [
+    {
+      "width_threshold_mm": 0.3,
+      "trace_boxes": 32,
+      "cells": 58692,
+      "rows": 219,
+      "cols": 268,
+      "detect_ms": 276.76338399760425
+    },
+    {
+      "width_threshold_mm": 0.2,
+      "trace_boxes": 12,
+      "cells": 35400,
+      "rows": 177,
+      "cols": 200,
+      "detect_ms": 65.25198300369084
+    },
+    {
+      "width_threshold_mm": 0.16,
+      "trace_boxes": 12,
+      "cells": 35400,
+      "rows": 177,
+      "cols": 200,
+      "detect_ms": 64.15484799072146
+    }
+  ],
+  "runs": [
+    {
+      "grid": "uniform 0.1 mm (v1)",
+      "schema": "plane-opt-current-field-problem/v1",
+      "operator": "SheetInductanceOperator",
+      "cells": 120409,
+      "branches": 149133,
+      "wall_ms": 17964.462952921167,
+      "max_current_density_a_per_mm2": 40.56506407230833,
+      "bulk_p99_current_density_a_per_mm2": 13.983134170606032
+    },
+    {
+      "grid": "uniform 0.25 mm (v1)",
+      "schema": "plane-opt-current-field-problem/v1",
+      "operator": "SheetInductanceOperator",
+      "cells": 19321,
+      "branches": 23230,
+      "wall_ms": 3457.58437900804,
+      "max_current_density_a_per_mm2": 75.70412834956363,
+      "bulk_p99_current_density_a_per_mm2": 15.174657818269754
+    },
+    {
+      "grid": "components 0.1 mm, margin 1 mm (v2)",
+      "schema": "plane-opt-current-field-problem/v2",
+      "operator": "PfftSheetInductanceOperator",
+      "cells": 32200,
+      "branches": 51545,
+      "wall_ms": 46882.51077802852,
+      "max_current_density_a_per_mm2": 44.24667774933047,
+      "bulk_p99_current_density_a_per_mm2": 19.576598969441147
+    },
+    {
+      "grid": "traces < 0.3 mm + components 0.1 mm, margin 0.2 mm (v2)",
+      "schema": "plane-opt-current-field-problem/v2",
+      "operator": "PfftSheetInductanceOperator",
+      "cells": 58692,
+      "branches": 95074,
+      "wall_ms": 85615.04095501732,
+      "max_current_density_a_per_mm2": 41.35256937563491,
+      "bulk_p99_current_density_a_per_mm2": 15.7869299180739
+    }
+  ],
+  "decision": {
+    "trace_aware_refinement": "not adopted",
+    "criteria": "under half the branches of the uniform 0.1 mm grid and a shorter 1 MHz solve; a tensor grid refines whole row and column strips, so scattered narrow traces refine the board"
+  }
+}

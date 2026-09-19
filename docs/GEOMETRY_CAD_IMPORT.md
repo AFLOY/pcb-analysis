@@ -267,6 +267,29 @@ the uniform coarse grid shares; a smaller coarse pitch or refinement boxes
 along the hot traces are the knobs. The two-level preconditioner needs 1.3 to
 2× more inner iterations on the graded grids than on the fine uniform one.
 
+#### Refinement along narrow traces: measured, not adopted
+
+A tensor grid refines whole row and column strips, so refinement boxes around
+every narrow trace refine most of a trace-dense board. Measured on
+`power_module` at 1 MHz (one filament per layer, near-field preconditioner;
+`TRACE_REFINEMENT_RESULTS.json`, `experiments/trace_refinement_probe.py` on
+the branch `exp/trace-aware-refinement`, tag
+`work/trace-aware-refinement-not-adopted`, Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz):
+
+| Grid | Cells | Branches | 1 MHz wall (s) | J max (A/mm²) | J p99 (A/mm²) |
+|---|---|---|---|---|---|
+| uniform 0.1 mm (v1) | 120409 | 149133 | 18.0 | 40.57 | 13.98 |
+| uniform 0.25 mm (v1) | 19321 | 23230 | 3.5 | 75.70 | 15.17 |
+| components 0.1 mm, margin 1 mm (v2) | 32200 | 51545 | 46.9 | 44.25 | 19.58 |
+| traces < 0.3 mm + components 0.1 mm, margin 0.2 mm (v2) | 58692 | 95074 | 85.6 | 41.35 | 15.79 |
+
+Decision: not adopted. With the near-field preconditioner the uniform 0.1 mm
+grid solves the whole board in 18 s, and every graded variant is slower once
+the pFFT build and its larger branch count are paid; the component-driven
+grading (above) stays available for boards where the fine copper is a small
+part of the area. The detector (disc-and-square openings of the copper
+section at 0.05 mm) lives on the experiment branch.
+
 ### Acceptance 5 against plane_opt
 
 `experiments/kicad_step_acceptance.py` exports the three boards of the
@@ -469,6 +492,7 @@ for the current path and the candidate, with the numbers written to
 | electro-thermal `σ(T)` loop around the interface iteration | `feature/enclosure-electrothermal-radiation` | done; `tests/test_electro_thermal_enclosure.py`, `ELECTROTHERMAL_ENCLOSURE_RESULTS.json` |
 | graded tensor grids in the rasteriser, component-driven refinement | `feature/tensor-grid-geometry` | done; `tests/test_geometry_step.py`, `tests/test_kicad_step.py`, `KICAD_REFINEMENT_RESULTS.json` |
 | sheet PEEC on graded grids (pFFT) and the plane-opt grid contract v2 | `feature/sheet-peec-pfft` | done; `tests/test_sheet_pfft.py`, `SHEET_PFFT_RESULTS.json`; `plane_opt_problem_mapping` emits v2 grid lines for graded rasters |
+| refinement boxes along narrow traces | `exp/trace-aware-refinement` | measured, not adopted; `TRACE_REFINEMENT_RESULTS.json` |
 | tessellation and C++ winding-number classification | `feature/geometry-native-classify` | done; `tests/test_native_geometry.py`, `GEOMETRY_CLASSIFY_RESULTS.json` |
 
 Measured on the synthetic fixture of `tests/test_geometry_step.py` (a 20 × 12 ×

@@ -369,9 +369,13 @@ diagonal one) and 46 s on the component-driven graded grid (460 s), of which
 29 s is the pFFT operator build; the graded grid has 2.2× the branches of the
 0.25 mm grid, so the fine pitch, not the operator, sets what is left. The
 pFFT pays off where the fine cells are a small part of the board (the strip
-line: 42 % of the branches, the same loss). The uniform convolution operator
-stays the choice for uniform grids: it is exact to its 24-cell seam and
-cheaper to build.
+line: 42 % of the branches, the same loss). With the same preconditioner the
+uniform 0.1 mm grid of `power_module` (120k cells, 149k branches) solves at
+1 MHz in 18 s (`TRACE_REFINEMENT_RESULTS.json`), so on a trace-dense board
+the fine uniform grid with the convolution operator is the practical choice;
+see `GEOMETRY_CAD_IMPORT.md` for the trace-aware grading that was measured
+and not adopted. The uniform convolution operator stays the choice for
+uniform grids: it is exact to its 24-cell seam and cheaper to build.
 
 ## What is not done
 
