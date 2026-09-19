@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from geometry.step_voxelize import (
+from geometry.cad_import import (
     TriangleMesh,
     box_solid,
     cylinder_solid,
@@ -92,7 +92,7 @@ def test_raster_fill_is_the_same_on_every_classification_path() -> None:
 
 
 def test_section_segments_are_closed_loops_counter_clockwise() -> None:
-    from geometry.step_voxelize import section_segments_numpy
+    from geometry.cad_import import section_segments_numpy
 
     mesh = _tetrahedron()
     segments = section_segments_numpy(mesh.triangles_m, 0.25)
@@ -113,7 +113,7 @@ def test_section_segments_are_closed_loops_counter_clockwise() -> None:
 
 @pytest.mark.skipif(not (ocp_available() and native_classify_available()), reason="needs OCP and the native extension")
 def test_section_coverage_is_exact_and_handles_holes() -> None:
-    from geometry.step_voxelize import plane_section_coverage
+    from geometry.cad_import import plane_section_coverage
 
     pad = box_solid("pad", (1.3 * MM, 0.7 * MM, 0.0), (3.0 * MM, 2.0 * MM, 0.035 * MM))
     coverage = plane_section_coverage([pad.tessellate()], 0.0175 * MM, origin_m=(0.0, 0.0), pitch_m=0.5 * MM, shape=(8, 10))

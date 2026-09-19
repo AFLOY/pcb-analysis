@@ -1,8 +1,8 @@
-# STEP geometry front end: 2.5D board, 3D enclosure and heat sink
+# STEP geometry front end (`geometry.cad_import`): 2.5D board, 3D enclosure and heat sink
 
 ## Scope
 
-`src/geometry/step_voxelize` reads mechanical CAD (STEP, via OpenCASCADE) and
+`src/geometry/cad_import` reads mechanical CAD (STEP, via OpenCASCADE) and
 turns it into the array inputs the solvers of this repository already accept.
 It owns no field solve. Two decisions fix its shape:
 
@@ -162,7 +162,7 @@ export z is unambiguous instead: the board body spans the laminate from the
 top of the bottom copper (`z = 0`) to the bottom of the top copper, each
 copper layer is its own sheet (`B.Cu` at `[-t, 0]`, inner layers at the
 dielectric boundaries, `F.Cu` on top), and a via or through-hole barrel runs
-from inside the lowest layer to inside the highest. `geometry.step_voxelize.kicad`
+from inside the lowest layer to inside the highest. `geometry.cad_import.kicad`
 therefore
 
 - runs the export (`export_kicad_step`), reads the `(stackup ...)` section of
@@ -317,17 +317,17 @@ requested.
 
 | Module | Responsibility |
 |---|---|
-| `geometry/step_voxelize/reader.py` | STEP load through `STEPCAFControl`, assembly flattening into named solids, point-in-solid tests, synthetic boxes and cylinders, `write_step` (the only module importing `OCP`) |
-| `geometry/step_voxelize/bodymap.py` | `BodyMap` (board stackup, copper, vias, bodies, ignore) and its exhaustive resolution against the model |
-| `geometry/step_voxelize/kicad.py` | `kicad-cli` STEP export, stackup reading, z-window body map, y-down grid origin |
-| `geometry/step_voxelize/mesh.py` | `TriangleMesh`, NumPy winding number, path selection |
-| `geometry/step_voxelize/skin.py` | thickness over skin depth per layer, `uniform` / `filaments` / `3d` |
-| `geometry/step_voxelize/native/point_in_mesh.cpp` | C++ winding number over points (OpenMP) and the exact plane-section coverage rasteriser, module `_voxelize_native` |
-| `geometry/step_voxelize/section.py` | per-layer sampling of the board outline and copper onto the routing grid (`BoardRaster`) |
-| `geometry/step_voxelize/voxelize.py` | 3D sampling of bodies onto a voxel grid, fill fraction, material precedence (`VoxelSolidModel`) |
-| `geometry/step_voxelize/contact.py` | board/voxel contact placement (origins, contact spec) feeding `thermal.matrix_free_mpir_fem.planar_contact_map` |
-| `geometry/step_voxelize/conductors.py` | thick conductor solids to `VoxelConductorProblem`, terminal regions, Joule loss to the thermal grid |
-| `geometry/step_voxelize/adapters.py` | build `Stackup`, occupancy, `ViaSet`, the board's `LayeredThermalMesh`, body meshes and heat sources, plane-opt mapping |
+| `geometry/cad_import/reader.py` | STEP load through `STEPCAFControl`, assembly flattening into named solids, point-in-solid tests, synthetic boxes and cylinders, `write_step` (the only module importing `OCP`) |
+| `geometry/cad_import/bodymap.py` | `BodyMap` (board stackup, copper, vias, bodies, ignore) and its exhaustive resolution against the model |
+| `geometry/cad_import/kicad.py` | `kicad-cli` STEP export, stackup reading, z-window body map, y-down grid origin |
+| `geometry/cad_import/mesh.py` | `TriangleMesh`, NumPy winding number, path selection |
+| `geometry/cad_import/skin.py` | thickness over skin depth per layer, `uniform` / `filaments` / `3d` |
+| `geometry/cad_import/native/point_in_mesh.cpp` | C++ winding number over points (OpenMP) and the exact plane-section coverage rasteriser, module `_voxelize_native` |
+| `geometry/cad_import/section.py` | per-layer sampling of the board outline and copper onto the routing grid (`BoardRaster`) |
+| `geometry/cad_import/voxelize.py` | 3D sampling of bodies onto a voxel grid, fill fraction, material precedence (`VoxelSolidModel`) |
+| `geometry/cad_import/contact.py` | board/voxel contact placement (origins, contact spec) feeding `thermal.matrix_free_mpir_fem.planar_contact_map` |
+| `geometry/cad_import/conductors.py` | thick conductor solids to `VoxelConductorProblem`, terminal regions, Joule loss to the thermal grid |
+| `geometry/cad_import/adapters.py` | build `Stackup`, occupancy, `ViaSet`, the board's `LayeredThermalMesh`, body meshes and heat sources, plane-opt mapping |
 | `thermal/matrix_free_mpir_fem/voxel.py`, `mesh.py`, `boundaries.py` | `VoxelThermalMesh`, active-element mask, exposed-face convection |
 | `thermal/matrix_free_mpir_fem/contact.py` | `ContactMap`, `planar_contact_map` |
 | `multiphysics/staggered_coupling/board_enclosure.py` | interface iteration |
@@ -376,7 +376,7 @@ for the current path and the candidate, with the numbers written to
 | this document and the pointers in the thermal and multiphysics documents | `docs/step-geometry-3d-thermal` | done |
 | active-element mask, `VoxelThermalMesh`, exposed-face convection, per-face ambient (acceptance 2, 3) | `feature/thermal-voxel-mesh` | done; `tests/test_thermal_voxel.py`, array, C++ and CUDA paths |
 | `ContactMap`, `nodal_heat_w`, `BoardEnclosureThermalScenario` (acceptance 4) | `feature/board-enclosure-coupling` | done; `tests/test_board_enclosure_coupling.py`, numbers in `MULTIPHYSICS_SCENARIOS.md` and `BOARD_ENCLOSURE_ACCEPTANCE_RESULTS.json` |
-| `geometry.step_voxelize`, `cad` extra, packaging and CI (acceptance 1, 5 on a synthetic STEP) | `feature/geometry-step-voxelize` | done; `tests/test_geometry_step.py` |
+| `geometry.cad_import`, `cad` extra, packaging and CI (acceptance 1, 5 on a synthetic STEP) | `feature/geometry-step-voxelize` | done; `tests/test_geometry_step.py` |
 | acceptance 5 on KiCad exports with copper (`power_module`, `bldc_driver`, `drone`) | `feature/kicad-step-acceptance` | done; `tests/test_kicad_step.py`, `KICAD_STEP_RESULTS.json` |
 | thick conductors to the 3D voxel PEEC (PyPEEC) with Joule loss to the voxel thermal mesh | `feature/voxel-peec-3d` | done; `tests/test_voxel_peec.py`, `VOXEL_PEEC_RESULTS.json` |
 | electro-thermal `σ(T)` loop around the interface iteration | — | not started |

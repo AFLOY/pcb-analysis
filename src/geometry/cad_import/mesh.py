@@ -106,7 +106,7 @@ class TriangleMesh:
             if _native is None:
                 raise ImportError(
                     "the geometry native extension is not built; run cmake or "
-                    "python -m geometry.step_voxelize.native.build"
+                    "python -m geometry.cad_import.native.build"
                 )
             return np.asarray(_native.winding_numbers(points, self.triangles_m, threads or native_threads()))
         if chosen == "numpy":
@@ -122,7 +122,7 @@ class TriangleMesh:
             if _native is None:
                 raise ImportError(
                     "the geometry native extension is not built; run cmake or "
-                    "python -m geometry.step_voxelize.native.build"
+                    "python -m geometry.cad_import.native.build"
                 )
             return np.asarray(_native.contains(points, self.triangles_m, threshold, threads or native_threads()), dtype=bool)
         lo, hi = self.bounds_m
@@ -161,7 +161,7 @@ def plane_section_coverage(
     if _native is None:
         raise ImportError(
             "the section rasteriser needs the geometry native extension; run cmake or "
-            "python -m geometry.step_voxelize.native.build"
+            "python -m geometry.cad_import.native.build"
         )
     rows, cols = (int(axis) for axis in shape)
     sets = []

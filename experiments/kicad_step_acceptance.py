@@ -31,7 +31,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from geometry.step_voxelize import (  # noqa: E402
+from geometry.cad_import import (  # noqa: E402
     board_vias,
     default_plane_method,
     export_kicad_step,

@@ -1,6 +1,6 @@
 """Acceptance of the masked thermal mesh and the board/body interface coupling.
 
-Runs the acceptance items 2, 3 and 4 of ``docs/GEOMETRY_STEP_VOXELIZE.md`` on
+Runs the acceptance items 2, 3 and 4 of ``docs/GEOMETRY_CAD_IMPORT.md`` on
 synthetic arrays (no CAD needed) and records solve time, inner/outer
 iterations, residuals and solution differences for the array, C++ and CUDA
 paths.  Writes a JSON with ``environment`` and ``decision``; the adopted copy

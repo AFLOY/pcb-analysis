@@ -327,4 +327,4 @@ before.
   third level.
 - A heat sink or enclosure is solved as its own `VoxelThermalMesh`; its
   interface coupling to the board is specified in
-  `GEOMETRY_STEP_VOXELIZE.md`.
+  `GEOMETRY_CAD_IMPORT.md`.

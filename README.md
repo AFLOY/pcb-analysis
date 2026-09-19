@@ -509,7 +509,7 @@ distribution fails the build rather than a user's install.
 
 ## STEP input (optional)
 
-`geometry.step_voxelize` reads mechanical CAD through OpenCASCADE and turns
+`geometry.cad_import` reads mechanical CAD through OpenCASCADE and turns
 it into the solvers' arrays: the board becomes the 2.5D occupancy, stackup and
 layered thermal mesh on the routing grid; heat sinks, enclosures and packages
 become separately meshed voxel bodies joined to the board through contact
@@ -519,8 +519,8 @@ above also produces `_voxelize_native`, the C++ point classification that
 makes sampling a board about 80× faster than the per-point OpenCASCADE
 classifier on one thread (`docs/GEOMETRY_CLASSIFY_RESULTS.json`). The body map that
 names which solid is the board, copper, via or body is the caller's, see
-[docs/GEOMETRY_STEP_VOXELIZE.md](docs/GEOMETRY_STEP_VOXELIZE.md). For a
-KiCad board, `geometry.step_voxelize.kicad` runs the `kicad-cli` export with
+[docs/GEOMETRY_CAD_IMPORT.md](docs/GEOMETRY_CAD_IMPORT.md). For a
+KiCad board, `geometry.cad_import.kicad` runs the `kicad-cli` export with
 copper and builds that map from the stackup by z window, since KiCad gives
 the solids no usable names. `geometry`
 is a new top-level package; nothing in the existing packages moved.

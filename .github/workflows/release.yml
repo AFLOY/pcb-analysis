@@ -63,7 +63,7 @@ jobs:
           wheel-env/bin/python -c "
           import electrical.dice_peec, electrical.matrix_free_mpir_fem
           import thermal.matrix_free_mpir_fem, emc.tiled_dipole_superposition
-          import multiphysics.staggered_coupling, geometry.step_voxelize
+          import multiphysics.staggered_coupling, geometry.cad_import
           from importlib.resources import files
           for package in ('electrical', 'thermal', 'emc', 'multiphysics', 'geometry'):
               assert files(package).joinpath('py.typed').is_file(), package

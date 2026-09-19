@@ -14,7 +14,7 @@ current phasor. The output carries the current density, potential and loss
 density per voxel, the terminal currents and voltages, the Joule loss, and
 `element_heat_w()` for a `VoxelThermalMesh` on the same grid.
 
-`geometry.step_voxelize.conductors` builds the problem from CAD solids:
+`geometry.cad_import.conductors` builds the problem from CAD solids:
 `conductor_problem_from_solids` voxelises the solids (a voxel is conductor
 when at least half of it is inside), marks the terminal voxels from solids
 or boxes of the same model, and returns the matching `VoxelSolidModel`;
@@ -69,7 +69,7 @@ does not offer; the coarse solve remains a lower bound on the loss.
 |---|---|
 | `electrical/voxel_peec/contract.py` | `VoxelConductorProblem`, `VoxelTerminal`, PyPEEC mappings, `solve_voxel_peec`, `VoxelPeecSolution` |
 | `electrical/voxel_peec/cuda_pypeec.py`, `pypeec_memory.py` | CUDA executor the `cuda` backend uses and the memory prediction |
-| `geometry/step_voxelize/conductors.py` | solids to problem, terminal regions, loss to thermal load |
+| `geometry/cad_import/conductors.py` | solids to problem, terminal regions, loss to thermal load |
 
 Import direction unchanged: `geometry` imports `electrical` and `thermal`;
 `electrical` imports nothing outside itself.

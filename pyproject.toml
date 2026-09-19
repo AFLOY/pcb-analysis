@@ -65,7 +65,7 @@ electrical = ["py.typed", "matrix_free_mpir_fem/native/*.cpp"]
 thermal = ["py.typed", "matrix_free_mpir_fem/native/*.cpp"]
 emc = ["py.typed", "tiled_dipole_superposition/native/*.cpp"]
 multiphysics = ["py.typed"]
-geometry = ["py.typed", "step_voxelize/native/*.cpp"]
+geometry = ["py.typed", "cad_import/native/*.cpp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

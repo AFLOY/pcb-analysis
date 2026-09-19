@@ -27,7 +27,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from geometry.step_voxelize import (  # noqa: E402
+from geometry.cad_import import (  # noqa: E402
     box_solid,
     cylinder_solid,
     native_classify_available,

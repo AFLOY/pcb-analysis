@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from geometry.step_voxelize import (
+from geometry.cad_import import (
     board_thermal_mesh,
     board_vias,
     export_kicad_step,

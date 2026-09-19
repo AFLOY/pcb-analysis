@@ -36,7 +36,7 @@ jobs:
           import thermal.matrix_free_mpir_fem.native_hex as t
           import emc.tiled_dipole_superposition.native_dipole as e
           import electrical.matrix_free_mpir_fem.native_q1 as q
-          import geometry.step_voxelize.mesh as g
+          import geometry.cad_import.mesh as g
           assert t.native_available() and e.native_available() and q.native_available() and g.native_available()
           "
 
@@ -44,7 +44,7 @@ jobs:
         # OpenCASCADE and PyPEEC are base dependencies, so the STEP and voxel
         # PEEC tests run here; only the CUDA and KiCad tests skip.
         run: |
-          python -c "from geometry.step_voxelize import ocp_available; assert ocp_available()"
+          python -c "from geometry.cad_import import ocp_available; assert ocp_available()"
           pytest tests/ -v --tb=short -rs
 
   # An editable install on whatever setuptools the runner ships exercises
@@ -94,7 +94,7 @@ jobs:
           )
           from emc.tiled_dipole_superposition import far_field_pattern, CISPR32_CLASS_B
           from multiphysics.staggered_coupling import run_scenario, ElectroThermalScenario
-          from geometry.step_voxelize import BodyMap, rasterize_board, voxelize_bodies, ocp_available
+          from geometry.cad_import import BodyMap, rasterize_board, voxelize_bodies, ocp_available
           assert callable(calibrate.main)
           assert callable(rasterize_board) and callable(voxelize_bodies) and ocp_available()
           assert callable(MultilayerDeltaScorer)
@@ -126,4 +126,4 @@ jobs:
           python -m venv /tmp/sdist-env
           /tmp/sdist-env/bin/pip install --upgrade pip
           /tmp/sdist-env/bin/pip install dist/*.tar.gz
-          cd /tmp && /tmp/sdist-env/bin/python -c "import electrical.dice_peec, electrical.matrix_free_mpir_fem, thermal.matrix_free_mpir_fem, emc.tiled_dipole_superposition, multiphysics.staggered_coupling, geometry.step_voxelize"
+          cd /tmp && /tmp/sdist-env/bin/python -c "import electrical.dice_peec, electrical.matrix_free_mpir_fem, thermal.matrix_free_mpir_fem, emc.tiled_dipole_superposition, multiphysics.staggered_coupling, geometry.cad_import"

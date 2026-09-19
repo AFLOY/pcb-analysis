@@ -1,6 +1,6 @@
 """Build the geometry C++ extension in place.
 
-Usage: ``python -m geometry.step_voxelize.native.build [--no-openmp]``
+Usage: ``python -m geometry.cad_import.native.build [--no-openmp]``
 """
 
 from __future__ import annotations
