@@ -42,6 +42,26 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v --tb=short
 
+  # The STEP front end needs OpenCASCADE, a large wheel; one job installs the
+  # cad extra so tests/test_geometry_step.py runs instead of being skipped.
+  cad:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install with the cad extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[test,cad]'
+          python -c "from geometry.step_voxelize import ocp_available; assert ocp_available()"
+
+      - name: Run the STEP front-end tests
+        run: pytest tests/test_geometry_step.py -v --tb=short -rs
+
   # An editable install on whatever setuptools the runner ships exercises
   # neither the version this project says it needs nor the artefact people
   # actually receive. The package once declared a license form only setuptools
@@ -89,7 +109,9 @@ jobs:
           )
           from emc.tiled_dipole_superposition import far_field_pattern, CISPR32_CLASS_B
           from multiphysics.staggered_coupling import run_scenario, ElectroThermalScenario
+          from geometry.step_voxelize import BodyMap, rasterize_board, voxelize_bodies, ocp_available
           assert callable(calibrate.main)
+          assert callable(rasterize_board) and callable(voxelize_bodies) and not ocp_available()
           assert callable(MultilayerDeltaScorer)
           assert callable(solve_pcb_dc)
           assert callable(solve_scalar_maxwell)
@@ -108,6 +130,7 @@ jobs:
           assert files('thermal').joinpath('py.typed').is_file()
           assert files('emc').joinpath('py.typed').is_file()
           assert files('multiphysics').joinpath('py.typed').is_file()
+          assert files('geometry').joinpath('py.typed').is_file()
           "
 
       - name: Run the suite against the installed package
@@ -118,4 +141,4 @@ jobs:
           python -m venv /tmp/sdist-env
           /tmp/sdist-env/bin/pip install --upgrade pip
           /tmp/sdist-env/bin/pip install dist/*.tar.gz
-          cd /tmp && /tmp/sdist-env/bin/python -c "import electrical.dice_peec, electrical.matrix_free_mpir_fem, thermal.matrix_free_mpir_fem, emc.tiled_dipole_superposition, multiphysics.staggered_coupling"
+          cd /tmp && /tmp/sdist-env/bin/python -c "import electrical.dice_peec, electrical.matrix_free_mpir_fem, thermal.matrix_free_mpir_fem, emc.tiled_dipole_superposition, multiphysics.staggered_coupling, geometry.step_voxelize"
