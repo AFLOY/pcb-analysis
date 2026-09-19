@@ -1,0 +1,235 @@
+{
+  "generated_at": "2026-09-19T16:25:37+00:00",
+  "environment": {
+    "platform": "Linux-6.12.0-211.54.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "cupy": "14.1.1",
+    "cpu": "Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz",
+    "cpu_count": 12,
+    "compiler": "g++ (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)",
+    "native_extension_built": true,
+    "PCB_NATIVE_THREADS": "4",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "thermal_hot_spot": {
+    "rise_k_reference": 109.76157608762264,
+    "runs": [
+      {
+        "grid": "uniform 0.5 mm",
+        "path": "array",
+        "cells": 2400,
+        "nodes": 10004,
+        "min_pitch_mm": 0.499999999999997,
+        "max_pitch_mm": 0.5000000000000004,
+        "wall_ms": 783.889353973791,
+        "inner_iterations": 477,
+        "converged": true,
+        "max_temperature_k": 409.8808345632416,
+        "heat_balance_error_w": -6.624922832543234e-12,
+        "peak_error_vs_uniform_0125_k": 0.11925847561894898
+      },
+      {
+        "grid": "uniform 0.5 mm",
+        "path": "native",
+        "cells": 2400,
+        "nodes": 10004,
+        "min_pitch_mm": 0.499999999999997,
+        "max_pitch_mm": 0.5000000000000004,
+        "wall_ms": 251.74889899790287,
+        "inner_iterations": 476,
+        "converged": true,
+        "max_temperature_k": 409.88083456334397,
+        "heat_balance_error_w": -7.8017592386459e-12,
+        "peak_error_vs_uniform_0125_k": 0.11925847572132398
+      },
+      {
+        "grid": "uniform 0.25 mm",
+        "path": "array",
+        "cells": 9600,
+        "nodes": 39204,
+        "min_pitch_mm": 0.24999999999999675,
+        "max_pitch_mm": 0.2500000000000002,
+        "wall_ms": 2571.1606059921905,
+        "inner_iterations": 428,
+        "converged": true,
+        "max_temperature_k": 409.78444186785055,
+        "heat_balance_error_w": -1.0506429060086475e-10,
+        "peak_error_vs_uniform_0125_k": 0.022865780227903088
+      },
+      {
+        "grid": "uniform 0.25 mm",
+        "path": "native",
+        "cells": 9600,
+        "nodes": 39204,
+        "min_pitch_mm": 0.24999999999999675,
+        "max_pitch_mm": 0.2500000000000002,
+        "wall_ms": 1250.5871390458196,
+        "inner_iterations": 424,
+        "converged": true,
+        "max_temperature_k": 409.7844418678256,
+        "heat_balance_error_w": -1.0471923328481125e-10,
+        "peak_error_vs_uniform_0125_k": 0.022865780202948827
+      },
+      {
+        "grid": "uniform 0.125 mm",
+        "path": "array",
+        "cells": 38400,
+        "nodes": 155204,
+        "min_pitch_mm": 0.12499999999999664,
+        "max_pitch_mm": 0.1250000000000001,
+        "wall_ms": 7577.197444974445,
+        "inner_iterations": 511,
+        "converged": true,
+        "max_temperature_k": 409.76157608762264,
+        "heat_balance_error_w": 1.601192511913041e-10,
+        "peak_error_vs_uniform_0125_k": 0.0
+      },
+      {
+        "grid": "uniform 0.125 mm",
+        "path": "native",
+        "cells": 38400,
+        "nodes": 155204,
+        "min_pitch_mm": 0.12499999999999664,
+        "max_pitch_mm": 0.1250000000000001,
+        "wall_ms": 2540.526297991164,
+        "inner_iterations": 501,
+        "converged": true,
+        "max_temperature_k": 409.7615760874013,
+        "heat_balance_error_w": 1.6278023373672568e-10,
+        "peak_error_vs_uniform_0125_k": -2.213482730439864e-10
+      },
+      {
+        "grid": "graded 0.125 mm, margin 1 mm, growth 1.4",
+        "path": "array",
+        "cells": 5829,
+        "nodes": 23936,
+        "min_pitch_mm": 0.12526213808765513,
+        "max_pitch_mm": 0.5013615530523146,
+        "wall_ms": 2786.4284369861707,
+        "inner_iterations": 845,
+        "converged": true,
+        "max_temperature_k": 409.68171925639336,
+        "heat_balance_error_w": -3.9468428525424315e-12,
+        "peak_error_vs_uniform_0125_k": -0.07985683122927867
+      },
+      {
+        "grid": "graded 0.125 mm, margin 1 mm, growth 1.4",
+        "path": "native",
+        "cells": 5829,
+        "nodes": 23936,
+        "min_pitch_mm": 0.12526213808765513,
+        "max_pitch_mm": 0.5013615530523146,
+        "wall_ms": 1189.3082249443978,
+        "inner_iterations": 896,
+        "converged": true,
+        "max_temperature_k": 409.68171925655577,
+        "heat_balance_error_w": -5.857314633317401e-12,
+        "peak_error_vs_uniform_0125_k": -0.07985683106687702
+      },
+      {
+        "grid": "graded 0.125 mm, margin 2 mm, growth 1.2",
+        "path": "array",
+        "cells": 8364,
+        "nodes": 34196,
+        "min_pitch_mm": 0.12544538218140985,
+        "max_pitch_mm": 0.5022160479270371,
+        "wall_ms": 3503.9186240173876,
+        "inner_iterations": 851,
+        "converged": true,
+        "max_temperature_k": 409.75227443194706,
+        "heat_balance_error_w": 7.489342479516381e-12,
+        "peak_error_vs_uniform_0125_k": -0.009301655675585607
+      },
+      {
+        "grid": "graded 0.125 mm, margin 2 mm, growth 1.2",
+        "path": "native",
+        "cells": 8364,
+        "nodes": 34196,
+        "min_pitch_mm": 0.12544538218140985,
+        "max_pitch_mm": 0.5022160479270371,
+        "wall_ms": 1370.9437689976767,
+        "inner_iterations": 1175,
+        "converged": true,
+        "max_temperature_k": 409.75227443306585,
+        "heat_balance_error_w": -6.143752173670691e-12,
+        "peak_error_vs_uniform_0125_k": -0.009301654556793437
+      }
+    ]
+  },
+  "dc_conduction": {
+    "cases": [
+      {
+        "case": "0.2 mm trace, graded length (one row)",
+        "elements": 59,
+        "exact_resistance_ohm": 0.049257142857142854,
+        "two-level": {
+          "wall_ms": 14.695997000671923,
+          "inner_iterations": 96,
+          "outer_iterations": 4,
+          "converged": true,
+          "resistance_ohm": 0.049257142857161935,
+          "resistance_rel_error": 3.8746783559417963e-13
+        },
+        "jacobi": {
+          "wall_ms": 34.515372943133116,
+          "inner_iterations": 419,
+          "outer_iterations": 4,
+          "converged": true,
+          "resistance_ohm": 0.049257142857733215,
+          "resistance_rel_error": 1.1985301640038415e-11
+        }
+      },
+      {
+        "case": "0.2 mm trace, graded length and rows 0.05/0.1/0.05",
+        "elements": 177,
+        "exact_resistance_ohm": 0.049257142857142854,
+        "two-level": {
+          "wall_ms": 33.59026205725968,
+          "inner_iterations": 255,
+          "outer_iterations": 4,
+          "converged": true,
+          "resistance_ohm": 0.049267635016091285,
+          "resistance_rel_error": 0.0002130078672826219
+        },
+        "jacobi": {
+          "wall_ms": 111.94805102422833,
+          "inner_iterations": 1208,
+          "outer_iterations": 4,
+          "converged": true,
+          "resistance_ohm": 0.0492676350161092,
+          "resistance_rel_error": 0.00021300786764633095
+        }
+      },
+      {
+        "case": "40 x 60 mm plane, uniform 0.5 mm",
+        "elements": 9600,
+        "exact_resistance_ohm": 0.0007388571428571431,
+        "two-level": {
+          "wall_ms": 84.14766192436218,
+          "inner_iterations": 54,
+          "outer_iterations": 4,
+          "converged": true,
+          "resistance_ohm": 0.0007390822646817321,
+          "resistance_rel_error": 0.00030468924441673373
+        },
+        "jacobi": {
+          "wall_ms": 266.55011798720807,
+          "inner_iterations": 821,
+          "outer_iterations": 4,
+          "converged": true,
+          "resistance_ohm": 0.0007390822646727877,
+          "resistance_rel_error": 0.00030468923231086187
+        }
+      }
+    ]
+  },
+  "decision": {
+    "graded_tensor_grid": "adopted",
+    "dc_two_level_preconditioner": "adopted",
+    "criteria": {
+      "thermal": "graded peak error below the uniform 0.5 mm error and below 1e-3 of the rise with under a quarter of the fine cells; native path within 1e-6 K of the array path",
+      "dc": "graded one-row trace resistance exact to 1e-9; two-level converges with fewer inner iterations than Jacobi on every case"
+    }
+  }
+}
