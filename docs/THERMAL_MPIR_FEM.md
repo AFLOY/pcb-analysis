@@ -3,8 +3,8 @@
 ## Scope
 
 `src/thermal/matrix_free_mpir_fem` solves steady heat conduction through a
-layered PCB stack and reports the temperature field, the element heat flux, and
-a closed heat budget. It shares the mixed-precision iterative-refinement solver
+layered PCB stack, marches the same problem in time by backward Euler, and
+reports the temperature field, the element heat flux, and a closed heat budget. It shares the mixed-precision iterative-refinement solver
 and the NumPy/CuPy runtimes of `electrical.matrix_free_mpir_fem`; only the
 discretisation, the boundary model, and the preconditioner are thermal.
 
@@ -30,8 +30,8 @@ The front end is:
   solved by Newton's method on the `T⁴` term inside
   `solve_thermal_conduction` (see "Radiation").
 
-Transient conduction, temperature-dependent conductivity and view factors
-between surfaces are not implemented. The nonlinear coupling back into the
+Temperature-dependent conductivity and view factors between surfaces are not
+implemented. The nonlinear coupling back into the
 electrical solve (copper resistivity rising with temperature) is left to
 `multiphysics.staggered_coupling`.
 
@@ -106,6 +106,7 @@ The heat flux is `-k ∇T` at the element centre from the trilinear gradient.
 | `radiative_heat_w` | heat removed by each radiation boundary, in problem order |
 | `radiation_iterations`, `radiation_converged`, `radiation_change_k` | Newton steps on the radiation term, whether the last step moved the nodes less than the tolerance, and by how much |
 | `fixed_temperature_heat_w` | heat absorbed by the fixed-temperature nodes |
+| `stored_heat_w` | heat going into the thermal mass this time step, `Σ C/Δt (T − Tₙ)`; zero in steady state |
 | `heat_balance_error_w` | input minus removal; equals minus the solver residual summed over free nodes |
 
 The fixed-node heat is `-(K T + R (T - T_amb) - q)` at those nodes, i.e. the
@@ -182,6 +183,68 @@ face, `ε = 0.9`, `T_amb = 298.15 K`, against the analytic surface temperature
 Decision: adopted. The bottom of the plate sits `q t / 2k` above the surface,
 as it must for volumetric heating, and the radiated heat equals the input to
 FP64 rounding.
+
+## Transient conduction
+
+`LayeredThermalMesh.volumetric_heat_capacity_j_per_m3_k` (scalar, per slab or
+per element, like the conductivity) gives every element `ρ c V`, lumped equally
+onto its eight corners (`nodal_heat_capacity_j_per_k`). One backward-Euler
+step is then
+
+```text
+(K + R + C/Δt) T_{n+1} = q + R T_amb + C/Δt T_n,
+```
+
+so `MatrixFreeThermalOperator(..., capacity_per_s=C/Δt)` adds the capacity to
+the same diagonal that already carries the Robin conductance, and the NumPy,
+CuPy and C++ kernels, the two-level preconditioner and the radiation Newton
+loop run unchanged; the step is better conditioned than the steady solve the
+larger `C/Δt` is. `solve_thermal_transient(problem, schedule,
+initial_temperature_k=, store=, until_steady=)` marches a `TimeSchedule`
+(`uniform(step, end)` or `geometric(first_step, end, growth=, max_step_s=)`),
+warm-starting every step from the previous field, rebuilding the operator
+only when `Δt` changes, and stopping early with `until_steady` once
+`max |T_{n+1} − T_n| / Δt` falls below `steady_tolerance_k_per_s`. Each step
+records the stored, convective and radiative heat, the budget error and the
+iteration counts; the result holds every field (`store="all"`) or the last.
+
+Backward Euler is first order and unconditionally stable, which is what a
+march from `t = 0` to the steady state wants: a first step resolving the
+copper's thermal time constant and a geometric growth to steps of the order of
+the board's own time constant reach the steady field in a few dozen steps.
+Measured (`THERMAL_TRANSIENT_RESULTS.json`,
+`experiments/thermal_transient_acceptance.py`, Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz):
+
+A nearly isothermal 4 × 5 × 2 mm copper block cooling from 350 K with
+`h = 20 W/m²K` (`τ = 345 s`) to `t = 400 s`, against the exact discrete
+backward-Euler law (lumping) and the analytic exponential (time error):
+
+| Δt (s) | Steps | Error vs analytic (K) | Deviation from discrete law (K) | Wall (ms) |
+|---|---|---|---|---|
+| 40.0 | 10 | +1.0104 | 1.2e-04 | 213 |
+| 20.0 | 20 | +0.5159 | 1.2e-04 | 408 |
+| 10.0 | 40 | +0.2608 | 1.2e-04 | 710 |
+| 5.0 | 80 | +0.1311 | 1.2e-04 | 1424 |
+| 2.5 | 160 | +0.0658 | 1.2e-04 | 2834 |
+
+The error ratio per step halving is 1.958, 1.978, 1.989, 1.993: first order, as it must be.
+
+A 40 × 60 cell, three-slab board (10004 nodes) with 1.6 W in a 2 × 2 mm
+copper patch, `h = 10 W/m²K` on both faces, steady rise 175.8 K (steady solve
+764 ms), marched from ambient until the drift falls below 2e-5 K/s:
+
+| Schedule | Steps taken / in schedule | End time (s) | Final difference from steady (K) | Wall (ms) |
+|---|---|---|---|---|
+| geometric 0.01 s x1.6, array | 27 / 30 | 5409 | 7.7e-04 | 13829 (512 per step) |
+| geometric 0.01 s x1.6, native | 27 / 30 | 5409 | 7.7e-04 | 5763 (213 per step) |
+| uniform 10 s, array | 163 / 200 | 1630 | 2.9e-03 | 63390 (389 per step) |
+
+Decision: adopted. The geometric schedule reaches the steady field in 27
+steps; uniform 10 s steps need 163 and stop earlier in physical time with a
+larger residual drift. The half-rise time of the hot spot is
+79 s on the geometric schedule. No Crank–Nicolson or higher-order
+scheme was measured; the first-order error is below the modelling error of
+the film coefficients for the schedules above.
 
 ## Two-level preconditioner
 
@@ -358,7 +421,8 @@ board with a via field.
 | `radiation.py` | `RadiationBoundary`, `ExposedFaceRadiation`, their Newton linearisation into the convection types |
 | `problem.py` | `ThermalConductionProblem` validation |
 | `operator.py` | matrix-free hex Q1 operator on NumPy, CuPy or C++, RHS and heat-budget post-processing |
-| `solve.py` | `solve_thermal_conduction` (linear solve, Newton loop over the radiation boundaries), `ThermalConductionSolution` |
+| `solve.py` | `solve_thermal_conduction` (linear solve, Newton loop over the radiation boundaries, one backward-Euler step when given `C/Δt`), `ThermalConductionSolution` |
+| `transient.py` | `TimeSchedule`, `solve_thermal_transient`, `TransientThermalSolution` |
 | `two_level.py` | Jacobi + aggregation coarse correction on a layered node grid |
 | `cuda.py` | fused node-owned gather kernel for the float32 action |
 | `native_hex.py`, `native/` | opt-in C++ action and two-level inner PCG (built in place) |
@@ -381,8 +445,8 @@ before.
   natural-convection `h(ΔT, orientation)` has to be iterated by the caller.
 - Radiation is surface-to-ambient only (no view factors, no enclosure
   radiosity); a board inside a case radiates to a given case temperature.
-- Steady state only, with `k` independent of temperature; `k(T)` would join
-  the radiation Newton loop. The thermal-electrical feedback through `ρ(T)`
+- Backward Euler only (first order in time); `k`, `ρ c` and `h` independent of
+  temperature. `k(T)` would join the radiation Newton loop. The thermal-electrical feedback through `ρ(T)`
   lives in `multiphysics.staggered_coupling`.
 - The coarse space is capped at 2,048 unknowns by a dense inverse. Boards
   beyond a few hundred thousand nodes will want a sparse coarse solve or a

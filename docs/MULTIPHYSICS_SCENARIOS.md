@@ -10,6 +10,7 @@ fields between the solvers and iterates where a field feeds back.
 |---|---|---|
 | `ElectricalScenario` | DC conduction | — |
 | `ThermalScenario` | steady heat conduction | — |
+| `ThermalTransientScenario` | backward-Euler heat conduction over a `TimeSchedule` | — |
 | `ElectroThermalScenario` | both, iterated | Joule heat → `T` → `σ(T)`, via `R(T)` |
 | `ElectroEmissionScenario` | DC conduction, dipole superposition | `J` → near and far field, limit margin |
 | `ElectroThermalEmissionScenario` | all three | `σ(T)`-converged `J` → field; cold `J` → field for comparison |
@@ -203,9 +204,10 @@ decade in field and that the FCC Class B limits at 3 m are read correctly.
 - Thermal radiation is surface-to-ambient (see `THERMAL_MPIR_FEM.md`): a
   board inside a case radiates to a given case temperature, not to the case's
   computed field.
-- The thermal solves are steady; a transient (0 s to steady state) would add
-  a lumped heat capacity to the operator diagonal and time-step the same
-  loop, and is not implemented.
+- The coupled scenarios are steady. `ThermalTransientScenario` marches a
+  thermal problem alone; a transient electro-thermal or board/body march
+  would time-step the same loops with `solve_thermal_transient` and is not
+  implemented.
 - The contact model carries no in-plane conduction inside the joint and no
   cooling of the joint's edge; a thick or conductive interface material
   belongs in the body mesh instead.
