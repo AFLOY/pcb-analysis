@@ -52,9 +52,15 @@ def export_kicad_step(
     substitute_models: bool = True,
     model_dir: str | Path | None = None,
     define_vars: Mapping[str, str] | None = None,
+    fuse_shapes: bool = False,
     extra_args: Sequence[str] = (),
 ) -> Path:
     """Export a ``.kicad_pcb`` to STEP with copper as solids.
+
+    ``fuse_shapes`` passes ``--fuse-shapes`` so pads, tracks and zones of one
+    layer come out as united solids instead of overlapping ones; the section
+    rasteriser sums overlapping coverages and clamps per cell, so fused copper
+    is what makes its areas exact and grid-independent.
 
     ``kicad-cli`` does not read the GUI's path configuration, so footprint
     models referenced through ``${KICAD<major>_3DMODEL_DIR}`` are skipped
@@ -73,6 +79,8 @@ def export_kicad_step(
         command.append("--no-components")
     if substitute_models:
         command.append("--subst-models")
+    if fuse_shapes:
+        command.append("--fuse-shapes")
     variables = dict(define_vars or {})
     if model_dir is not None:
         variables.setdefault(kicad_model_dir_variable(kicad_cli), str(Path(model_dir)))

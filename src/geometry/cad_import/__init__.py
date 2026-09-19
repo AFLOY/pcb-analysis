@@ -56,6 +56,7 @@ from .reader import (
 )
 from .mesh import TriangleMesh, default_method, default_plane_method, plane_section_coverage, section_segments_numpy, winding_numbers_numpy
 from .mesh import native_available as native_classify_available
+from .refinement import RefinementBox, board_refined_grid, component_boxes, refinement_summary
 from .section import BoardRaster, rasterize_board, sample_plane_fill
 from .skin import LayerSkin, SkinReport, skin_report, warn_if_not_sheet
 from .voxelize import sample_volume_fill, voxel_grid, voxelize_bodies
@@ -89,6 +90,10 @@ __all__ = [
     "ocp_available",
     "plane_opt_problem_mapping",
     "rasterize_board",
+    "RefinementBox",
+    "board_refined_grid",
+    "component_boxes",
+    "refinement_summary",
     "resolve_bodies",
     "sample_plane_fill",
     "sample_volume_fill",
