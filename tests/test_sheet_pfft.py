@@ -260,3 +260,38 @@ def test_cuda_pfft_solve_matches_the_cpu_solve_on_a_graded_grid() -> None:
     np.testing.assert_allclose(cp.asnumpy(dx), fx, rtol=1e-10, atol=1e-18)
     np.testing.assert_allclose(cp.asnumpy(dy), fy, rtol=1e-10, atol=1e-18)
     np.testing.assert_allclose(cp.asnumpy(dz), fz, rtol=1e-10, atol=1e-18)
+
+
+@pytest.mark.parametrize("kind", ["fft", "pfft"])
+def test_near_field_preconditioner_cuts_iterations_and_keeps_the_solution(kind) -> None:
+    frequency, rows, cols = 1.0e6, 6, 40
+    if kind == "fft":
+        grid = TensorGrid.uniform(0.2e-3, (rows, cols))
+    else:
+        xe = graded_edges(0.0, 8e-3, coarse_pitch_m=0.4e-3, fine_pitch_m=0.1e-3, refine_m=[(0.0, 1e-3), (7e-3, 8e-3)], margin_m=0.3e-3)
+        grid = TensorGrid(xe, np.linspace(0.0, 1.2e-3, rows + 1))
+        rows, cols = grid.shape
+    occupancy = np.ones((2, rows, cols), bool)
+    vias = tuple(ViaBranch(r, cols - 1, 1, 0, 1e-4) for r in range(rows))
+    mesh = SheetMesh((rows, cols), float(grid.pitch_x_m[0]) if grid.is_uniform else None, STACKUP, occupancy, vias=vias, grid=grid)
+    if kind == "fft":
+        operator = SheetInductanceOperator((rows, cols), float(grid.pitch_x_m[0]), STACKUP, vertical_levels=mesh.vertical_levels)
+    else:
+        operator = PfftSheetInductanceOperator(mesh)
+    near = operator.near_inductance(mesh)
+    assert near.shape == (mesh.branch_count, mesh.branch_count)
+    # Symmetric, with every branch's exact self term on the diagonal.
+    assert abs(near - near.T).max() < 1e-9 * abs(near).max()  # closed form evaluated per ordered pair
+    from electrical.sheet_peec.sheet_peec import _inline_self_inductance, _vertical_self_inductance
+
+    expected_diagonal = np.concatenate([_inline_self_inductance(mesh, operator), _vertical_self_inductance(mesh, operator)])
+    np.testing.assert_allclose(near.diagonal(), expected_diagonal, rtol=1e-9)
+    terminals = [Terminal("in", 0, tuple((r, 0) for r in range(rows)), 1.0), Terminal("out", 1, tuple((r, 0) for r in range(rows)), -1.0)]
+    diagonal = solve_sheet_case(mesh, operator, terminals, frequency_hz=frequency, tolerance=1e-9, preconditioner="diagonal")
+    near_solution = solve_sheet_case(mesh, operator, terminals, frequency_hz=frequency, tolerance=1e-9, preconditioner="near")
+    assert diagonal.converged and near_solution.converged
+    assert near_solution.iterations * 4 < diagonal.iterations
+    scale = np.max(np.abs(diagonal.branch_current))
+    np.testing.assert_allclose(near_solution.branch_current, diagonal.branch_current, atol=1e-7 * scale)
+    with pytest.raises(ValueError, match="preconditioner"):
+        solve_sheet_case(mesh, operator, terminals, frequency_hz=frequency, preconditioner="ilu")
