@@ -418,3 +418,46 @@ def test_nested_assembly_components_keep_their_placement(tmp_path) -> None:
         lo, hi = np.asarray(model.solid(f"board/{reference}/body").bounds_m) / 1e-3
         assert np.allclose(lo, (x, y, 2.1), atol=1e-6)
         assert np.allclose(hi, (x + 1.6, y + 0.8, 2.9), atol=1e-6)
+
+
+def test_graded_raster_conserves_copper_area_and_builds_a_graded_thermal_mesh(model) -> None:
+    """The same board on a graded grid: exact areas per layer, per-cell pitches in the thermal mesh."""
+
+    from electrical.matrix_free_mpir_fem import TensorGrid
+    from geometry.cad_import import RefinementBox, board_refined_grid, board_thermal_mesh, refinement_summary
+
+    body_map = _body_map()
+    resolved = resolve_bodies(model, body_map)
+    uniform = rasterize_board(resolved, body_map.board, pitch_mm=0.25, method="section")
+    box = RefinementBox("hot", 6.0 * MM, 9.0 * MM, 2.0 * MM, 5.0 * MM)
+    grid = board_refined_grid(resolved.board, coarse_pitch_mm=0.5, fine_pitch_mm=0.1, boxes=[box], margin_mm=0.5)
+    graded = rasterize_board(resolved, body_map.board, grid=grid, method="section")
+    assert isinstance(graded.grid, TensorGrid) and not graded.is_uniform and graded.pitch_mm is None
+    summary = refinement_summary(grid, [box])
+    assert summary["cells"] < summary["uniform_fine_cells"] and summary["cells"] > summary["uniform_coarse_cells"]
+    # The exact section coverage carries the same copper area on both grids;
+    # the raster's own area differs only by edge cells the outline threshold drops.
+    copper = [solid for _, solids in resolved.copper for solid in solids]
+    for layer in body_map.board.layers:
+        z = layer.center_z_mm * MM
+        on_graded = sample_plane_fill(copper, z_m=z, grid=grid, method="section")
+        on_uniform = sample_plane_fill(copper, z_m=z, grid=uniform.grid, method="section")
+        assert float(np.sum(on_graded * grid.cell_area_m2)) == pytest.approx(
+            float(np.sum(on_uniform * uniform.grid.cell_area_m2)), rel=1.0e-9
+        )
+    assert float(np.sum(graded.outline * graded.cell_area_m2)) == pytest.approx(
+        float(np.sum(uniform.outline * uniform.cell_area_m2)), rel=2.0e-2
+    )
+    with pytest.raises(ValueError, match="graded"):
+        graded.pitch_m
+    thermal = board_thermal_mesh(graded)
+    assert thermal.mesh.element_grid_shape[1:] == grid.shape
+    np.testing.assert_array_equal(thermal.mesh.pitch_x_m, grid.pitch_x_m)
+    np.testing.assert_array_equal(thermal.mesh.pitch_y_m, grid.pitch_y_m)
+    with pytest.raises(ValueError, match="uniform"):
+        plane_opt_problem_mapping(graded, terminals=())
+    # y-down storage reverses the row heights with the rows.
+    flipped = rasterize_board(resolved, body_map.board, grid=grid, method="section", y_down=True)
+    np.testing.assert_array_equal(flipped.pitch_y_m, grid.pitch_y_m[::-1])
+    np.testing.assert_array_equal(flipped.fill, graded.fill[:, ::-1])
+    assert flipped.row_y_m(0) == pytest.approx(float(grid.y_centres_m[-1]))

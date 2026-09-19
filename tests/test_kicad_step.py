@@ -203,3 +203,48 @@ def test_component_solids_bind_to_footprints_by_reference(tmp_path) -> None:
         # F.Cu parts stand on the board: above the laminate, within the copper and mask thickness.
         assert footprints[reference].layer == "F.Cu"
         assert board_top_mm <= lo[2] / 1e-3 <= board_top_mm + 0.1, reference
+
+
+@pytest.mark.skipif(not _library_model_present(), reason="needs the KiCad 3D model library (C_0603_1608Metric.step)")
+def test_component_footprints_drive_a_graded_grid_that_keeps_the_copper(tmp_path) -> None:
+    from geometry.cad_import import (
+        board_refined_grid,
+        board_thermal_mesh,
+        component_boxes,
+        default_kicad_model_dir,
+        kicad_component_solids,
+        refinement_summary,
+    )
+
+    path = export_kicad_step(
+        BOARD, tmp_path / "power_module_components.step", model_dir=default_kicad_model_dir(), fuse_shapes=True, extra_args=("--no-dnp",)
+    )
+    model = load_step(path)
+    components = kicad_component_solids(model)
+    layers, top = layers_from_kicad_stackup(read_kicad_stackup(BOARD))
+    # Component solids are not copper: the body map skips them by reference designator.
+    body_map = kicad_step_body_map(layers, board_top_z_mm=top, ignore=tuple(f".*/{ref}/.*" for ref in components))
+    resolved = resolve_bodies(model, body_map)
+    boxes = component_boxes(components, min_size_m=1.0e-3)
+    assert len(boxes) == 11
+    grid = board_refined_grid(resolved.board, coarse_pitch_mm=0.5, fine_pitch_mm=0.1, boxes=boxes, margin_mm=1.0)
+    summary = refinement_summary(grid, boxes)
+    assert summary["cells"] < 0.5 * summary["uniform_fine_cells"]
+    graded = rasterize_board(resolved, body_map.board, grid=grid, method="section")
+    fine = rasterize_board(resolved, body_map.board, pitch_mm=0.1, method="section")
+    from geometry.cad_import import sample_plane_fill
+
+    # With fused shapes no solids overlap, so the exact section coverage carries
+    # the same copper area on any grid (unfused pads and tracks overlap, and the
+    # per-cell sum-and-clamp then depends slightly on the cell size).
+    copper = [solid for _, solids in resolved.copper for solid in solids] + [s for _, solids in resolved.vias for s in solids]
+    for layer in body_map.board.layers:
+        z = layer.center_z_mm * 1e-3
+        on_graded = sample_plane_fill(copper, z_m=z, grid=grid, method="section")
+        on_fine = sample_plane_fill(copper, z_m=z, grid=fine.grid, method="section")
+        assert float(np.sum(on_graded * grid.cell_area_m2)) == pytest.approx(float(np.sum(on_fine * fine.grid.cell_area_m2)), rel=1.0e-9)
+    # The rasters differ only by the edge cells the outline threshold drops.
+    for layer in range(len(body_map.board.layers)):
+        assert graded.copper_area_m2(layer) == pytest.approx(fine.copper_area_m2(layer), rel=2.0e-2)
+    thermal = board_thermal_mesh(graded)
+    assert thermal.mesh.element_grid_shape[1:] == grid.shape
