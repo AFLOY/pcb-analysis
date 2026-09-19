@@ -17,7 +17,13 @@ It owns no field solve. Two decisions fix its shape:
    staggered interface iteration in `multiphysics`. Neither solver knows
    about the other.
 
-Rasterisation here means fixed-pitch sampling of B-rep solids. There is no
+Rasterisation here means fixed-pitch sampling of B-rep solids: every cell or
+voxel is covered by `n × n` (or `n³`) sample points classified against the
+solids with `BRepClass3d_SolidClassifier`, and the inside fraction is the
+fill. The 2.5D layers are sampled at their centre `z` the same way rather
+than through section faces, so one code path serves both parts. Bounds come
+from `BRepBndLib::AddOptimal` without the shape tolerance, otherwise a 20 mm
+board reports 20.0000002 mm and the grid gains a cell. There is no
 unstructured mesher and no CFD. Convection is a film coefficient on exposed
 faces, radiation is not modelled.
 
@@ -149,11 +155,12 @@ requested.
 
 | Module | Responsibility |
 |---|---|
-| `geometry/step_voxelize/reader.py` | STEP load, assembly flattening, body map resolution (only module importing `OCP`) |
-| `geometry/step_voxelize/section.py` | planar sections and 2D rasterisation to the routing grid |
-| `geometry/step_voxelize/voxelize.py` | 3D classification, fill fraction, exposed faces |
-| `geometry/step_voxelize/contact.py` | board/voxel contact placement (origins, TIM spec) feeding `thermal.matrix_free_mpir_fem.planar_contact_map` |
-| `geometry/step_voxelize/adapters.py` | build `Stackup`, occupancy, `ViaSet`, `LayeredThermalMesh`, plane-opt mapping |
+| `geometry/step_voxelize/reader.py` | STEP load through `STEPCAFControl`, assembly flattening into named solids, point-in-solid tests, synthetic boxes and cylinders, `write_step` (the only module importing `OCP`) |
+| `geometry/step_voxelize/bodymap.py` | `BodyMap` (board stackup, copper, vias, bodies, ignore) and its exhaustive resolution against the model |
+| `geometry/step_voxelize/section.py` | per-layer sampling of the board outline and copper onto the routing grid (`BoardRaster`) |
+| `geometry/step_voxelize/voxelize.py` | 3D sampling of bodies onto a voxel grid, fill fraction, material precedence (`VoxelSolidModel`) |
+| `geometry/step_voxelize/contact.py` | board/voxel contact placement (origins, contact spec) feeding `thermal.matrix_free_mpir_fem.planar_contact_map` |
+| `geometry/step_voxelize/adapters.py` | build `Stackup`, occupancy, `ViaSet`, the board's `LayeredThermalMesh`, body meshes and heat sources, plane-opt mapping |
 | `thermal/matrix_free_mpir_fem/voxel.py`, `conduction.py` | `VoxelThermalMesh`, active-element mask, exposed-face convection |
 | `thermal/matrix_free_mpir_fem/contact.py` | `ContactMap`, `planar_contact_map` |
 | `multiphysics/staggered_coupling/board_enclosure.py` | interface iteration |
@@ -195,21 +202,29 @@ for the current path and the candidate, with the numbers written to
    with the same board's `.kicad_pcb`-derived occupancy from the plane-opt
    mapping.
 
-## Increments
+## Status
 
-Each step is one branch and passes the full test suite before the next.
+| Increment | Branch | State |
+|---|---|---|
+| this document and the pointers in the thermal and multiphysics documents | `docs/step-geometry-3d-thermal` | done |
+| active-element mask, `VoxelThermalMesh`, exposed-face convection, per-face ambient (acceptance 2, 3) | `feature/thermal-voxel-mesh` | done; `tests/test_thermal_voxel.py`, array, C++ and CUDA paths |
+| `ContactMap`, `nodal_heat_w`, `BoardEnclosureThermalScenario` (acceptance 4) | `feature/board-enclosure-coupling` | done; `tests/test_board_enclosure_coupling.py`, numbers in `MULTIPHYSICS_SCENARIOS.md` |
+| `geometry.step_voxelize`, `cad` extra, packaging and CI (acceptance 1, 5 on a synthetic STEP) | `feature/geometry-step-voxelize` | done; `tests/test_geometry_step.py` |
+| acceptance 5 on a KiCad export with copper enabled | — | not started; needs a real export as fixture |
+| electro-thermal `σ(T)` loop around the interface iteration | — | not started |
+| C++ or BVH point classification for large boards | — | not started; the Python loop over `BRepClass3d_SolidClassifier` costs about 25 µs per sample point on this host |
 
-1. `docs/`: this document, the pointers in the thermal and multiphysics
-   documents (this branch).
-2. `feature/thermal-voxel-mesh`: `VoxelThermalMesh`, active mask in the
-   operator and preconditioner, exposed-face convection, per-element ambient
-   in `ConvectionBoundary`; acceptance items 2 and 3.
-3. `feature/board-enclosure-coupling`: contact map dataclass and the
-   interface iteration; acceptance item 4 on synthetic arrays, no STEP yet.
-4. `feature/geometry-step-voxelize`: the `geometry` package, `cad` extra,
-   packaging and CI; acceptance items 1 and 5.
-5. CUDA kernels for the masked action once the array path is adopted, on
-   the GPU shell with the device and CuPy version recorded.
+Measured on the synthetic fixture of `tests/test_geometry_step.py` (a 20 × 12 ×
+1.6 mm board, copper on both faces, one via, a 6 × 6 × 4 mm sink, one
+component), OCP 8.0.1, this host: rectangles aligned with the grid rasterise
+to their exact area at 1.0 and 0.5 mm; at 0.4 mm with three samples per axis
+the area is 5 % high because a boundary sample counts as inside and a
+half-covered cell quantises to 2/3. A 0.3 mm via disc sampled at 0.1 mm is
+13 % off with one sample per cell and 1 % with two or four. The sink
+voxelises to its exact volume at (0.5, 0.5, 1.0) mm, its 144-pair contact
+map covers 36 mm², and the coupled board/sink solve converges in 6 interface
+iterations. These are checks that the pipeline is wired correctly; the
+adoption benchmark against a real export is still to be measured.
 
 ## Not in scope
 
