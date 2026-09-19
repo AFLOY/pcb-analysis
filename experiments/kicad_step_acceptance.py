@@ -33,6 +33,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from geometry.step_voxelize import (  # noqa: E402
     board_vias,
+    default_plane_method,
     export_kicad_step,
     kicad_cli_version,
     kicad_grid_origin_mm,
@@ -182,6 +183,7 @@ def run_board(plane_opt: Path, name: str, pitch_mm: float, supersamples: list[in
             })
         vias = board_vias(resolved, raster)
         result["rasters"].append({
+            "method": default_plane_method(),
             "supersample": supersample,
             "sample_points": rows * cols * supersample * supersample * len(raster.layers),
             "seconds": raster_s,
@@ -248,7 +250,7 @@ def main() -> None:
             if "skipped" in r:
                 print(f"  supersample {r['supersample']}: skipped ({r['skipped']}, {r['sample_points']} points)")
                 continue
-            print(f"  supersample {r['supersample']}: {r['seconds']:.1f} s, {r['sample_points']} points, {r['via_specs']} vias")
+            print(f"  {r['method']} supersample {r['supersample']}: {r['seconds']:.1f} s, {r['sample_points']} points, {r['via_specs']} vias")
             for layer in r["layers"]:
                 print(f"    {layer['layer']:6s} IoU={layer['iou']:.3f} interior step-only={layer['interior_step_only']} plane_opt-only={layer['interior_plane_opt_only']} ({100*layer['interior_plane_opt_only_fraction_of_copper']:.2f} %) holes step/plane_opt={layer['hole_cells_step_only']}/{layer['hole_cells_plane_opt_only']} boundary diff={layer['boundary_disagreement']}/{layer['boundary_cells']}")
     print("decision:", json.dumps(report["decision"]))
