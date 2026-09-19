@@ -137,8 +137,14 @@ def run_board_enclosure_thermal(
     config: InterfaceCouplingConfig | None = None,
     backend: RuntimeBackend | None = None,
     device_id: int = 0,
+    initial: BoardEnclosureThermalResult | None = None,
 ) -> BoardEnclosureThermalResult:
-    """Iterate the board and its bodies to a common interface temperature."""
+    """Iterate the board and its bodies to a common interface temperature.
+
+    ``initial`` warm-starts the contact temperatures and both solves from a
+    previous result of the same scenario geometry (an outer σ(T) loop calls
+    this once per resistivity update).
+    """
 
     config = config or InterfaceCouplingConfig()
     board_mesh = scenario.board.mesh
@@ -151,6 +157,8 @@ def run_board_enclosure_thermal(
         problem = body.body
         if problem.convection:
             start = problem.convection[0].mean_ambient_k()
+        elif problem.radiation:
+            start = problem.radiation[0].mean_ambient_k()
         else:
             mask = problem.fixed_temperature_mask
             start = float(np.mean(problem.fixed_temperature_k[mask]))
@@ -161,6 +169,14 @@ def run_board_enclosure_thermal(
     pair_heat: list[np.ndarray] = []
     board_guess: np.ndarray | None = None
     body_guesses: list[np.ndarray | None] = [None] * len(bodies)
+    if initial is not None:
+        if len(initial.bodies) != len(bodies) or any(
+            previous.shape != current.shape for previous, current in zip(initial.contact_temperature_k, body_temperatures)
+        ):
+            raise ValueError("initial must come from a scenario with the same bodies and contacts")
+        body_temperatures = [np.asarray(t, dtype=np.float64).copy() for t in initial.contact_temperature_k]
+        board_guess = np.nan_to_num(initial.board.temperature_k, nan=initial.board.min_temperature_k)
+        body_guesses = [np.nan_to_num(s.temperature_k, nan=s.min_temperature_k) for s in initial.bodies]
     previous_increment: np.ndarray | None = None
     relaxation = config.relaxation
     previous_heat = float("nan")

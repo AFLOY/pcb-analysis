@@ -151,7 +151,7 @@ def test_scenario_validation() -> None:
     thermal = _thermal_mesh(problem)
     with pytest.raises(ValueError, match="one thermal slab per electrical layer"):
         ElectroThermalScenario(problem, thermal, (0,), convection=(ConvectionBoundary("top", 5.0, AMBIENT),))
-    with pytest.raises(ValueError, match="positive film coefficient or a fixed node"):
+    with pytest.raises(ValueError, match="positive film coefficient, a radiating face or a fixed node"):
         ElectroThermalScenario(problem, thermal, (0, 2))
     with pytest.raises(ValueError, match="relaxation"):
         CouplingConfig(relaxation=0.0)

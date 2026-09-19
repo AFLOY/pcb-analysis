@@ -37,8 +37,10 @@ from electrical.matrix_free_mpir_fem import (
 )
 from thermal.matrix_free_mpir_fem import (
     ConvectionBoundary,
+    ExposedFaceRadiation,
     HeatSource,
     LayeredThermalMesh,
+    RadiationBoundary,
     ThermalConductionProblem,
     ThermalConductionSolution,
     element_joule_heat_w,
@@ -64,6 +66,7 @@ class ElectroThermalScenario:
     extra_element_heat_w: np.ndarray | None = None
     conductivity_reference_temperature_k: float = 293.15
     temperature_coefficient_per_k: float = COPPER_TEMPERATURE_COEFFICIENT_PER_K
+    radiation: tuple[RadiationBoundary | ExposedFaceRadiation, ...] = ()
 
     def __post_init__(self) -> None:
         layers, rows, cols = self.electrical.mesh.element_active.shape
@@ -78,6 +81,7 @@ class ElectroThermalScenario:
         object.__setattr__(self, "layer_slabs", mapping)
         object.__setattr__(self, "convection", tuple(self.convection))
         object.__setattr__(self, "extra_heat_sources", tuple(self.extra_heat_sources))
+        object.__setattr__(self, "radiation", tuple(self.radiation))
         # Validate the thermal boundary conditions once, without heat.
         ThermalConductionProblem(
             self.thermal_mesh,
@@ -86,6 +90,7 @@ class ElectroThermalScenario:
             fixed_temperature_k=self.fixed_temperature_k,
             heat_sources=self.extra_heat_sources,
             element_heat_w=self.extra_element_heat_w,
+            radiation=self.radiation,
         )
 
 
@@ -198,9 +203,11 @@ def conductivity_at_temperature(
     return np.asarray(reference_conductivity) / factor
 
 
-def _thermal_problem(
+def thermal_problem_with_joule_heat(
     scenario: ElectroThermalScenario, electrical: PCBConductionSolution
 ) -> ThermalConductionProblem:
+    """The board's thermal problem loaded with this electrical solution's losses."""
+
     heat = element_joule_heat_w(electrical, scenario.thermal_mesh, scenario.layer_slabs)
     if scenario.extra_element_heat_w is not None:
         heat = heat + np.asarray(scenario.extra_element_heat_w, dtype=np.float64)
@@ -214,7 +221,92 @@ def _thermal_problem(
         fixed_temperature_k=scenario.fixed_temperature_k,
         heat_sources=sources + scenario.extra_heat_sources,
         element_heat_w=heat,
+        radiation=scenario.radiation,
     )
+
+
+def heated_electrical_problem(
+    scenario: ElectroThermalScenario, temperature_k: np.ndarray
+) -> PCBConductionProblem:
+    """The electrical problem with copper and via resistivity at the given board temperatures."""
+
+    reference_conductivity = np.asarray(scenario.electrical.mesh.conductivity_s_per_m, dtype=np.float64)
+    layer_temperature = electrical_layer_temperature_k(
+        temperature_k, scenario.thermal_mesh, scenario.layer_slabs
+    )
+    conductivity = conductivity_at_temperature(
+        reference_conductivity,
+        layer_temperature,
+        reference_temperature_k=scenario.conductivity_reference_temperature_k,
+        coefficient_per_k=scenario.temperature_coefficient_per_k,
+    )
+    # Via barrels are copper too: their resistance follows the same law at
+    # the temperature of their endpoints.
+    via_temperature = via_node_temperature_k(
+        temperature_k, scenario.thermal_mesh, scenario.layer_slabs, scenario.electrical
+    )
+    via_factor = 1.0 + scenario.temperature_coefficient_per_k * (
+        via_temperature - scenario.conductivity_reference_temperature_k
+    )
+    vias = tuple(
+        dataclasses.replace(via, resistance_ohm=via.resistance_ohm * float(factor))
+        for via, factor in zip(scenario.electrical.vias, via_factor)
+    )
+    return dataclasses.replace(
+        scenario.electrical,
+        mesh=dataclasses.replace(scenario.electrical.mesh, conductivity_s_per_m=conductivity),
+        vias=vias,
+    )
+
+
+class TemperatureFixedPoint:
+    """Relaxed fixed-point update on a temperature field with Aitken's Δ² rescaling.
+
+    A slowly contracting iteration (loss rising with temperature under
+    constant current) gets ω > 1, an oscillating one gets ω < 1.  The linear
+    resistivity model ``1 + α (T - T_ref)`` turns non-positive only far below
+    the reference; an over-relaxed undershoot must not get there, so the
+    plain step is taken when it would.
+    """
+
+    def __init__(self, scenario: ElectroThermalScenario, config: "CouplingConfig") -> None:
+        self.config = config
+        self.relaxation = config.relaxation
+        self.temperature: np.ndarray | None = None
+        self._previous_increment: np.ndarray | None = None
+        minimum_factor = 1.0e-3  # keep 1 + α (T - T_ref) safely positive
+        self._floor = (
+            scenario.conductivity_reference_temperature_k
+            - (1.0 - minimum_factor) / scenario.temperature_coefficient_per_k
+            if scenario.temperature_coefficient_per_k > 0.0
+            else -np.inf
+        )
+
+    def update(self, proposed: np.ndarray) -> float:
+        """Accept a proposed field; return the largest change of the relaxed iterate."""
+
+        proposed = np.asarray(proposed, dtype=np.float64)
+        if self.temperature is None:
+            self.temperature = proposed.copy()
+            self._previous_increment = None
+            return float("inf")
+        increment = proposed - self.temperature
+        if self.config.aitken and self._previous_increment is not None:
+            difference = increment - self._previous_increment
+            denominator = float(np.dot(difference.reshape(-1), difference.reshape(-1)))
+            if denominator > 0.0:
+                self.relaxation = -self.relaxation * float(
+                    np.dot(self._previous_increment.reshape(-1), difference.reshape(-1))
+                ) / denominator
+                self.relaxation = float(np.clip(self.relaxation, 0.05, self.config.max_relaxation))
+        candidate = self.temperature + self.relaxation * increment
+        if float(np.min(candidate)) < self._floor <= float(np.min(proposed)):
+            self.relaxation = 1.0
+            candidate = proposed.copy()
+        change = float(np.max(np.abs(candidate - self.temperature)))
+        self.temperature = candidate
+        self._previous_increment = increment
+        return change
 
 
 def run_electro_thermal(
@@ -227,18 +319,10 @@ def run_electro_thermal(
     """Iterate electrical and thermal solves to a self-consistent ρ(T) state."""
 
     config = config or CouplingConfig()
-    base_mesh = scenario.electrical.mesh
-    reference_conductivity = np.asarray(base_mesh.conductivity_s_per_m, dtype=np.float64)
-    conductivity = reference_conductivity.copy()
-    reference_vias = scenario.electrical.vias
-    vias = reference_vias
-
+    problem = scenario.electrical
+    fixed_point = TemperatureFixedPoint(scenario, config)
     history: list[CouplingStep] = []
     potential: np.ndarray | None = None
-    temperature: np.ndarray | None = None
-    previous_increment: np.ndarray | None = None
-    minimum_factor = 1.0e-3  # keep 1 + α (T - T_ref) safely positive
-    relaxation = config.relaxation
     cold_loss = float("nan")
     electrical_solution: PCBConductionSolution | None = None
     thermal_solution: ThermalConductionSolution | None = None
@@ -246,11 +330,6 @@ def run_electro_thermal(
     previous_loss = float("nan")
 
     for iteration in range(1, config.max_iterations + 1):
-        problem = dataclasses.replace(
-            scenario.electrical,
-            mesh=dataclasses.replace(base_mesh, conductivity_s_per_m=conductivity),
-            vias=vias,
-        )
         electrical_solution = solve_pcb_dc(
             problem,
             config=config.electrical,
@@ -264,47 +343,22 @@ def run_electro_thermal(
             cold_loss = loss
 
         thermal_solution = solve_thermal_conduction(
-            _thermal_problem(scenario, electrical_solution),
+            thermal_problem_with_joule_heat(scenario, electrical_solution),
             config=config.thermal,
             backend=backend,
             device_id=device_id,
-            initial_temperature_k=temperature,
+            initial_temperature_k=fixed_point.temperature,
         )
-        proposed = thermal_solution.temperature_k
-
-        # Relaxed fixed-point update on the temperature field.  Aitken's Δ²
-        # estimate rescales the relaxation from two successive increments: a
-        # slowly contracting iteration (loss rising with temperature under
-        # constant current) gets ω > 1, an oscillating one gets ω < 1.
-        if temperature is None:
-            increment = None
-            temperature = proposed
-            change = float("inf")
-        else:
-            increment = proposed - temperature
-            if config.aitken and previous_increment is not None:
-                difference = increment - previous_increment
-                denominator = float(np.dot(difference.reshape(-1), difference.reshape(-1)))
-                if denominator > 0.0:
-                    relaxation = -relaxation * float(
-                        np.dot(previous_increment.reshape(-1), difference.reshape(-1))
-                    ) / denominator
-                    relaxation = float(np.clip(relaxation, 0.05, config.max_relaxation))
-            candidate = temperature + relaxation * increment
-            if scenario.temperature_coefficient_per_k > 0.0:
-                # The linear model 1 + α (T - T_ref) turns non-positive only far
-                # below the reference; an over-relaxed undershoot must not get
-                # there.  Fall back to the plain step when it would.
-                floor = (
-                    scenario.conductivity_reference_temperature_k
-                    - (1.0 - minimum_factor) / scenario.temperature_coefficient_per_k
-                )
-                if float(np.min(candidate)) < floor <= float(np.min(proposed)):
-                    relaxation = 1.0
-                    candidate = proposed
-            change = float(np.max(np.abs(candidate - temperature)))
-            temperature = candidate
-        previous_increment = increment
+        # Nodes outside a masked mesh are NaN; hold them at the coldest node so
+        # the fixed point sees finite fields (they carry no copper anyway).
+        proposed = np.where(
+            np.isfinite(thermal_solution.temperature_k),
+            thermal_solution.temperature_k,
+            thermal_solution.min_temperature_k,
+        )
+        change = fixed_point.update(proposed)
+        temperature = fixed_point.temperature
+        assert temperature is not None
 
         relative_loss_change = (
             abs(loss - previous_loss) / abs(loss) if np.isfinite(previous_loss) and loss else float("inf")
@@ -317,7 +371,7 @@ def run_electro_thermal(
                 max_temperature_k=float(np.max(temperature)),
                 temperature_change_k=change,
                 relative_loss_change=relative_loss_change,
-                relaxation=relaxation,
+                relaxation=fixed_point.relaxation,
                 electrical_inner_iterations=electrical_solution.solve.inner_iterations,
                 thermal_inner_iterations=thermal_solution.solve.inner_iterations,
             )
@@ -333,28 +387,7 @@ def run_electro_thermal(
         ):
             converged = True
             break
-
-        layer_temperature = electrical_layer_temperature_k(
-            temperature, scenario.thermal_mesh, scenario.layer_slabs
-        )
-        conductivity = conductivity_at_temperature(
-            reference_conductivity,
-            layer_temperature,
-            reference_temperature_k=scenario.conductivity_reference_temperature_k,
-            coefficient_per_k=scenario.temperature_coefficient_per_k,
-        )
-        # Via barrels are copper too: their resistance follows the same law at
-        # the temperature of their endpoints.
-        via_temperature = via_node_temperature_k(
-            temperature, scenario.thermal_mesh, scenario.layer_slabs, scenario.electrical
-        )
-        via_factor = 1.0 + scenario.temperature_coefficient_per_k * (
-            via_temperature - scenario.conductivity_reference_temperature_k
-        )
-        vias = tuple(
-            dataclasses.replace(via, resistance_ohm=via.resistance_ohm * float(factor))
-            for via, factor in zip(reference_vias, via_factor)
-        )
+        problem = heated_electrical_problem(scenario, temperature)
 
     assert electrical_solution is not None and thermal_solution is not None and temperature is not None
     layer_temperature = electrical_layer_temperature_k(
@@ -363,8 +396,8 @@ def run_electro_thermal(
     return ElectroThermalResult(
         electrical=electrical_solution,
         thermal=thermal_solution,
-        conductivity_s_per_m=conductivity,
-        via_resistance_ohm=np.asarray([via.resistance_ohm for via in vias], dtype=np.float64),
+        conductivity_s_per_m=np.asarray(problem.mesh.conductivity_s_per_m, dtype=np.float64),
+        via_resistance_ohm=np.asarray([via.resistance_ohm for via in problem.vias], dtype=np.float64),
         element_temperature_k=layer_temperature,
         converged=converged,
         iterations=len(history),
