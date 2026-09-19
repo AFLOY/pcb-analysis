@@ -79,9 +79,61 @@ def test_tessellation_is_closed_outward_and_agrees_with_the_classifier() -> None
 def test_raster_fill_is_the_same_on_every_classification_path() -> None:
     pad = box_solid("pad", (1.3 * MM, 0.7 * MM, 0.0), (3.0 * MM, 2.0 * MM, 0.035 * MM))
     kwargs = dict(z_m=0.0175 * MM, origin_m=(0.0, 0.0), pitch_m=0.5 * MM, shape=(8, 10), supersample=3)
-    occ = sample_plane_fill([pad], **kwargs)
+    occ = sample_plane_fill([pad], method="occ", **kwargs)
     numpy_path = sample_plane_fill([pad], method="numpy", **kwargs)
     np.testing.assert_allclose(numpy_path, occ)
     if native_classify_available():
         np.testing.assert_allclose(sample_plane_fill([pad], method="native", **kwargs), occ)
+        # The exact section differs from three-sample quantisation by at most one sample per cell.
+        exact = sample_plane_fill([pad], method="section", **kwargs)
+        assert float(np.max(np.abs(exact - occ))) <= 1.0 / 9.0 + 1.0e-12
+        assert float(exact.sum()) * (0.5 * MM) ** 2 == pytest.approx(6.0 * MM**2, rel=1.0e-12)
     assert float(occ.sum()) * (0.5 * MM) ** 2 == pytest.approx(6.0 * MM**2, rel=0.12)
+
+
+def test_section_segments_are_closed_loops_counter_clockwise() -> None:
+    from geometry.step_voxelize import section_segments_numpy
+
+    mesh = _tetrahedron()
+    segments = section_segments_numpy(mesh.triangles_m, 0.25)
+    assert segments.shape == (3, 2, 2)
+    # Every end point is another segment's start point: closed loop.
+    starts = {tuple(np.round(s[0], 12)) for s in segments}
+    ends = {tuple(np.round(s[1], 12)) for s in segments}
+    assert starts == ends
+    # Shoelace area of the loop is positive (counter-clockwise) and equals the section triangle.
+    area = 0.5 * float(np.sum(segments[:, 0, 0] * segments[:, 1, 1] - segments[:, 1, 0] * segments[:, 0, 1]))
+    assert area == pytest.approx(0.5 * 0.75 * 0.75)
+    if native_classify_available():
+        native = mesh.section_segments(0.25)
+        assert native.shape == segments.shape
+        native_area = 0.5 * float(np.sum(native[:, 0, 0] * native[:, 1, 1] - native[:, 1, 0] * native[:, 0, 1]))
+        assert native_area == pytest.approx(area)
+
+
+@pytest.mark.skipif(not (ocp_available() and native_classify_available()), reason="needs OCP and the native extension")
+def test_section_coverage_is_exact_and_handles_holes() -> None:
+    from geometry.step_voxelize import plane_section_coverage
+
+    pad = box_solid("pad", (1.3 * MM, 0.7 * MM, 0.0), (3.0 * MM, 2.0 * MM, 0.035 * MM))
+    coverage = plane_section_coverage([pad.tessellate()], 0.0175 * MM, origin_m=(0.0, 0.0), pitch_m=0.5 * MM, shape=(8, 10))
+    assert float(coverage.sum()) * (0.5 * MM) ** 2 == pytest.approx(6.0 * MM**2, rel=1.0e-12)
+    assert coverage[1, 2] == pytest.approx(0.2 * 0.3 / 0.25)  # corner cell: 0.2 x 0.3 mm of a 0.5 mm cell
+    assert coverage[2, 4] == pytest.approx(1.0)
+    assert coverage[0, 0] == 0.0
+    # An annulus (pad ring around a drill) plus its barrel: the hole stays open, the pieces add.
+    ring_outer = cylinder_solid("outer", (2.0 * MM, 2.0 * MM), 0.0, 0.035 * MM, 0.85 * MM)
+    # Build the ring as the section of two solids is not possible with primitives alone, so check
+    # orientation with the barrel instead: coverage of a barrel disc at its own section.
+    barrel = cylinder_solid("barrel", (2.0 * MM, 2.0 * MM), -0.1 * MM, 1.7 * MM, 0.45 * MM)
+    disc = plane_section_coverage([barrel.tessellate()], 0.8 * MM, origin_m=(0.0, 0.0), pitch_m=0.05 * MM, shape=(80, 80))
+    assert float(disc.sum()) * (0.05 * MM) ** 2 == pytest.approx(np.pi * (0.45 * MM) ** 2, rel=3.0e-3)
+    both = plane_section_coverage([ring_outer.tessellate(), barrel.tessellate()], 0.0175 * MM, origin_m=(0.0, 0.0), pitch_m=0.05 * MM, shape=(80, 80))
+    # Overlapping solids clamp at one; the union area is the outer disc.
+    assert float(both.sum()) * (0.05 * MM) ** 2 == pytest.approx(np.pi * (0.85 * MM) ** 2, rel=3.0e-3)
+    assert both.max() <= 1.0
+    # Reference: dense point sampling through OpenCASCADE agrees with the exact area per cell.
+    sampled = sample_plane_fill([pad], z_m=0.0175 * MM, origin_m=(0.0, 0.0), pitch_m=0.5 * MM, shape=(8, 10), supersample=10, method="occ")
+    np.testing.assert_allclose(coverage, sampled, atol=0.06)
+    auto = sample_plane_fill([pad], z_m=0.0175 * MM, origin_m=(0.0, 0.0), pitch_m=0.5 * MM, shape=(8, 10))
+    np.testing.assert_allclose(auto, coverage)

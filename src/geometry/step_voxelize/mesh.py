@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover
     _native = None
 
 
-ClassifyMethod = Literal["auto", "occ", "numpy", "native"]
+ClassifyMethod = Literal["auto", "occ", "numpy", "native", "section"]
 
 
 def native_available() -> bool:
@@ -41,9 +41,18 @@ def default_method() -> ClassifyMethod:
     """``PCB_GEOMETRY_CLASSIFY`` overrides; else native when built, else NumPy."""
 
     flag = os.environ.get("PCB_GEOMETRY_CLASSIFY", "").strip().lower()
-    if flag in ("occ", "numpy", "native"):
+    if flag in ("occ", "numpy", "native", "section"):
         return flag  # type: ignore[return-value]
     return "native" if native_available() else "numpy"
+
+
+def default_plane_method() -> ClassifyMethod:
+    """Layer sampling: the exact section rasteriser when built, else the point path."""
+
+    flag = os.environ.get("PCB_GEOMETRY_CLASSIFY", "").strip().lower()
+    if flag in ("occ", "numpy", "native", "section"):
+        return flag  # type: ignore[return-value]
+    return "section" if native_available() else "numpy"
 
 
 @dataclass(frozen=True)
@@ -124,6 +133,75 @@ class TriangleMesh:
         return inside
 
 
+    # ------------------------------------------------------------ sections
+    def section_segments(self, z_m: float) -> np.ndarray:
+        """Oriented segments ``(m, 2, 2)`` of the surface cut at ``z``, counter-clockwise around the solid."""
+
+        if _native is not None:
+            return np.asarray(_native.section_segments(self.triangles_m, float(z_m)))
+        return section_segments_numpy(self.triangles_m, float(z_m))
+
+
+def plane_section_coverage(
+    meshes: "list[TriangleMesh]",
+    z_m: float,
+    *,
+    origin_m: tuple[float, float],
+    pitch_m: float,
+    shape: tuple[int, int],
+) -> np.ndarray:
+    """Exact fraction of every ``(row, col)`` cell covered by the solids' section at ``z``.
+
+    Rows count upwards from ``origin_m``.  The solids of one layer touch but
+    do not overlap, so their coverages add; the sum is clamped to one.
+    Needs the native extension; ``section_segments_numpy`` gives the segments
+    for checks but no NumPy rasteriser is provided.
+    """
+
+    if _native is None:
+        raise ImportError(
+            "the section rasteriser needs the geometry native extension; run cmake or "
+            "python -m geometry.step_voxelize.native.build"
+        )
+    rows, cols = (int(axis) for axis in shape)
+    sets = []
+    for mesh in meshes:
+        lo, hi = mesh.bounds_m
+        if lo[2] <= z_m <= hi[2]:
+            sets.append(mesh.triangles_m)
+    if not sets:
+        return np.zeros((rows, cols))
+    return np.asarray(
+        _native.plane_section_coverage(sets, float(z_m), float(origin_m[0]), float(origin_m[1]), float(pitch_m), rows, cols)
+    )
+
+
+def section_segments_numpy(triangles_m: np.ndarray, z_m: float) -> np.ndarray:
+    """Reference implementation of the oriented plane section, ``(m, 2, 2)``."""
+
+    tri = np.asarray(triangles_m, dtype=np.float64)
+    above = tri[:, :, 2] > z_m
+    crossing = np.any(above, axis=1) & ~np.all(above, axis=1)
+    out = []
+    for t, flags in zip(tri[crossing], above[crossing]):
+        pts = []
+        for i in range(3):
+            p, q = t[i], t[(i + 1) % 3]
+            if flags[i] == flags[(i + 1) % 3]:
+                continue
+            f = (z_m - p[2]) / (q[2] - p[2])
+            pts.append(p[:2] + f * (q[:2] - p[:2]))
+        if len(pts) < 2:
+            continue
+        n = np.cross(t[1] - t[0], t[2] - t[0])
+        tangent = np.array([-n[1], n[0]])
+        p0, p1 = pts[0], pts[1]
+        if np.dot(p1 - p0, tangent) < 0.0:
+            p0, p1 = p1, p0
+        out.append([p0, p1])
+    return np.asarray(out, dtype=np.float64).reshape(-1, 2, 2)
+
+
 def winding_numbers_numpy(points_m: np.ndarray, triangles_m: np.ndarray, *, chunk: int = 4096) -> np.ndarray:
     """Solid angle sum over the triangles divided by ``4π``, chunked over points."""
 
@@ -150,4 +228,4 @@ def winding_numbers_numpy(points_m: np.ndarray, triangles_m: np.ndarray, *, chun
     return out
 
 
-__all__ = ["ClassifyMethod", "TriangleMesh", "default_method", "native_available", "native_threads", "winding_numbers_numpy"]
+__all__ = ["ClassifyMethod", "TriangleMesh", "default_method", "default_plane_method", "native_available", "native_threads", "plane_section_coverage", "section_segments_numpy", "winding_numbers_numpy"]

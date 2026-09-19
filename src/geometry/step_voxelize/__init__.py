@@ -48,7 +48,7 @@ from .reader import (
     synthetic_model,
     write_step,
 )
-from .mesh import TriangleMesh, default_method, winding_numbers_numpy
+from .mesh import TriangleMesh, default_method, default_plane_method, plane_section_coverage, section_segments_numpy, winding_numbers_numpy
 from .mesh import native_available as native_classify_available
 from .section import BoardRaster, rasterize_board, sample_plane_fill
 from .voxelize import sample_volume_fill, voxel_grid, voxelize_bodies
@@ -99,5 +99,8 @@ __all__ = [
     "layers_from_kicad_stackup",
     "read_kicad_stackup",
     "kicad_grid_origin_mm",
+    "default_plane_method",
+    "plane_section_coverage",
+    "section_segments_numpy",
     "write_step",
 ]

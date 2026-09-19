@@ -1,11 +1,13 @@
-"""Planar sampling of the board and its copper onto the routing grid (2.5D).
+"""Planar rasterisation of the board and its copper onto the routing grid (2.5D).
 
-Each conductor layer is sampled at its centre ``z`` with ``supersample²``
-points per cell; the fraction of points inside a copper solid is the cell's
-fill.  The board solid sampled the same way gives the outline, so a board
-that is not a rectangle becomes an active-element mask on the thermal mesh.
-Sampling through the 3D classifier rather than building section faces keeps
-one code path for the 2.5D and 3D parts.
+Each conductor layer is cut at its centre ``z``.  With the native extension
+the cut is exact: the copper solids' tessellations are sectioned into
+oriented loops and rasterised to the exact fraction of every cell they cover
+(``method="section"``, the default when built).  Without it, ``supersample²``
+points per cell are classified against the solids and the inside fraction is
+the fill (``"numpy"``, ``"native"`` or the per-point OpenCASCADE ``"occ"``).
+The board solid treated the same way gives the outline, so a board that is
+not a rectangle becomes an active-element mask on the thermal mesh.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from typing import Sequence
 import numpy as np
 
 from .bodymap import BoardSpec, CopperSpec, LayerSpec, ResolvedBodies
-from .mesh import ClassifyMethod
+from .mesh import ClassifyMethod, default_plane_method, plane_section_coverage
 from .reader import MM, StepSolid
 
 
@@ -36,9 +38,23 @@ def sample_plane_fill(
     supersample: int = 3,
     method: ClassifyMethod = "auto",
 ) -> np.ndarray:
-    """Fraction of every ``(row, col)`` cell covered by the solids at ``z``."""
+    """Fraction of every ``(row, col)`` cell covered by the solids at ``z``.
+
+    ``method="section"`` returns the exact area fraction and ignores
+    ``supersample``; the point methods return the sampled fraction.
+    """
 
     rows, cols = shape
+    chosen = default_plane_method() if method == "auto" else method
+    if chosen == "section":
+        return plane_section_coverage(
+            [solid.tessellate() for solid in solids if solid.bounds_m[0][2] - 1.0e-12 <= z_m <= solid.bounds_m[1][2] + 1.0e-12],
+            z_m,
+            origin_m=origin_m,
+            pitch_m=pitch_m,
+            shape=(rows, cols),
+        )
+    method = chosen
     offsets = _cell_sample_offsets(supersample)
     x = origin_m[0] + pitch_m * (np.arange(cols)[:, None] + offsets[None, :]).reshape(-1)
     y = origin_m[1] + pitch_m * (np.arange(rows)[:, None] + offsets[None, :]).reshape(-1)
