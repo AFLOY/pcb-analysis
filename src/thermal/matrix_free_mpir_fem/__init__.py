@@ -17,6 +17,14 @@ from .mesh import (
 )
 from .operator import MatrixFreeThermalOperator
 from .problem import ThermalConductionProblem
+from .radiation import (
+    STEFAN_BOLTZMANN_W_PER_M2_K4,
+    ExposedFaceRadiation,
+    RadiationBoundary,
+    element_temperature_k,
+    face_temperature_k,
+    newton_linearisation,
+)
 from .solve import ThermalConductionSolution, solve_thermal_conduction
 from .contact import ContactMap, planar_contact_map
 from .coupling import element_joule_heat_w, via_joule_heat_sources
@@ -29,12 +37,15 @@ __all__ = [
     "ContactMap",
     "ConvectionBoundary",
     "ExposedFaceConvection",
+    "ExposedFaceRadiation",
     "FACE_DIRECTIONS",
     "FR4_IN_PLANE_THERMAL_CONDUCTIVITY_W_PER_M_K",
     "FR4_THROUGH_PLANE_THERMAL_CONDUCTIVITY_W_PER_M_K",
     "HeatSource",
     "LayeredThermalMesh",
     "MatrixFreeThermalOperator",
+    "RadiationBoundary",
+    "STEFAN_BOLTZMANN_W_PER_M2_K4",
     "ThermalConductionProblem",
     "ThermalConductionSolution",
     "VoxelMaterial",
@@ -42,6 +53,9 @@ __all__ = [
     "VoxelThermalMesh",
     "choose_block_size",
     "element_joule_heat_w",
+    "element_temperature_k",
+    "face_temperature_k",
+    "newton_linearisation",
     "exposed_element_faces",
     "planar_contact_map",
     "solve_thermal_conduction",

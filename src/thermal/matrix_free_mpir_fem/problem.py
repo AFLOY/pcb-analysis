@@ -8,6 +8,7 @@ import numpy as np
 
 from .boundaries import Convection, ConvectionBoundary, ExposedFaceConvection, HeatSource
 from .mesh import LayeredThermalMesh, _flat_index
+from .radiation import ExposedFaceRadiation, Radiation, RadiationBoundary
 
 
 @dataclass(frozen=True)
@@ -18,8 +19,12 @@ class ThermalConductionProblem:
     lumped equally onto the element's eight corner nodes.  ``nodal_heat_w``
     is power already lumped onto nodes, one value per node (the heat a
     contact hands over through an interface).  At least one positive film
-    coefficient or one fixed node is required, otherwise the temperature
-    level is undetermined.
+    coefficient, one radiating face or one fixed node is required, otherwise
+    the temperature level is undetermined.
+
+    ``radiation`` lists surface-to-ambient radiation boundaries.  They make
+    the problem nonlinear; :func:`solve_thermal_conduction` iterates their
+    Newton linearisation to a fixed point.
     """
 
     mesh: LayeredThermalMesh
@@ -29,6 +34,7 @@ class ThermalConductionProblem:
     heat_sources: tuple[HeatSource, ...] = ()
     element_heat_w: np.ndarray | None = None
     nodal_heat_w: np.ndarray | None = None
+    radiation: tuple[Radiation, ...] = ()
 
     def __post_init__(self) -> None:
         node_shape = self.mesh.node_shape
@@ -43,6 +49,12 @@ class ThermalConductionProblem:
                 )
             boundary.check_shape(self.mesh)
         has_convection = any(boundary.cools for boundary in convection)
+        radiation = tuple(self.radiation)
+        for boundary in radiation:
+            if not isinstance(boundary, (RadiationBoundary, ExposedFaceRadiation)):
+                raise TypeError("radiation entries must be RadiationBoundary or ExposedFaceRadiation")
+            boundary.check_shape(self.mesh)
+        has_convection = has_convection or any(boundary.radiates for boundary in radiation)
 
         if self.fixed_temperature_mask is None:
             mask = np.zeros(node_shape, dtype=bool)
@@ -70,7 +82,7 @@ class ThermalConductionProblem:
         active_nodes = self.mesh.active_nodes
         if not has_convection and not np.any(mask & active_nodes):
             raise ValueError(
-                "the problem needs a positive film coefficient or a fixed node"
+                "the problem needs a positive film coefficient, a radiating face or a fixed node"
             )
 
         if self.element_heat_w is None:
@@ -104,6 +116,7 @@ class ThermalConductionProblem:
                     )
 
         object.__setattr__(self, "convection", convection)
+        object.__setattr__(self, "radiation", radiation)
         object.__setattr__(self, "fixed_temperature_mask", mask.copy())
         object.__setattr__(self, "fixed_temperature_k", values.copy())
         object.__setattr__(self, "heat_sources", sources)

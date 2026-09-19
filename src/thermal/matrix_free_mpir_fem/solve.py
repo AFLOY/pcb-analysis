@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 
 import numpy as np
@@ -27,6 +28,10 @@ class ThermalConductionSolution:
     fixed_temperature_heat_w: float
     heat_balance_error_w: float
     solve: MPIRResult
+    radiative_heat_w: np.ndarray = dataclasses.field(default_factory=lambda: np.zeros(0))
+    radiation_iterations: int = 0
+    radiation_converged: bool = True
+    radiation_change_k: float = 0.0
 
 
 def solve_thermal_conduction(
@@ -42,6 +47,8 @@ def solve_thermal_conduction(
     reference_temperature_k: float | None = None,
     native: bool | None = None,
     native_threads: int | None = None,
+    radiation_max_iterations: int = 25,
+    radiation_tolerance_k: float = 1.0e-4,
 ) -> ThermalConductionSolution:
     """Solve steady heat conduction in a layered PCB with matrix-free MPIR.
 
@@ -51,8 +58,86 @@ def solve_thermal_conduction(
     ``300 K`` of absolute temperature.  ``initial_temperature_k`` warm-starts
     the outer refinement; a previous solution shortens the solve.  Without it
     the solve starts from the reference temperature.
+
+    With ``problem.radiation`` the problem is nonlinear: each radiating face is
+    replaced by its Newton linearisation at the current temperature, the
+    linear problem is solved, and the two repeat until the nodal temperatures
+    move by less than ``radiation_tolerance_k`` (Newton's method on the whole
+    problem, since conduction is linear).  The first linearisation uses the
+    warm start, else the radiative ambient.  ``radiative_heat_w`` then holds
+    the heat each radiation boundary removes and ``convective_heat_w`` only
+    the true convection boundaries.
     """
 
+    if not problem.radiation:
+        return _solve_linear(
+            problem, config=config, runtime=runtime, backend=backend, device_id=device_id,
+            initial_temperature_k=initial_temperature_k, preconditioner=preconditioner,
+            coarse_block_nodes=coarse_block_nodes, reference_temperature_k=reference_temperature_k,
+            native=native, native_threads=native_threads,
+        )
+    if radiation_max_iterations < 1:
+        raise ValueError("radiation_max_iterations must be positive")
+    if not radiation_tolerance_k > 0.0:
+        raise ValueError("radiation_tolerance_k must be positive")
+
+    mesh = problem.mesh
+    if initial_temperature_k is None:
+        start = float(problem.radiation[0].mean_ambient_k())
+        if problem.convection:
+            start = problem.convection[0].mean_ambient_k()
+        current = np.full(mesh.node_shape, start)
+    else:
+        guess = np.asarray(initial_temperature_k, dtype=np.float64)
+        current = np.full(mesh.node_shape, float(guess)) if guess.ndim == 0 else guess.reshape(mesh.node_shape).copy()
+        current = np.where(np.isfinite(current), current, problem.radiation[0].mean_ambient_k())
+    convection_count = len(problem.convection)
+    solution: ThermalConductionSolution | None = None
+    change = float("inf")
+    converged = False
+    for iteration in range(1, radiation_max_iterations + 1):
+        linearised = tuple(boundary.linearize(mesh, current) for boundary in problem.radiation)
+        linear = dataclasses.replace(
+            problem, convection=tuple(problem.convection) + linearised, radiation=()
+        )
+        solution = _solve_linear(
+            linear, config=config, runtime=runtime, backend=backend, device_id=device_id,
+            initial_temperature_k=current, preconditioner=preconditioner,
+            coarse_block_nodes=coarse_block_nodes, reference_temperature_k=reference_temperature_k,
+            native=native, native_threads=native_threads,
+        )
+        proposed = np.where(np.isfinite(solution.temperature_k), solution.temperature_k, current)
+        change = float(np.max(np.abs(proposed - current)))
+        current = proposed
+        if change <= radiation_tolerance_k:
+            converged = True
+            break
+    assert solution is not None
+    heat = solution.convective_heat_w
+    return dataclasses.replace(
+        solution,
+        convective_heat_w=heat[:convection_count],
+        radiative_heat_w=heat[convection_count:],
+        radiation_iterations=iteration,
+        radiation_converged=converged and solution.solve.converged,
+        radiation_change_k=change,
+    )
+
+
+def _solve_linear(
+    problem: ThermalConductionProblem,
+    *,
+    config: MPIRConfig | None,
+    runtime: LowPrecisionRuntime | None,
+    backend: RuntimeBackend | None,
+    device_id: int,
+    initial_temperature_k: np.ndarray | float | None,
+    preconditioner: Preconditioner,
+    coarse_block_nodes: int | None,
+    reference_temperature_k: float | None,
+    native: bool | None,
+    native_threads: int | None,
+) -> ThermalConductionSolution:
     operator = MatrixFreeThermalOperator(
         problem,
         runtime=runtime,

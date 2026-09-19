@@ -203,9 +203,9 @@ def test_mesh_broadcasts_per_slab_conductivity_and_reports_volumes() -> None:
 
 def test_floating_problem_and_bad_inputs_are_rejected() -> None:
     mesh = _uniform_mesh(1, 1.0e-3, (1, 1), 1.0)
-    with pytest.raises(ValueError, match="positive film coefficient or a fixed node"):
+    with pytest.raises(ValueError, match="positive film coefficient, a radiating face or a fixed node"):
         ThermalConductionProblem(mesh)
-    with pytest.raises(ValueError, match="positive film coefficient or a fixed node"):
+    with pytest.raises(ValueError, match="positive film coefficient, a radiating face or a fixed node"):
         ThermalConductionProblem(mesh, convection=(ConvectionBoundary("top", 0.0, 300.0),))
     with pytest.raises(ValueError, match="element_shape is required"):
         LayeredThermalMesh((1.0e-3,), 1.0e-3, 1.0e-3, 1.0)
