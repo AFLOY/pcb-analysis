@@ -181,6 +181,35 @@ plating barrel through the hole, and the hole itself open. Pads with the
 extra thickness KiCad adds by default would sit in a different z window, hence
 the `--no-extra-pad-thickness` flag.
 
+### Component models
+
+With components enabled (the default) KiCad places each footprint's 3D model
+as an assembly component *named by the reference designator* at the footprint
+origin, so after flattening a part's solids are `board/<refdes>/<model path>`
+(`power_module 1/C7/=>[0:1:1:3]`) while copper and the laminate stay direct
+children (`board/=>[...]`). `kicad_component_solids(model)` groups the solids
+by that second path segment, `read_kicad_footprints(board)` reads every
+footprint's reference, footprint name, position, rotation, layer and
+`(property ...)` fields from the `.kicad_pcb`, and `KicadFootprint.step_xy_mm`
+gives the origin in the STEP frame (y negated). Custom footprint fields are
+where a design carries per-part data that the STEP does not, such as a
+thermal network model and its resistances; AP242 user-defined properties
+(`STEPCAFControl_Writer.SetMetadataMode`, read back as `TDataStd_NamedData`)
+round-trip through OCP 8.0.1 and are the planned carrier once the parameters
+live in the STEP itself.
+
+`kicad-cli` does not read the GUI path table, so library models referenced as
+`${KICAD10_3DMODEL_DIR}/...` are silently dropped ("Could not add 3D model for
+C1") unless the variable is passed: `export_kicad_step(..., model_dir=...)`
+defines it for the installed major version (`kicad_model_dir_variable`,
+`default_kicad_model_dir`). Placement needs the flattener to accumulate the
+transforms of nested components; before that fix every part landed at its
+model origin. Verified with KiCad 10.0.5 on `power_module`: the eleven 0603
+parts whose library model was present centre within 0.05 mm of their
+footprint origin and stand on the board (`tests/test_kicad_step.py`, skipped
+without the library models; `tests/test_geometry_step.py` covers the nested
+placement with a synthetic assembly).
+
 ### Acceptance 5 against plane_opt
 
 `experiments/kicad_step_acceptance.py` exports the three boards of the
@@ -319,7 +348,7 @@ requested.
 |---|---|
 | `geometry/cad_import/reader.py` | STEP load through `STEPCAFControl`, assembly flattening into named solids, point-in-solid tests, synthetic boxes and cylinders, `write_step` (the only module importing `OCP`) |
 | `geometry/cad_import/bodymap.py` | `BodyMap` (board stackup, copper, vias, bodies, ignore) and its exhaustive resolution against the model |
-| `geometry/cad_import/kicad.py` | `kicad-cli` STEP export, stackup reading, z-window body map, y-down grid origin |
+| `geometry/cad_import/kicad.py` | `kicad-cli` STEP export, stackup and footprint reading, refdes to solid binding, z-window body map, y-down grid origin |
 | `geometry/cad_import/mesh.py` | `TriangleMesh`, NumPy winding number, path selection |
 | `geometry/cad_import/skin.py` | thickness over skin depth per layer, `uniform` / `filaments` / `3d` |
 | `geometry/cad_import/native/point_in_mesh.cpp` | C++ winding number over points (OpenMP) and the exact plane-section coverage rasteriser, module `_voxelize_native` |
