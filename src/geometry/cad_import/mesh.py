@@ -146,16 +146,20 @@ def plane_section_coverage(
     meshes: "list[TriangleMesh]",
     z_m: float,
     *,
-    origin_m: tuple[float, float],
-    pitch_m: float,
-    shape: tuple[int, int],
+    origin_m: tuple[float, float] | None = None,
+    pitch_m: float | None = None,
+    shape: tuple[int, int] | None = None,
+    x_edges_m: np.ndarray | None = None,
+    y_edges_m: np.ndarray | None = None,
 ) -> np.ndarray:
     """Exact fraction of every ``(row, col)`` cell covered by the solids' section at ``z``.
 
-    Rows count upwards from ``origin_m``.  The solids of one layer touch but
-    do not overlap, so their coverages add; the sum is clamped to one.
-    Needs the native extension; ``section_segments_numpy`` gives the segments
-    for checks but no NumPy rasteriser is provided.
+    Either a uniform grid (``origin_m``, ``pitch_m``, ``shape``) or a graded
+    one (``x_edges_m``, ``y_edges_m``, the grid lines in metres).  Rows count
+    upwards.  The solids of one layer touch but do not overlap, so their
+    coverages add; the sum is clamped to one.  Needs the native extension;
+    ``section_segments_numpy`` gives the segments for checks but no NumPy
+    rasteriser is provided.
     """
 
     if _native is None:
@@ -163,7 +167,17 @@ def plane_section_coverage(
             "the section rasteriser needs the geometry native extension; run cmake or "
             "python -m geometry.cad_import.native.build"
         )
-    rows, cols = (int(axis) for axis in shape)
+    graded = x_edges_m is not None or y_edges_m is not None
+    if graded:
+        if x_edges_m is None or y_edges_m is None or origin_m is not None or pitch_m is not None or shape is not None:
+            raise ValueError("pass x_edges_m and y_edges_m alone, or origin_m, pitch_m and shape")
+        x_edges = np.ascontiguousarray(x_edges_m, dtype=np.float64).reshape(-1)
+        y_edges = np.ascontiguousarray(y_edges_m, dtype=np.float64).reshape(-1)
+        rows, cols = y_edges.size - 1, x_edges.size - 1
+    else:
+        if origin_m is None or pitch_m is None or shape is None:
+            raise ValueError("a uniform grid needs origin_m, pitch_m and shape")
+        rows, cols = (int(axis) for axis in shape)
     sets = []
     for mesh in meshes:
         lo, hi = mesh.bounds_m
@@ -171,6 +185,8 @@ def plane_section_coverage(
             sets.append(mesh.triangles_m)
     if not sets:
         return np.zeros((rows, cols))
+    if graded:
+        return np.asarray(_native.plane_section_coverage_graded(sets, float(z_m), x_edges, y_edges))
     return np.asarray(
         _native.plane_section_coverage(sets, float(z_m), float(origin_m[0]), float(origin_m[1]), float(pitch_m), rows, cols)
     )

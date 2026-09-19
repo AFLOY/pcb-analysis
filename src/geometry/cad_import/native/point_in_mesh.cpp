@@ -303,6 +303,74 @@ py::array_t<double> plane_section_coverage(const std::vector<ArrF64>& triangle_s
     return result;
 }
 
+// Coverage on a graded tensor grid.  Each axis is mapped piecewise linearly
+// onto cell index space (cell i spans [i, i + 1)); the map is affine inside a
+// cell, so a segment split at every grid line it crosses keeps exact area
+// fractions under the uniform accumulation above.  Outside the grid the
+// first and last cell's scale continue the map.
+inline double to_index(double v, const std::vector<double>& edges) {
+    const int n = static_cast<int>(edges.size()) - 1;
+    if (v <= edges.front()) return (v - edges.front()) / (edges[1] - edges[0]);
+    if (v >= edges.back()) return n + (v - edges.back()) / (edges[n] - edges[n - 1]);
+    const int i = static_cast<int>(std::upper_bound(edges.begin(), edges.end(), v) - edges.begin()) - 1;
+    return i + (v - edges[i]) / (edges[i + 1] - edges[i]);
+}
+
+inline void split_at_edges(double a, double b, const std::vector<double>& edges, std::vector<double>& ts) {
+    if (a == b) return;
+    const double lo = std::min(a, b), hi = std::max(a, b);
+    auto first = std::upper_bound(edges.begin(), edges.end(), lo);
+    for (auto it = first; it != edges.end() && *it < hi; ++it) ts.push_back((*it - a) / (b - a));
+}
+
+py::array_t<double> plane_section_coverage_graded(const std::vector<ArrF64>& triangle_sets, double z,
+                                                  const ArrF64& x_edges, const ArrF64& y_edges) {
+    const std::vector<double> ex(x_edges.data(), x_edges.data() + x_edges.size());
+    const std::vector<double> ey(y_edges.data(), y_edges.data() + y_edges.size());
+    if (ex.size() < 2 || ey.size() < 2) throw std::invalid_argument("edges need at least two lines");
+    for (std::size_t i = 1; i < ex.size(); ++i)
+        if (!(ex[i] > ex[i - 1])) throw std::invalid_argument("x_edges must increase");
+    for (std::size_t i = 1; i < ey.size(); ++i)
+        if (!(ey[i] > ey[i - 1])) throw std::invalid_argument("y_edges must increase");
+    const int cols = static_cast<int>(ex.size()) - 1, rows = static_cast<int>(ey.size()) - 1;
+    const int stride = cols + 2;
+    std::vector<double> acc(static_cast<std::size_t>(rows) * stride, 0.0);
+    {
+        py::gil_scoped_release release;
+        std::vector<double> ts;
+        for (const ArrF64& triangles : triangle_sets) {
+            const std::vector<Triangle> mesh = load_triangles(triangles);
+            for (const Segment& s : plane_section(mesh, z)) {
+                ts.clear();
+                ts.push_back(0.0);
+                split_at_edges(s.x0, s.x1, ex, ts);
+                split_at_edges(s.y0, s.y1, ey, ts);
+                ts.push_back(1.0);
+                std::sort(ts.begin(), ts.end());
+                for (std::size_t k = 0; k + 1 < ts.size(); ++k) {
+                    const double t0 = ts[k], t1 = ts[k + 1];
+                    if (t1 <= t0) continue;
+                    const double ax = s.x0 + t0 * (s.x1 - s.x0), ay = s.y0 + t0 * (s.y1 - s.y0);
+                    const double bx = s.x0 + t1 * (s.x1 - s.x0), by = s.y0 + t1 * (s.y1 - s.y0);
+                    accumulate_line(acc, rows, cols, to_index(ax, ex), to_index(ay, ey), to_index(bx, ex),
+                                    to_index(by, ey));
+                }
+            }
+        }
+    }
+    py::array_t<double> result({static_cast<py::ssize_t>(rows), static_cast<py::ssize_t>(cols)});
+    double* out = result.mutable_data();
+    for (int y = 0; y < rows; ++y) {
+        double running = 0.0;
+        const double* line = acc.data() + static_cast<std::size_t>(y) * stride;
+        for (int x = 0; x < cols; ++x) {
+            running += line[x];
+            out[static_cast<std::size_t>(y) * cols + x] = std::min(1.0, std::fabs(running));
+        }
+    }
+    return result;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_voxelize_native, m) {
@@ -311,6 +379,8 @@ PYBIND11_MODULE(_voxelize_native, m) {
     m.def("contains", &contains, py::arg("points"), py::arg("triangles"), py::arg("threshold") = 0.5,
           py::arg("threads") = 1);
     m.def("section_segments", &section_segments, py::arg("triangles"), py::arg("z"));
+    m.def("plane_section_coverage_graded", &plane_section_coverage_graded, py::arg("triangle_sets"), py::arg("z"),
+          py::arg("x_edges"), py::arg("y_edges"));
     m.def("plane_section_coverage", &plane_section_coverage, py::arg("triangle_sets"), py::arg("z"),
           py::arg("origin_x"), py::arg("origin_y"), py::arg("pitch"), py::arg("rows"), py::arg("cols"));
 }

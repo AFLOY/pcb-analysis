@@ -123,8 +123,8 @@ def board_thermal_mesh(raster: BoardRaster, *, thickness_source: str = "stackup"
     active = np.broadcast_to(raster.outline[None], (len(thickness), rows, cols)).copy()
     mesh = LayeredThermalMesh(
         slab_thickness_m=tuple(thickness),
-        pitch_x_m=raster.pitch_m,
-        pitch_y_m=raster.pitch_m,
+        pitch_x_m=raster.pitch_x_m,
+        pitch_y_m=raster.pitch_y_m,
         conductivity_w_per_m_k=np.where(active, np.stack(in_plane), 1.0),
         through_plane_conductivity_w_per_m_k=np.where(active, np.stack(through), 1.0),
         active=active,
@@ -181,6 +181,11 @@ def plane_opt_problem_mapping(
     from .skin import skin_report, warn_if_not_sheet
 
     rows, cols = raster.shape
+    if not raster.is_uniform:
+        raise ValueError(
+            "the plane-opt-current-field-problem/v1 grid is uniform; the sheet PEEC on graded grids is not "
+            "implemented yet (see SHEET_PEEC.md)"
+        )
     occupancy = raster.occupancy
     if frequency_hz > 0.0:
         warn_if_not_sheet(skin_report(raster, frequency_hz, thickness_source=thickness_source))

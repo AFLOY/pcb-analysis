@@ -19,6 +19,8 @@ from typing import Sequence
 import numpy as np
 
 from .bodymap import BoardSpec, CopperSpec, LayerSpec, ResolvedBodies
+from electrical.matrix_free_mpir_fem.grid import TensorGrid
+
 from .mesh import ClassifyMethod, default_plane_method, plane_section_coverage
 from .reader import MM, StepSolid
 
@@ -33,39 +35,45 @@ def sample_plane_fill(
     solids: Sequence[StepSolid],
     *,
     z_m: float,
-    origin_m: tuple[float, float],
-    pitch_m: float,
-    shape: tuple[int, int],
+    origin_m: tuple[float, float] | None = None,
+    pitch_m: float | None = None,
+    shape: tuple[int, int] | None = None,
+    grid: TensorGrid | None = None,
     supersample: int = 3,
     method: ClassifyMethod = "auto",
 ) -> np.ndarray:
     """Fraction of every ``(row, col)`` cell covered by the solids at ``z``.
 
-    ``method="section"`` returns the exact area fraction and ignores
-    ``supersample``; the point methods return the sampled fraction.
+    The grid is uniform (``origin_m``, ``pitch_m``, ``shape``) or a
+    ``TensorGrid`` in the STEP frame (``grid``).  ``method="section"``
+    returns the exact area fraction and ignores ``supersample``; the point
+    methods return the sampled fraction.
     """
 
-    rows, cols = shape
+    if grid is None:
+        if origin_m is None or pitch_m is None or shape is None:
+            raise ValueError("pass grid, or origin_m, pitch_m and shape")
+        grid = TensorGrid.uniform(pitch_m, shape, origin_m)
+    elif origin_m is not None or pitch_m is not None or shape is not None:
+        raise ValueError("pass either grid or origin_m, pitch_m and shape")
+    rows, cols = grid.shape
     chosen = default_plane_method() if method == "auto" else method
+    crossing = [solid for solid in solids if solid.bounds_m[0][2] - 1.0e-12 <= z_m <= solid.bounds_m[1][2] + 1.0e-12]
     if chosen == "section":
-        return plane_section_coverage(
-            [solid.tessellate() for solid in solids if solid.bounds_m[0][2] - 1.0e-12 <= z_m <= solid.bounds_m[1][2] + 1.0e-12],
-            z_m,
-            origin_m=origin_m,
-            pitch_m=pitch_m,
-            shape=(rows, cols),
-        )
+        meshes = [solid.tessellate() for solid in crossing]
+        if grid.is_uniform:
+            return plane_section_coverage(
+                meshes, z_m, origin_m=grid.origin_m, pitch_m=float(grid.pitch_x_m[0]), shape=(rows, cols)
+            )
+        return plane_section_coverage(meshes, z_m, x_edges_m=grid.x_edges_m, y_edges_m=grid.y_edges_m)
     method = chosen
     offsets = _cell_sample_offsets(supersample)
-    x = origin_m[0] + pitch_m * (np.arange(cols)[:, None] + offsets[None, :]).reshape(-1)
-    y = origin_m[1] + pitch_m * (np.arange(rows)[:, None] + offsets[None, :]).reshape(-1)
+    x = (grid.x_edges_m[:-1, None] + grid.pitch_x_m[:, None] * offsets[None, :]).reshape(-1)
+    y = (grid.y_edges_m[:-1, None] + grid.pitch_y_m[:, None] * offsets[None, :]).reshape(-1)
     grid_x, grid_y = np.meshgrid(x, y)  # (rows*s, cols*s)
     points = np.column_stack((grid_x.reshape(-1), grid_y.reshape(-1), np.full(grid_x.size, z_m)))
     inside = np.zeros(points.shape[0], dtype=bool)
-    for solid in solids:
-        lo, hi = solid.bounds_m
-        if not (lo[2] - 1.0e-12 <= z_m <= hi[2] + 1.0e-12):
-            continue
+    for solid in crossing:
         inside |= solid.contains(points, method=method)
     fine = inside.reshape(rows, supersample, cols, supersample)
     return fine.mean(axis=(1, 3))
@@ -73,16 +81,25 @@ def sample_plane_fill(
 
 @dataclass(frozen=True)
 class BoardRaster:
-    """The board on the routing grid: outline and per-layer copper fill."""
+    """The board on the routing grid: outline and per-layer copper fill.
+
+    ``grid`` holds the grid lines in the STEP frame (metres, y up); it is
+    built from ``pitch_mm`` and ``origin_mm`` when not given, and those two
+    describe it when it is uniform (``pitch_mm`` is ``None`` on a graded
+    grid).  Row 0 of the arrays is the row of smallest ``y`` unless
+    ``y_down``, in which case the rows are stored top-down and ``pitch_y_m``
+    / ``row_y_m`` follow that order.
+    """
 
     spec: BoardSpec
-    pitch_mm: float
+    pitch_mm: float | None
     origin_mm: tuple[float, float]
     outline: np.ndarray
     fill: np.ndarray
     threshold: float = 0.5
     y_down: bool = False
     measured_thickness_mm: tuple[float | None, ...] = ()
+    grid: TensorGrid | None = None
 
     def __post_init__(self) -> None:
         outline = np.asarray(self.outline, dtype=bool)
@@ -91,6 +108,19 @@ class BoardRaster:
             raise ValueError("fill must be (layers, rows, cols) over the outline grid")
         if not 0.0 < self.threshold <= 1.0:
             raise ValueError("threshold must lie in (0, 1]")
+        if self.grid is None:
+            if self.pitch_mm is None:
+                raise ValueError("a raster without a grid needs pitch_mm")
+            grid = TensorGrid.uniform(float(self.pitch_mm) * MM, outline.shape, (self.origin_mm[0] * MM, self.origin_mm[1] * MM))
+        else:
+            grid = self.grid
+            if grid.shape != outline.shape:
+                raise ValueError("grid shape must match the outline (rows, cols)")
+            origin = (grid.origin_m[0] / MM, grid.origin_m[1] / MM)
+            object.__setattr__(self, "origin_mm", (float(origin[0]), float(origin[1])))
+            pitch = float(grid.pitch_x_m[0]) / MM if grid.is_uniform else None
+            object.__setattr__(self, "pitch_mm", pitch)
+        object.__setattr__(self, "grid", grid)
         object.__setattr__(self, "outline", outline)
         object.__setattr__(self, "fill", np.where(outline[None], fill, 0.0))
         measured = tuple(self.measured_thickness_mm)
@@ -115,8 +145,35 @@ class BoardRaster:
         return (self.fill >= self.threshold).astype(np.float64)
 
     @property
+    def is_uniform(self) -> bool:
+        return self.grid.is_uniform  # type: ignore[union-attr]
+
+    @property
     def pitch_m(self) -> float:
+        """The uniform pitch in metres; raises on a graded grid."""
+
+        if self.pitch_mm is None:
+            raise ValueError("the raster grid is graded; use pitch_x_m / pitch_y_m")
         return self.pitch_mm * MM
+
+    @property
+    def pitch_x_m(self) -> np.ndarray:
+        """Column widths in metres, ``(cols,)``."""
+
+        return self.grid.pitch_x_m  # type: ignore[union-attr]
+
+    @property
+    def pitch_y_m(self) -> np.ndarray:
+        """Row heights in metres in array row order (top-down when ``y_down``), ``(rows,)``."""
+
+        pitch = self.grid.pitch_y_m  # type: ignore[union-attr]
+        return pitch[::-1].copy() if self.y_down else pitch
+
+    @property
+    def cell_area_m2(self) -> np.ndarray:
+        """Cell areas ``(rows, cols)`` in array row order."""
+
+        return self.pitch_y_m[:, None] * self.pitch_x_m[None, :]
 
     @property
     def origin_m(self) -> tuple[float, float]:
@@ -151,16 +208,18 @@ class BoardRaster:
         return tuple(out)
 
     def copper_area_m2(self, layer: int) -> float:
-        return float(np.sum(self.fill[layer])) * self.pitch_m**2
+        return float(np.sum(self.fill[layer] * self.cell_area_m2))
 
     def cell_of(self, x_m: float, y_m: float) -> tuple[int, int]:
         """Cell of a point in the STEP frame; row 0 is at the origin unless ``y_down``."""
 
-        col = int(np.floor((x_m - self.origin_m[0]) / self.pitch_m))
-        row = int(np.floor((y_m - self.origin_m[1]) / self.pitch_m))
+        grid = self.grid
+        assert grid is not None
         rows, cols = self.shape
-        if not (0 <= row < rows and 0 <= col < cols):
+        if not (grid.x_edges_m[0] <= x_m < grid.x_edges_m[-1] and grid.y_edges_m[0] <= y_m < grid.y_edges_m[-1]):
             raise ValueError(f"point ({x_m}, {y_m}) lies outside the board grid")
+        col = int(np.searchsorted(grid.x_edges_m, x_m, side="right") - 1)
+        row = int(np.searchsorted(grid.y_edges_m, y_m, side="right") - 1)
         if self.y_down:
             row = rows - 1 - row
         return row, col
@@ -170,14 +229,14 @@ class BoardRaster:
 
         rows = self.shape[0]
         index = rows - 1 - row if self.y_down else row
-        return self.origin_m[1] + (index + 0.5) * self.pitch_m
+        return float(self.grid.y_centres_m[index])  # type: ignore[union-attr]
 
 
 def rasterize_board(
     resolved: ResolvedBodies,
     spec: BoardSpec,
     *,
-    pitch_mm: float,
+    pitch_mm: float | None = None,
     supersample: int = 3,
     origin_mm: tuple[float, float] | None = None,
     threshold: float = 0.5,
@@ -185,37 +244,42 @@ def rasterize_board(
     shape: tuple[int, int] | None = None,
     y_down: bool = False,
     thickness_tolerance: float = 0.05,
+    grid: TensorGrid | None = None,
 ) -> BoardRaster:
     """Sample the board outline and each layer's copper onto the grid.
 
-    The grid origin defaults to the board's minimum corner and the grid
-    covers the board's bounding box with whole cells; ``shape`` fixes the
-    ``(rows, cols)`` instead, for a grid another tool has already chosen.
+    The grid is uniform with ``pitch_mm``: its origin defaults to the board's
+    minimum corner and it covers the board's bounding box with whole cells,
+    or ``shape`` fixes the ``(rows, cols)`` for a grid another tool has
+    already chosen.  Or it is a ``TensorGrid`` in the STEP frame (metres),
+    typically from :func:`geometry.cad_import.refinement.board_refined_grid`.
     With ``y_down`` row 0 is the row of largest STEP ``y``, which is KiCad's
     and plane-opt's y-down convention (KiCad exports STEP with ``y`` negated,
     so a KiCad grid whose rows count downwards maps onto STEP rows counted
     from the top).
     """
 
-    if pitch_mm <= 0.0 or not np.isfinite(pitch_mm):
-        raise ValueError("pitch_mm must be positive")
     board = resolved.board
     lo, hi = board.bounds_m
-    origin = (lo[0] / MM, lo[1] / MM) if origin_mm is None else origin_mm
-    if shape is None:
-        cols = int(np.ceil((hi[0] / MM - origin[0]) / pitch_mm - 1.0e-6))
-        rows = int(np.ceil((hi[1] / MM - origin[1]) / pitch_mm - 1.0e-6))
-    else:
-        rows, cols = (int(axis) for axis in shape)
-    if rows < 1 or cols < 1:
-        raise ValueError("the grid origin lies beyond the board")
-    pitch_m = pitch_mm * MM
-    origin_m = (origin[0] * MM, origin[1] * MM)
+    if grid is None:
+        if pitch_mm is None or pitch_mm <= 0.0 or not np.isfinite(pitch_mm):
+            raise ValueError("pitch_mm must be positive unless a grid is given")
+        origin = (lo[0] / MM, lo[1] / MM) if origin_mm is None else origin_mm
+        if shape is None:
+            cols = int(np.ceil((hi[0] / MM - origin[0]) / pitch_mm - 1.0e-6))
+            rows = int(np.ceil((hi[1] / MM - origin[1]) / pitch_mm - 1.0e-6))
+        else:
+            rows, cols = (int(axis) for axis in shape)
+        if rows < 1 or cols < 1:
+            raise ValueError("the grid origin lies beyond the board")
+        grid = TensorGrid.uniform(pitch_mm * MM, (rows, cols), (origin[0] * MM, origin[1] * MM))
+    elif pitch_mm is not None or origin_mm is not None or shape is not None:
+        raise ValueError("pass either grid or pitch_mm / origin_mm / shape")
+    rows, cols = grid.shape
+    origin = (grid.origin_m[0] / MM, grid.origin_m[1] / MM)
     board_mid_z = (lo[2] + hi[2]) / 2.0
     outline = (
-        sample_plane_fill(
-            [board], z_m=board_mid_z, origin_m=origin_m, pitch_m=pitch_m, shape=(rows, cols), supersample=supersample, method=method
-        )
+        sample_plane_fill([board], z_m=board_mid_z, grid=grid, supersample=supersample, method=method)
         >= threshold
     )
     by_layer: dict[str, list[StepSolid]] = {layer.name: [] for layer in spec.layers}
@@ -243,19 +307,13 @@ def rasterize_board(
         if not solids:
             continue
         fill[index] = sample_plane_fill(
-            solids,
-            z_m=layer.center_z_mm * MM,
-            origin_m=origin_m,
-            pitch_m=pitch_m,
-            shape=(rows, cols),
-            supersample=supersample,
-            method=method,
+            solids, z_m=layer.center_z_mm * MM, grid=grid, supersample=supersample, method=method
         )
     if y_down:
         outline = outline[::-1].copy()
         fill = fill[:, ::-1].copy()
     raster = BoardRaster(
-        spec, pitch_mm, (float(origin[0]), float(origin[1])), outline, fill, threshold, y_down, tuple(measured)
+        spec, None, (float(origin[0]), float(origin[1])), outline, fill, threshold, y_down, tuple(measured), grid=grid
     )
     for name, stackup_mm, measured_mm in raster.thickness_mismatches(relative_tolerance=thickness_tolerance):
         warnings.warn(
