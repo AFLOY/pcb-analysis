@@ -14,6 +14,7 @@ fields between the solvers and iterates where a field feeds back.
 | `ElectroEmissionScenario` | DC conduction, dipole superposition | `J` → near and far field, limit margin |
 | `ElectroThermalEmissionScenario` | all three | `σ(T)`-converged `J` → field; cold `J` → field for comparison |
 | `SheetPeecEmissionScenario` | sheet PEEC at each frequency, dipole superposition | `J(f)` → field |
+| `BoardEnclosureThermalScenario` | board conduction and one conduction solve per body, iterated | contact heat → body `T` → board Robin ambient |
 
 `run_scenario` dispatches on the dataclass type; `run_scenarios` runs a list.
 The `backend` argument reaches every solver (`"cpu"`, `"cuda"`, `"auto"`).
@@ -62,6 +63,46 @@ the cold loss, and a per-iteration history with the relaxation factor.
   loss to `1e-12`; the accelerated and plain iterations agree to `1e-6`.
 - An iteration cap reports `converged=False` and keeps the last iterate.
 
+## Board and separately meshed bodies
+
+A heat sink, enclosure or component body keeps its own `LayeredThermalMesh`
+(a `VoxelThermalMesh` from CAD) with its own pitch and origin. A `ContactMap`
+from `thermal.matrix_free_mpir_fem` names which board face touches which body
+face, the overlap area, and the joint conductance `G` (from a TIM's `k / t`
+or a contact coefficient); `planar_contact_map` builds it for a body standing
+on the board's top or hanging below its bottom, intersecting the two cell
+footprints in a common frame. The iteration is Robin on the board, Neumann on
+the body:
+
+1. the board is solved with an extra `ConvectionBoundary` on the contact
+   faces, film coefficient `G / A` and a per-face ambient equal to the body's
+   current contact temperature (several body faces on one board face add
+   their conductances and average their temperatures with `G` weights);
+2. the heat that crossed each pair, `G (T_board − T_body)`, is lumped onto the
+   body's face nodes as `nodal_heat_w` and the body is solved with its own
+   boundaries;
+3. the contact temperatures are relaxed (Aitken by default) and step 1
+   repeats until they move less than `temperature_tolerance_k` and the
+   interface heat is steady.
+
+A hard contact on a stiff body has a fixed-point gain near one, so the
+unrelaxed exchange oscillates with growing amplitude; the run stops when the
+contact temperature change exceeds `divergence_temperature_k` and reports
+`converged = False` rather than overflowing the solves.
+
+### Verification
+
+`tests/test_board_enclosure_coupling.py` solves a three-layer board with a
+6 × 6 × 4 mm aluminium block on a 1 µm, 0.01 W/mK interface (`G / A = 1e4
+W/m²K`) both as one masked layered mesh and as two meshes through the contact
+map. With a 97 K rise the partitioned board agrees with the monolithic mesh to
+0.036 K and the block to 0.011 K (both below `2e-3` of the rise); the residual
+is the monolithic mesh's cooled interface sliver and its in-plane conduction,
+which the contact model omits. The interface heat equals the board's
+convective heat on the contact boundary to `1e-9` and the block's rejected heat
+to `1e-6`. Aitken converges in 6 interface iterations, a fixed relaxation of
+0.2 in 20, and the unrelaxed exchange is stopped as diverging after 9.
+
 ## Emission scenarios
 
 `ElectroEmissionScenario` uses one DC solve as a phasor at every frequency of
@@ -105,10 +146,11 @@ decade in field and that the FCC Class B limits at 3 m are read correctly.
   (immunity) scenario is provided.
 - The scenarios share one in-plane element grid; the thermal stack may add
   laminate slabs but not refine the footprint.
-- No scenario yet joins the board to a separately meshed heat sink or
-  enclosure. The staggered interface iteration for that
-  (`BoardEnclosureThermalScenario`) is specified in
-  `GEOMETRY_STEP_VOXELIZE.md`.
+- `BoardEnclosureThermalScenario` is thermal only; wrapping it in the
+  copper `σ(T)` loop of `ElectroThermalScenario` is the next increment.
+- The contact model carries no in-plane conduction inside the joint and no
+  cooling of the joint's edge; a thick or conductive interface material
+  belongs in the body mesh instead.
 
 `examples/coupled_scenarios_demo.py` runs the electro-thermal iteration on a
 two-layer loop and then evaluates its emission, printing the iteration history,

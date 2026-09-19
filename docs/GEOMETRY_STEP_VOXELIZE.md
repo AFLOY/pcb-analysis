@@ -111,7 +111,8 @@ solver does not model buoyancy.
 ## Interface between the two meshes
 
 The front end also emits the **contact map** between the board and the 3D
-bodies. For every board element face on the top or bottom surface that lies
+bodies (the dataclass lives in `thermal.matrix_free_mpir_fem.contact`, so
+`multiphysics` needs no geometry import to use it). For every board element face on the top or bottom surface that lies
 under an active voxel, it records
 
 ```text
@@ -151,9 +152,10 @@ requested.
 | `geometry/step_voxelize/reader.py` | STEP load, assembly flattening, body map resolution (only module importing `OCP`) |
 | `geometry/step_voxelize/section.py` | planar sections and 2D rasterisation to the routing grid |
 | `geometry/step_voxelize/voxelize.py` | 3D classification, fill fraction, exposed faces |
-| `geometry/step_voxelize/contact.py` | board/voxel contact map |
+| `geometry/step_voxelize/contact.py` | board/voxel contact placement (origins, TIM spec) feeding `thermal.matrix_free_mpir_fem.planar_contact_map` |
 | `geometry/step_voxelize/adapters.py` | build `Stackup`, occupancy, `ViaSet`, `LayeredThermalMesh`, plane-opt mapping |
-| `thermal/matrix_free_mpir_fem/voxel.py` | `VoxelThermalMesh`, masked operator, exposed-face convection |
+| `thermal/matrix_free_mpir_fem/voxel.py`, `conduction.py` | `VoxelThermalMesh`, active-element mask, exposed-face convection |
+| `thermal/matrix_free_mpir_fem/contact.py` | `ContactMap`, `planar_contact_map` |
 | `multiphysics/staggered_coupling/board_enclosure.py` | interface iteration |
 
 Import direction: `electrical ← geometry`, `thermal ← geometry`,

@@ -11,6 +11,7 @@ dispatches on its type and returns the matching result.  The chains are:
 | ``ElectroEmissionScenario`` | DC conduction, dipole fields | J → radiated field |
 | ``ElectroThermalEmissionScenario`` | all three | σ(T)-converged J → radiated field |
 | ``SheetPeecEmissionScenario`` | sheet PEEC per frequency, dipole fields | J(f) → radiated field |
+| ``BoardEnclosureThermalScenario`` | board and body conduction, iterated | contact heat ↔ contact temperature |
 
 The EMC step never feeds back: radiation at these levels does not change the
 currents.  The thermal step feeds back through the copper resistivity only.
@@ -34,6 +35,11 @@ from thermal.matrix_free_mpir_fem import (
     solve_thermal_conduction,
 )
 
+from .board_enclosure import (
+    BoardEnclosureThermalResult,
+    BoardEnclosureThermalScenario,
+    run_board_enclosure_thermal,
+)
 from .electro_thermal import (
     CouplingConfig,
     ElectroThermalResult,
@@ -138,6 +144,13 @@ def _(scenario: ThermalScenario, *, backend: str | None = None, device_id: int =
 @run_scenario.register
 def _(scenario: ElectroThermalScenario, *, backend: str | None = None, device_id: int = 0) -> ElectroThermalResult:
     return run_electro_thermal(scenario, backend=backend, device_id=device_id)
+
+
+@run_scenario.register
+def _(
+    scenario: BoardEnclosureThermalScenario, *, backend: str | None = None, device_id: int = 0
+) -> BoardEnclosureThermalResult:
+    return run_board_enclosure_thermal(scenario, backend=backend, device_id=device_id)
 
 
 def _emission_backend(backend: str | None) -> str:

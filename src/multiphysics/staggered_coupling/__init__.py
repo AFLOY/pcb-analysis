@@ -6,6 +6,14 @@ The emission chains hand a converged current distribution to the dipole
 superposition.  ``run_scenario`` dispatches on the scenario dataclass.
 """
 
+from .board_enclosure import (
+    BoardEnclosureThermalResult,
+    BoardEnclosureThermalScenario,
+    BodyContact,
+    InterfaceCouplingConfig,
+    InterfaceStep,
+    run_board_enclosure_thermal,
+)
 from .electro_thermal import (
     COPPER_TEMPERATURE_COEFFICIENT_PER_K,
     CouplingConfig,
@@ -41,7 +49,12 @@ from .scenarios import (
 )
 
 __all__ = [
+    "BoardEnclosureThermalResult",
+    "BoardEnclosureThermalScenario",
+    "BodyContact",
     "COPPER_TEMPERATURE_COEFFICIENT_PER_K",
+    "InterfaceCouplingConfig",
+    "InterfaceStep",
     "CouplingConfig",
     "CouplingStep",
     "ElectricalScenario",
@@ -61,6 +74,7 @@ __all__ = [
     "conductivity_at_temperature",
     "electrical_layer_temperature_k",
     "evaluate_emission",
+    "run_board_enclosure_thermal",
     "run_electro_thermal",
     "run_pcb_dc_emission",
     "run_scenario",
