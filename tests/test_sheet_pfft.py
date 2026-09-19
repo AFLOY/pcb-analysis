@@ -236,14 +236,15 @@ def test_cuda_pfft_solve_matches_the_cpu_solve_on_a_graded_grid() -> None:
         pytest.skip("no CUDA device")
     mesh, operator, terminals, context = build_plane_opt_sheet_inputs(_graded_problem(1.0e6))
     cpu = solve_sheet_case(mesh, operator, terminals, frequency_hz=1.0e6, tolerance=1e-9)
-    # The CUDA path aims its Krylov residual three decades below the public
-    # tolerance; 1e-6 keeps that target above the float64 floor.
+    # The CUDA path runs GMRES one restart cycle at a time and stops on the
+    # public saddle-point residual, so the tolerance means what it does on the CPU.
     gpu, telemetry = solve_sheet_case_cuda(
-        mesh, operator, terminals, frequency_hz=1.0e6, tolerance=1e-6, max_iterations=6, restart=60
+        mesh, operator, terminals, frequency_hz=1.0e6, tolerance=1e-9, max_iterations=40, restart=60
     )
-    assert cpu.converged and gpu.residual < 1e-6
+    assert cpu.converged and gpu.converged and gpu.residual <= 1e-9
+    assert gpu.iterations <= 6  # restart cycles, not inner iterations
     scale = np.max(np.abs(cpu.branch_current))
-    np.testing.assert_allclose(gpu.branch_current, cpu.branch_current, atol=1e-5 * scale)
+    np.testing.assert_allclose(gpu.branch_current, cpu.branch_current, atol=1e-8 * scale)
     import cupy as cp
 
     device = CudaPfftSheetInductanceOperator(operator, cp)
