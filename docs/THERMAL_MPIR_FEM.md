@@ -296,7 +296,11 @@ board with a via field.
 
 | Module | Responsibility |
 |---|---|
-| `conduction.py` | mesh, boundary and source dataclasses, matrix-free hex Q1 operator, heat budget |
+| `mesh.py` | `LayeredThermalMesh`, active mask, exposed faces, corner views, unit element matrices |
+| `boundaries.py` | `ConvectionBoundary`, `ExposedFaceConvection`, `HeatSource`, each lumping its own nodal conductance and load |
+| `problem.py` | `ThermalConductionProblem` validation |
+| `operator.py` | matrix-free hex Q1 operator on NumPy, CuPy or C++, RHS and heat-budget post-processing |
+| `solve.py` | `solve_thermal_conduction`, `ThermalConductionSolution` |
 | `two_level.py` | Jacobi + aggregation coarse correction on a layered node grid |
 | `cuda.py` | fused node-owned gather kernel for the float32 action |
 | `native_hex.py`, `native/` | opt-in C++ action and two-level inner PCG (built in place) |

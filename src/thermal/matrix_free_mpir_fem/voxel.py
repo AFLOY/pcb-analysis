@@ -3,7 +3,7 @@
 A ``VoxelSolidModel`` is what the geometry front end produces from CAD: one
 material id per voxel on a Cartesian grid, ``0`` for void, and optionally the
 fraction of each voxel the body fills.  ``VoxelThermalMesh`` turns it into the
-layered mesh of :mod:`.conduction` with an active-element mask, so the same
+layered mesh of :mod:`.mesh` with an active-element mask, so the same
 operator, preconditioner, CUDA kernel and C++ path solve it unchanged.
 """
 
@@ -14,7 +14,7 @@ from typing import Mapping
 
 import numpy as np
 
-from .conduction import FaceDirection, LayeredThermalMesh, exposed_element_faces
+from .mesh import FaceDirection, LayeredThermalMesh, exposed_element_faces
 
 
 @dataclass(frozen=True)

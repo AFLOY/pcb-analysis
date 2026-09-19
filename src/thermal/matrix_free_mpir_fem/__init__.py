@@ -6,21 +6,18 @@ convective faces and fixed-temperature nodes, and in voxelised 3D bodies
 low-precision runtimes are shared with ``electrical.matrix_free_mpir_fem``.
 """
 
-from .conduction import (
+from .boundaries import ConvectionBoundary, ExposedFaceConvection, HeatSource
+from .mesh import (
     COPPER_THERMAL_CONDUCTIVITY_W_PER_M_K,
+    FACE_DIRECTIONS,
     FR4_IN_PLANE_THERMAL_CONDUCTIVITY_W_PER_M_K,
     FR4_THROUGH_PLANE_THERMAL_CONDUCTIVITY_W_PER_M_K,
-    FACE_DIRECTIONS,
-    ConvectionBoundary,
-    ExposedFaceConvection,
-    HeatSource,
     LayeredThermalMesh,
-    MatrixFreeThermalOperator,
-    ThermalConductionProblem,
-    ThermalConductionSolution,
     exposed_element_faces,
-    solve_thermal_conduction,
 )
+from .operator import MatrixFreeThermalOperator
+from .problem import ThermalConductionProblem
+from .solve import ThermalConductionSolution, solve_thermal_conduction
 from .contact import ContactMap, planar_contact_map
 from .coupling import element_joule_heat_w, via_joule_heat_sources
 from .two_level import AggregationCoarseCorrection, choose_block_size

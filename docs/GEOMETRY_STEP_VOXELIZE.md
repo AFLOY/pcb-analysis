@@ -328,7 +328,7 @@ requested.
 | `geometry/step_voxelize/contact.py` | board/voxel contact placement (origins, contact spec) feeding `thermal.matrix_free_mpir_fem.planar_contact_map` |
 | `geometry/step_voxelize/conductors.py` | thick conductor solids to `VoxelConductorProblem`, terminal regions, Joule loss to the thermal grid |
 | `geometry/step_voxelize/adapters.py` | build `Stackup`, occupancy, `ViaSet`, the board's `LayeredThermalMesh`, body meshes and heat sources, plane-opt mapping |
-| `thermal/matrix_free_mpir_fem/voxel.py`, `conduction.py` | `VoxelThermalMesh`, active-element mask, exposed-face convection |
+| `thermal/matrix_free_mpir_fem/voxel.py`, `mesh.py`, `boundaries.py` | `VoxelThermalMesh`, active-element mask, exposed-face convection |
 | `thermal/matrix_free_mpir_fem/contact.py` | `ContactMap`, `planar_contact_map` |
 | `multiphysics/staggered_coupling/board_enclosure.py` | interface iteration |
 

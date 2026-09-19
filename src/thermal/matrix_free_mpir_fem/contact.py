@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .conduction import (
+from .mesh import (
     _FACE_CORNERS,
     FaceDirection,
     LayeredThermalMesh,

@@ -18,7 +18,8 @@ from electrical.matrix_free_mpir_fem.pcb import (
     PCBConductionSolution,
 )
 
-from .conduction import HeatSource, LayeredThermalMesh
+from .boundaries import HeatSource
+from .mesh import LayeredThermalMesh
 
 
 def _check_layer_slabs(
