@@ -39,6 +39,7 @@ cuda = [
 ]
 test = ["pytest>=8,<9"]
 native = ["pybind11>=2.12,<4"]
+cad = ["cadquery-ocp>=7.7,<9"]
 
 [project.urls]
 Homepage = "https://github.com/AFLOY/pcb-analysis"
@@ -53,13 +54,14 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["electrical*", "thermal*", "emc*", "multiphysics*"]
+include = ["electrical*", "thermal*", "emc*", "multiphysics*", "geometry*"]
 
 [tool.setuptools.package-data]
 electrical = ["py.typed", "matrix_free_mpir_fem/native/*.cpp"]
 thermal = ["py.typed", "matrix_free_mpir_fem/native/*.cpp"]
 emc = ["py.typed", "tiled_dipole_superposition/native/*.cpp"]
 multiphysics = ["py.typed"]
+geometry = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

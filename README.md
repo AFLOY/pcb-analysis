@@ -480,6 +480,24 @@ distribution with the oldest supported setuptools and imports both
 subpackages from a clean environment, so a module missing from the
 distribution fails the build rather than a user's install.
 
+## STEP input (optional)
+
+`geometry.step_voxelize` reads mechanical CAD through OpenCASCADE and turns
+it into the solvers' arrays: the board becomes the 2.5D occupancy, stackup and
+layered thermal mesh on the routing grid; heat sinks, enclosures and packages
+become separately meshed voxel bodies joined to the board through contact
+maps. It needs the `cad` extra:
+
+```bash
+pip install 'pcb-analysis[cad]'   # cadquery-ocp, a large wheel
+```
+
+Without it the package imports and the array-side functions work; only
+`load_step`, the synthetic solids and `write_step` raise. The body map that
+names which solid is the board, copper, via or body is the caller's, see
+[docs/GEOMETRY_STEP_VOXELIZE.md](docs/GEOMETRY_STEP_VOXELIZE.md). `geometry`
+is a new top-level package; nothing in the existing packages moved.
+
 ## Documentation
 
 - [Architecture & Design](docs/DESIGN.md)
