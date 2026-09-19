@@ -36,6 +36,8 @@ from .reader import (
     synthetic_model,
     write_step,
 )
+from .mesh import TriangleMesh, default_method, winding_numbers_numpy
+from .mesh import native_available as native_classify_available
 from .section import BoardRaster, rasterize_board, sample_plane_fill
 from .voxelize import sample_volume_fill, voxel_grid, voxelize_bodies
 
@@ -51,6 +53,7 @@ __all__ = [
     "ResolvedBodies",
     "StepModel",
     "StepSolid",
+    "TriangleMesh",
     "ViaSpec",
     "board_body_contact",
     "board_occupancy",
@@ -61,7 +64,9 @@ __all__ = [
     "body_thermal_mesh",
     "box_solid",
     "cylinder_solid",
+    "default_method",
     "load_step",
+    "native_classify_available",
     "ocp_available",
     "plane_opt_problem_mapping",
     "rasterize_board",
@@ -71,5 +76,6 @@ __all__ = [
     "synthetic_model",
     "voxel_grid",
     "voxelize_bodies",
+    "winding_numbers_numpy",
     "write_step",
 ]

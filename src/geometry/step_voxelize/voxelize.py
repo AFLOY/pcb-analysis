@@ -9,6 +9,7 @@ import numpy as np
 from thermal.matrix_free_mpir_fem import VoxelMaterial, VoxelSolidModel
 
 from .bodymap import BodySpec, ResolvedBodies
+from .mesh import ClassifyMethod
 from .reader import StepSolid
 
 
@@ -41,6 +42,7 @@ def sample_volume_fill(
     pitch_m: tuple[float, float, float],
     shape: tuple[int, int, int],
     supersample: int = 2,
+    method: ClassifyMethod = "auto",
 ) -> np.ndarray:
     """Fraction of every voxel ``(k, j, i)`` inside the solids."""
 
@@ -56,7 +58,7 @@ def sample_volume_fill(
     points = np.column_stack((grid_x.reshape(-1), grid_y.reshape(-1), grid_z.reshape(-1)))
     inside = np.zeros(points.shape[0], dtype=bool)
     for solid in solids:
-        inside |= solid.contains(points)
+        inside |= solid.contains(points, method=method)
     fine = inside.reshape(nz, supersample, ny, supersample, nx, supersample)
     return fine.mean(axis=(1, 3, 5))
 
@@ -69,6 +71,7 @@ def voxelize_bodies(
     margin_voxels: int = 0,
     origin_m: tuple[float, float, float] | None = None,
     bodies: Sequence[BodySpec] | None = None,
+    method: ClassifyMethod = "auto",
 ) -> tuple[VoxelSolidModel, dict[int, BodySpec]]:
     """Voxelise the map's bodies; returns the model and ``material id → spec``.
 
@@ -91,7 +94,7 @@ def voxelize_bodies(
     materials: dict[int, VoxelMaterial] = {}
     specs: dict[int, BodySpec] = {}
     for index, (spec, solids) in enumerate(chosen, start=1):
-        fill = sample_volume_fill(solids, origin_m=origin, pitch_m=pitch_m, shape=shape, supersample=supersample)
+        fill = sample_volume_fill(solids, origin_m=origin, pitch_m=pitch_m, shape=shape, supersample=supersample, method=method)
         wins = fill > best
         material_id[wins] = index
         best = np.where(wins, fill, best)

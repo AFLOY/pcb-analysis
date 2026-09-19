@@ -16,7 +16,10 @@ from typing import Any, Iterable, Sequence
 
 import numpy as np
 
+from .mesh import ClassifyMethod, TriangleMesh, default_method
+
 MM = 1.0e-3
+DEFAULT_DEFLECTION_M = 5.0e-6
 
 
 def _ocp() -> Any:
@@ -51,6 +54,7 @@ class StepSolid:
     bounds_m: tuple[tuple[float, float, float], tuple[float, float, float]]
     volume_m3: float
     _shape: Any = field(repr=False, compare=False)
+    _meshes: dict = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def size_m(self) -> tuple[float, float, float]:
@@ -62,14 +66,80 @@ class StepSolid:
         lo, hi = self.bounds_m
         return ((lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0)
 
-    def contains(self, points_m: np.ndarray, *, tolerance_m: float = 1.0e-9) -> np.ndarray:
-        """Point-in-solid test for ``(n, 3)`` points in metres.
+    def tessellate(self, deflection_m: float = DEFAULT_DEFLECTION_M) -> TriangleMesh:
+        """Outward-oriented triangles of the solid, cached per deflection.
 
-        Points outside the bounding box are rejected without a classifier
-        call; the rest are classified one by one by OpenCASCADE, with points
-        on the boundary counted as inside.
+        Planar faces tessellate exactly; curved faces deviate by at most
+        ``deflection_m`` (default 5 µm), with a 0.2 rad angular deflection.
         """
 
+        key = float(deflection_m)
+        cached = self._meshes.get(key)
+        if cached is not None:
+            return cached
+        _ocp()
+        from OCP.BRep import BRep_Tool
+        from OCP.BRepMesh import BRepMesh_IncrementalMesh
+        from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopLoc import TopLoc_Location
+        from OCP.TopoDS import TopoDS
+
+        BRepMesh_IncrementalMesh(self._shape, key / MM, False, 0.2, True)
+        triangles: list[np.ndarray] = []
+        explorer = TopExp_Explorer(self._shape, TopAbs_FACE)
+        while explorer.More():
+            face = TopoDS.Face(explorer.Current())
+            location = TopLoc_Location()
+            triangulation = BRep_Tool.Triangulation_s(face, location)
+            explorer.Next()
+            if triangulation is None:
+                continue
+            transform = location.Transformation()
+            nodes = np.array(
+                [
+                    (point.X(), point.Y(), point.Z())
+                    for point in (
+                        triangulation.Node(index).Transformed(transform)
+                        for index in range(1, triangulation.NbNodes() + 1)
+                    )
+                ],
+                dtype=np.float64,
+            )
+            reversed_face = face.Orientation() == TopAbs_REVERSED
+            for index in range(1, triangulation.NbTriangles() + 1):
+                a, b, c = triangulation.Triangle(index).Get()
+                if reversed_face:
+                    a, c = c, a
+                triangles.append(nodes[[a - 1, b - 1, c - 1]])
+        if not triangles:
+            raise ValueError(f"solid {self.name!r} produced no triangles")
+        mesh = TriangleMesh(np.asarray(triangles) * MM, key)
+        if mesh.signed_volume_m3() <= 0.0:
+            raise ValueError(f"solid {self.name!r} tessellated with inward orientation")
+        self._meshes[key] = mesh
+        return mesh
+
+    def contains(
+        self,
+        points_m: np.ndarray,
+        *,
+        tolerance_m: float = 1.0e-9,
+        method: ClassifyMethod = "auto",
+        deflection_m: float = DEFAULT_DEFLECTION_M,
+        threads: int | None = None,
+    ) -> np.ndarray:
+        """Point-in-solid test for ``(n, 3)`` points in metres.
+
+        ``method`` ``"occ"`` classifies each point with OpenCASCADE (exact on
+        the B-rep, one call per point); ``"native"`` and ``"numpy"`` use the
+        winding number over the tessellation; ``"auto"`` follows
+        ``mesh.default_method`` (native when built, else NumPy).
+        """
+
+        chosen = default_method() if method == "auto" else method
+        if chosen != "occ":
+            return self.tessellate(deflection_m).contains(points_m, method=chosen, threads=threads)
         _ocp()
         from OCP.BRepClass3d import BRepClass3d_SolidClassifier
         from OCP.gp import gp_Pnt

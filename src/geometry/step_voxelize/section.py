@@ -16,6 +16,7 @@ from typing import Sequence
 import numpy as np
 
 from .bodymap import BoardSpec, CopperSpec, LayerSpec, ResolvedBodies
+from .mesh import ClassifyMethod
 from .reader import MM, StepSolid
 
 
@@ -33,6 +34,7 @@ def sample_plane_fill(
     pitch_m: float,
     shape: tuple[int, int],
     supersample: int = 3,
+    method: ClassifyMethod = "auto",
 ) -> np.ndarray:
     """Fraction of every ``(row, col)`` cell covered by the solids at ``z``."""
 
@@ -47,7 +49,7 @@ def sample_plane_fill(
         lo, hi = solid.bounds_m
         if not (lo[2] - 1.0e-12 <= z_m <= hi[2] + 1.0e-12):
             continue
-        inside |= solid.contains(points)
+        inside |= solid.contains(points, method=method)
     fine = inside.reshape(rows, supersample, cols, supersample)
     return fine.mean(axis=(1, 3))
 
@@ -115,6 +117,7 @@ def rasterize_board(
     supersample: int = 3,
     origin_mm: tuple[float, float] | None = None,
     threshold: float = 0.5,
+    method: ClassifyMethod = "auto",
 ) -> BoardRaster:
     """Sample the board outline and each layer's copper onto the grid.
 
@@ -136,7 +139,7 @@ def rasterize_board(
     board_mid_z = (lo[2] + hi[2]) / 2.0
     outline = (
         sample_plane_fill(
-            [board], z_m=board_mid_z, origin_m=origin_m, pitch_m=pitch_m, shape=(rows, cols), supersample=supersample
+            [board], z_m=board_mid_z, origin_m=origin_m, pitch_m=pitch_m, shape=(rows, cols), supersample=supersample, method=method
         )
         >= threshold
     )
@@ -155,6 +158,7 @@ def rasterize_board(
             pitch_m=pitch_m,
             shape=(rows, cols),
             supersample=supersample,
+            method=method,
         )
     return BoardRaster(spec, pitch_mm, (float(origin[0]), float(origin[1])), outline, fill, threshold)
 
