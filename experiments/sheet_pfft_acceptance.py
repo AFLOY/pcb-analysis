@@ -117,13 +117,18 @@ def strip_line() -> dict[str, Any]:
             operator.apply(gx, gy, gz)
         apply = (time.perf_counter() - start) / 5
         terminals = [Terminal("in", 0, tuple((r, 0) for r in range(rows)), 1.0), Terminal("out", 1, tuple((r, 0) for r in range(rows)), -1.0)]
-        start = time.perf_counter()
-        solution = solve_sheet_case(mesh, operator, terminals, frequency_hz=frequency, tolerance=1e-9)
-        solve = time.perf_counter() - start
-        loss = float(np.sum(mesh.resistances() * np.abs(solution.branch_current) ** 2))
+        solves = {}
+        for preconditioner in ("diagonal", "near"):
+            start = time.perf_counter()
+            solution = solve_sheet_case(mesh, operator, terminals, frequency_hz=frequency, tolerance=1e-9, preconditioner=preconditioner)
+            solves[preconditioner] = {"solve_ms": (time.perf_counter() - start) * 1e3, "gmres_iterations": solution.iterations, "converged": solution.converged,
+                                      "joule_loss_w": float(np.sum(mesh.resistances() * np.abs(solution.branch_current) ** 2))}
+        loss = solves["near"]["joule_loss_w"]
         return {"grid": label, "operator": type(operator).__name__, "cells": int(grid.size), "branches": mesh.branch_count,
-                "kernel_bytes": int(operator.kernel_bytes), "build_ms": build * 1e3, "apply_ms": apply * 1e3, "solve_ms": solve * 1e3,
-                "gmres_iterations": solution.iterations, "converged": solution.converged, "joule_loss_w": loss}
+                "kernel_bytes": int(operator.kernel_bytes), "build_ms": build * 1e3, "apply_ms": apply * 1e3,
+                "solve_ms": solves["near"]["solve_ms"], "gmres_iterations": solves["near"]["gmres_iterations"], "converged": solves["near"]["converged"],
+                "joule_loss_w": loss, "preconditioners": solves,
+                "loss_rel_diff_near_vs_diagonal": loss / solves["diagonal"]["joule_loss_w"] - 1.0}
 
     runs = [
         run("uniform 0.1 mm", TensorGrid.uniform(0.1e-3, (10, 120)), "fft"),
@@ -191,7 +196,13 @@ def power_module(plane_opt: Path) -> dict[str, Any] | None:
             # pFFT precorrection 36 layer pairs of near terms on this board.
             result = solve_plane_opt_problem(mapping, {"maximum_iterations": 60, "relative_tolerance": 1e-8, "maximum_filaments": 1})
             wall = time.perf_counter() - start
+            diagonal_wall = None
+            if frequency > 0.0:
+                start = time.perf_counter()
+                solve_plane_opt_problem(mapping, {"maximum_iterations": 60, "relative_tolerance": 1e-8, "maximum_filaments": 1, "preconditioner": "diagonal"})
+                diagonal_wall = (time.perf_counter() - start) * 1e3
             runs.append({
+                "preconditioner": "near", "wall_ms_diagonal_preconditioner": diagonal_wall,
                 "grid": label, "frequency_hz": frequency, "schema": mapping["schema"], "cells": int(raster.grid.size),
                 "branches": result.metrics["branch_count"], "operator": result.metrics["inductance_operator"],
                 "kernel_bytes": result.metrics["operator_kernel_bytes"], "wall_ms": wall * 1e3,
@@ -228,10 +239,11 @@ def main() -> None:
         u, g = c["uniform 0.2 mm"]["errors"], c["graded 0.1-0.5 mm"]["errors"]
         print(f"order={c['order']} R={c['near_radius_cells']} uniform x/y {u['x']['relative_frobenius']:.1e}/{u['y']['relative_frobenius']:.1e} graded x/y {g['x']['relative_frobenius']:.1e}/{g['y']['relative_frobenius']:.1e} build {c['graded 0.1-0.5 mm']['build_ms']:.0f} ms")
     for r in strip["runs"]:
-        print(f"strip {r['grid']:42s} {r['operator']:30s} branches={r['branches']:5d} build={r['build_ms']:6.0f} apply={r['apply_ms']:6.1f} solve={r['solve_ms']:6.0f} ms it={r['gmres_iterations']:3d} loss_diff={r['loss_rel_diff_vs_uniform_fine']:+.3e}")
+        d = r["preconditioners"]["diagonal"]
+        print(f"strip {r['grid']:42s} {r['operator']:30s} branches={r['branches']:5d} build={r['build_ms']:6.0f} apply={r['apply_ms']:6.1f} solve near={r['solve_ms']:6.0f} ms it={r['gmres_iterations']:3d} (diagonal {d['solve_ms']:6.0f} ms it={d['gmres_iterations']:3d}) loss_diff={r['loss_rel_diff_vs_uniform_fine']:+.3e}")
     if kicad:
         for r in kicad["runs"]:
-            print(f"power_module {r['grid']:36s} f={r['frequency_hz']:.0e} {r['operator']:30s} cells={r['cells']:6d} branches={r['branches']:6d} wall={r['wall_ms']:7.0f} ms Jmax={r['max_current_density_a_per_mm2']:.3f} p99={r['bulk_p99_current_density_a_per_mm2']:.3f}")
+            print(f"power_module {r['grid']:36s} f={r['frequency_hz']:.0e} {r['operator']:30s} cells={r['cells']:6d} branches={r['branches']:6d} wall near={r['wall_ms']:7.0f} ms diagonal={r['wall_ms_diagonal_preconditioner']} Jmax={r['max_current_density_a_per_mm2']:.3f} p99={r['bulk_p99_current_density_a_per_mm2']:.3f}")
     print("decision:", report["decision"]["pfft_sheet_inductance"])
 
 

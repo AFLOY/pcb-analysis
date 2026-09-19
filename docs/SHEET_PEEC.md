@@ -313,12 +313,12 @@ in-plane operator (x / y) against the convolution operator on a uniform
 
 | Order | Near radius (cells) | Uniform x / y | Graded x / y | Build, graded (ms) |
 |---|---|---|---|---|
-| 1 | 2 | 2.5e-03 / 2.4e-03 | 3.0e-03 / 3.8e-03 | 214 |
-| 2 | 3 | 1.4e-04 / 2.0e-04 | 3.7e-04 / 5.2e-04 | 373 |
-| 3 | 3 | 1.2e-04 / 1.4e-04 | 3.3e-04 / 4.5e-04 | 439 |
-| 3 | 4 | 3.0e-10 / 2.8e-10 | 6.7e-05 / 1.3e-04 | 626 |
-| 3 | 5 | 3.0e-10 / 2.8e-10 | 2.7e-05 / 5.0e-05 | 764 |
-| 4 | 5 | 3.0e-10 / 2.8e-10 | 5.7e-06 / 1.2e-05 | 1011 |
+| 1 | 2 | 2.5e-03 / 2.4e-03 | 3.0e-03 / 3.8e-03 | 222 |
+| 2 | 3 | 1.4e-04 / 2.0e-04 | 3.7e-04 / 5.2e-04 | 385 |
+| 3 | 3 | 1.2e-04 / 1.4e-04 | 3.3e-04 / 4.5e-04 | 452 |
+| 3 | 4 | 3.0e-10 / 2.8e-10 | 6.7e-05 / 1.3e-04 | 623 |
+| 3 | 5 | 3.0e-10 / 2.8e-10 | 2.7e-05 / 5.0e-05 | 806 |
+| 4 | 5 | 3.0e-10 / 2.8e-10 | 5.7e-06 / 1.2e-05 | 1010 |
 
 The default is order 3, radius 3, on a projection grid of twice the finest
 cell. The near terms (one closed form per distinct bar pair and offset, one
@@ -328,34 +328,50 @@ built (`native_available()`), else in NumPy. A 12 × 1 mm strip line at 1e+06 Hz
 (F.Cu go, B.Cu return, 35 µm copper cut into filaments), loss relative to the
 uniform 0.1 mm convolution solve:
 
-| Grid | Operator | Branches | Kernel (MB) | Build (ms) | Apply (ms) | Solve (ms) | GMRES | Loss rel. diff |
+| Grid | Operator | Branches | Kernel (MB) | Build (ms) | Apply (ms) | Diagonal: solve (ms) / GMRES | Near: solve (ms) / GMRES | Loss rel. diff |
 |---|---|---|---|---|---|---|---|---|
-| uniform 0.1 mm | SheetInductanceOperator | 4550 | 0.27 | 78 | 0.4 | 1198 | 221 | +0.00e+00 |
-| uniform 0.5 mm | SheetInductanceOperator | 142 | 0.01 | 50 | 0.2 | 62 | 69 | -1.15e-01 |
-| uniform 0.1 mm, pFFT | PfftSheetInductanceOperator | 4550 | 15.00 | 196 | 2.8 | 2145 | 227 | -2.10e-04 |
-| graded 0.1 mm at the ends, 0.5 mm between | PfftSheetInductanceOperator | 1928 | 4.17 | 249 | 1.3 | 987 | 216 | -2.54e-04 |
+| uniform 0.1 mm | SheetInductanceOperator | 4550 | 0.27 | 84 | 0.5 | 1247 / 221 | 198 / 14 | +0.00e+00 |
+| uniform 0.5 mm | SheetInductanceOperator | 142 | 0.01 | 53 | 0.2 | 65 / 69 | 6 / 2 | -1.15e-01 |
+| uniform 0.1 mm, pFFT | PfftSheetInductanceOperator | 4550 | 15.00 | 203 | 2.6 | 2227 / 227 | 375 / 13 | -2.10e-04 |
+| graded 0.1 mm at the ends, 0.5 mm between | PfftSheetInductanceOperator | 1928 | 4.17 | 270 | 1.3 | 1044 / 216 | 136 / 15 | -2.54e-04 |
+
+### Near-field preconditioner
+
+The saddle-point GMRES was preconditioned with `Z` replaced by its diagonal
+(self terms only), which left every mutual term to the Krylov iterations:
+about 220 on the strip line, 1,150 to 1,800 on `power_module`. Both operators
+now report the exact partial inductance between each branch and its
+neighbours within one projection cell (pFFT: kept from the precorrection's
+near pairs; convolution: read off the kernel tables), and the default
+preconditioner (`preconditioner="near"`) factors the saddle-point matrix with
+`R + j omega L_near` in place of `Z` by sparse LU (`"diagonal"` keeps the old
+Schur-complement form). The strip-line rows below carry both; the solution
+is the same to `1e-10`. On CUDA the factors are SuperLU's applied by device
+triangular solves and GMRES runs in cycles growing from ten iterations, which
+on `power_module` (uniform, 1 MHz) gives 8 s against 3 s on the CPU and 48 s
+with the diagonal form; the near preconditioner makes the CPU path the faster
+one for these sizes.
 
 `power_module` from KiCad (fused copper, y-down raster, terminals at the two
 ends of the largest B.Cu copper piece, barrels off the copper dropped),
-through `solve_plane_opt_problem`:
+through `solve_plane_opt_problem`, one filament per layer:
 
-| Grid | f (Hz) | Schema | Operator | Cells | Branches | Kernel (MB) | Wall (s) | J max (A/mm²) | J p99 (A/mm²) |
-|---|---|---|---|---|---|---|---|---|---|
-| uniform 0.25 mm (v1) | 0e+00 | v1 | SheetInductanceOperator | 19321 | 23230 | 4.4 | 0.3 | 77.270 | 12.482 |
-| uniform 0.25 mm (v1) | 1e+06 | v1 | SheetInductanceOperator | 19321 | 23230 | 4.4 | 82.8 | 75.704 | 15.175 |
-| graded 0.1 mm under components (v2) | 0e+00 | v2 | PfftSheetInductanceOperator | 32200 | 51545 | 659.3 | 29.1 | 45.047 | 12.992 |
-| graded 0.1 mm under components (v2) | 1e+06 | v2 | PfftSheetInductanceOperator | 32200 | 51545 | 659.3 | 453.1 | 44.247 | 19.577 |
+| Grid | f (Hz) | Schema | Operator | Cells | Branches | Kernel (MB) | Wall, diagonal (s) | Wall, near (s) | J max (A/mm²) | J p99 (A/mm²) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| uniform 0.25 mm (v1) | 0e+00 | v1 | SheetInductanceOperator | 19321 | 23230 | 4.4 | — | 0.3 | 77.270 | 12.482 |
+| uniform 0.25 mm (v1) | 1e+06 | v1 | SheetInductanceOperator | 19321 | 23230 | 4.4 | 82.9 | 3.5 | 75.704 | 15.175 |
+| graded 0.1 mm under components (v2) | 0e+00 | v2 | PfftSheetInductanceOperator | 32200 | 51545 | 659.3 | — | 29.4 | 45.047 | 12.992 |
+| graded 0.1 mm under components (v2) | 1e+06 | v2 | PfftSheetInductanceOperator | 32200 | 51545 | 659.3 | 460.2 | 45.7 | 44.247 | 19.577 |
 
-Decision: adopted. On `power_module` the component-driven grid has 2.2× the
-branches of the uniform 0.25 mm grid, so its solves are slower, not faster:
-the DC wall time is the operator build (29 s, of which the C++ near terms
-are about 10 s and the row deduplication 9 s; the NumPy near terms took
-200 s), the 1 MHz wall time is the GMRES iterations over 51k branches with a
-precorrection of 53 M non-zeros. The pFFT pays off where the fine cells are a
-small part of the board (the strip line: 42 % of the branches, the same
-loss); a fine pitch chosen to the trace width rather than to 0.1 mm keeps the
-branch count down. The uniform convolution operator stays the choice for
-uniform grids: it is exact to its 24-cell seam and cheaper to build.
+Decision: adopted. With the near-field preconditioner the 1 MHz solve of
+`power_module` takes 3.5 s on the uniform 0.25 mm grid (83 s with the
+diagonal one) and 46 s on the component-driven graded grid (460 s), of which
+29 s is the pFFT operator build; the graded grid has 2.2× the branches of the
+0.25 mm grid, so the fine pitch, not the operator, sets what is left. The
+pFFT pays off where the fine cells are a small part of the board (the strip
+line: 42 % of the branches, the same loss). The uniform convolution operator
+stays the choice for uniform grids: it is exact to its 24-cell seam and
+cheaper to build.
 
 ## What is not done
 

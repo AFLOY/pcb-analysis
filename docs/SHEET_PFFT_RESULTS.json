@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-19T19:55:28+00:00",
+  "generated_at": "2026-09-19T20:44:10+00:00",
   "environment": {
     "platform": "Linux-6.12.0-211.54.1.el10_2.x86_64-x86_64-with-glibc2.39",
     "python": "3.12.14",
@@ -16,7 +16,7 @@
         "order": 1,
         "near_radius_cells": 2,
         "uniform 0.2 mm": {
-          "build_ms": 33.45326893031597,
+          "build_ms": 45.55013601202518,
           "cells": 80,
           "errors": {
             "x": {
@@ -32,7 +32,7 @@
           }
         },
         "graded 0.1-0.5 mm": {
-          "build_ms": 214.08083103597164,
+          "build_ms": 222.2749989014119,
           "cells": 216,
           "errors": {
             "x": {
@@ -52,7 +52,7 @@
         "order": 2,
         "near_radius_cells": 3,
         "uniform 0.2 mm": {
-          "build_ms": 38.86336204595864,
+          "build_ms": 42.646851972676814,
           "cells": 80,
           "errors": {
             "x": {
@@ -68,7 +68,7 @@
           }
         },
         "graded 0.1-0.5 mm": {
-          "build_ms": 373.42478707432747,
+          "build_ms": 385.49032097216696,
           "cells": 216,
           "errors": {
             "x": {
@@ -88,7 +88,7 @@
         "order": 3,
         "near_radius_cells": 3,
         "uniform 0.2 mm": {
-          "build_ms": 42.68751002382487,
+          "build_ms": 46.583257033489645,
           "cells": 80,
           "errors": {
             "x": {
@@ -104,7 +104,7 @@
           }
         },
         "graded 0.1-0.5 mm": {
-          "build_ms": 438.92250291537493,
+          "build_ms": 452.0574869820848,
           "cells": 216,
           "errors": {
             "x": {
@@ -124,7 +124,7 @@
         "order": 3,
         "near_radius_cells": 4,
         "uniform 0.2 mm": {
-          "build_ms": 44.34596898499876,
+          "build_ms": 48.07488096412271,
           "cells": 80,
           "errors": {
             "x": {
@@ -140,7 +140,7 @@
           }
         },
         "graded 0.1-0.5 mm": {
-          "build_ms": 625.9562519844621,
+          "build_ms": 622.5777020445094,
           "cells": 216,
           "errors": {
             "x": {
@@ -160,7 +160,7 @@
         "order": 3,
         "near_radius_cells": 5,
         "uniform 0.2 mm": {
-          "build_ms": 44.754186063073575,
+          "build_ms": 47.28290403727442,
           "cells": 80,
           "errors": {
             "x": {
@@ -176,7 +176,7 @@
           }
         },
         "graded 0.1-0.5 mm": {
-          "build_ms": 764.0268970280886,
+          "build_ms": 806.028853985481,
           "cells": 216,
           "errors": {
             "x": {
@@ -196,7 +196,7 @@
         "order": 4,
         "near_radius_cells": 5,
         "uniform 0.2 mm": {
-          "build_ms": 50.32729101367295,
+          "build_ms": 54.04033395461738,
           "cells": 80,
           "errors": {
             "x": {
@@ -212,7 +212,7 @@
           }
         },
         "graded 0.1-0.5 mm": {
-          "build_ms": 1010.9451790340245,
+          "build_ms": 1009.7807620186359,
           "cells": 216,
           "errors": {
             "x": {
@@ -239,12 +239,27 @@
         "cells": 1200,
         "branches": 4550,
         "kernel_bytes": 271040,
-        "build_ms": 77.6319830911234,
-        "apply_ms": 0.430649402551353,
-        "solve_ms": 1197.9052510578185,
-        "gmres_iterations": 221,
+        "build_ms": 84.28771304897964,
+        "apply_ms": 0.535900192335248,
+        "solve_ms": 198.1070680776611,
+        "gmres_iterations": 14,
         "converged": true,
-        "joule_loss_w": 0.012862381651385871,
+        "joule_loss_w": 0.012862381650206249,
+        "preconditioners": {
+          "diagonal": {
+            "solve_ms": 1246.9987319782376,
+            "gmres_iterations": 221,
+            "converged": true,
+            "joule_loss_w": 0.012862381651385871
+          },
+          "near": {
+            "solve_ms": 198.1070680776611,
+            "gmres_iterations": 14,
+            "converged": true,
+            "joule_loss_w": 0.012862381650206249
+          }
+        },
+        "loss_rel_diff_near_vs_diagonal": -9.171108317218568e-11,
         "loss_rel_diff_vs_uniform_fine": 0.0
       },
       {
@@ -253,13 +268,28 @@
         "cells": 48,
         "branches": 142,
         "kernel_bytes": 11200,
-        "build_ms": 49.99537696130574,
-        "apply_ms": 0.19437801092863083,
-        "solve_ms": 62.479420099407434,
-        "gmres_iterations": 69,
+        "build_ms": 53.39107697363943,
+        "apply_ms": 0.19871219992637634,
+        "solve_ms": 5.84676000289619,
+        "gmres_iterations": 2,
         "converged": true,
-        "joule_loss_w": 0.011379142857100524,
-        "loss_rel_diff_vs_uniform_fine": -0.1153160304589107
+        "joule_loss_w": 0.01137914285714285,
+        "preconditioners": {
+          "diagonal": {
+            "solve_ms": 65.42237510439008,
+            "gmres_iterations": 69,
+            "converged": true,
+            "joule_loss_w": 0.011379142857100524
+          },
+          "near": {
+            "solve_ms": 5.84676000289619,
+            "gmres_iterations": 2,
+            "converged": true,
+            "joule_loss_w": 0.01137914285714285
+          }
+        },
+        "loss_rel_diff_near_vs_diagonal": 3.7194691770991994e-12,
+        "loss_rel_diff_vs_uniform_fine": -0.11531603037448479
       },
       {
         "grid": "uniform 0.1 mm, pFFT",
@@ -267,13 +297,28 @@
         "cells": 1200,
         "branches": 4550,
         "kernel_bytes": 15003936,
-        "build_ms": 195.61280799098313,
-        "apply_ms": 2.839254611171782,
-        "solve_ms": 2144.9949640082195,
-        "gmres_iterations": 227,
+        "build_ms": 203.1949390657246,
+        "apply_ms": 2.596065402030945,
+        "solve_ms": 375.1223690342158,
+        "gmres_iterations": 13,
         "converged": true,
-        "joule_loss_w": 0.012859676159862558,
-        "loss_rel_diff_vs_uniform_fine": -0.00021034141239484327
+        "joule_loss_w": 0.012859676157463756,
+        "preconditioners": {
+          "diagonal": {
+            "solve_ms": 2226.863107061945,
+            "gmres_iterations": 227,
+            "converged": true,
+            "joule_loss_w": 0.012859676159862558
+          },
+          "near": {
+            "solve_ms": 375.1223690342158,
+            "gmres_iterations": 13,
+            "converged": true,
+            "joule_loss_w": 0.012859676157463756
+          }
+        },
+        "loss_rel_diff_near_vs_diagonal": -1.8653667499535231e-10,
+        "loss_rel_diff_vs_uniform_fine": -0.0002103415072005621
       },
       {
         "grid": "graded 0.1 mm at the ends, 0.5 mm between",
@@ -281,13 +326,28 @@
         "cells": 510,
         "branches": 1928,
         "kernel_bytes": 4174800,
-        "build_ms": 248.57248598709702,
-        "apply_ms": 1.2599418172612786,
-        "solve_ms": 987.2806050116196,
-        "gmres_iterations": 216,
+        "build_ms": 269.85926809720695,
+        "apply_ms": 1.268274593167007,
+        "solve_ms": 135.7725530397147,
+        "gmres_iterations": 15,
         "converged": true,
-        "joule_loss_w": 0.012859118525532742,
-        "loss_rel_diff_vs_uniform_fine": -0.00025369530632601833
+        "joule_loss_w": 0.012859118525327767,
+        "preconditioners": {
+          "diagonal": {
+            "solve_ms": 1043.6861580237746,
+            "gmres_iterations": 216,
+            "converged": true,
+            "joule_loss_w": 0.012859118525532742
+          },
+          "near": {
+            "solve_ms": 135.7725530397147,
+            "gmres_iterations": 15,
+            "converged": true,
+            "joule_loss_w": 0.012859118525327767
+          }
+        },
+        "loss_rel_diff_near_vs_diagonal": -1.5940027076055685e-11,
+        "loss_rel_diff_vs_uniform_fine": -0.0002536952305741691
       }
     ]
   },
@@ -295,6 +355,8 @@
     "board": "power_module",
     "runs": [
       {
+        "preconditioner": "near",
+        "wall_ms_diagonal_preconditioner": null,
         "grid": "uniform 0.25 mm (v1)",
         "frequency_hz": 0.0,
         "schema": "plane-opt-current-field-problem/v1",
@@ -302,13 +364,15 @@
         "branches": 23230,
         "operator": "SheetInductanceOperator",
         "kernel_bytes": 4359040,
-        "wall_ms": 301.4417359372601,
+        "wall_ms": 309.5515010645613,
         "iterations": null,
         "converged": true,
         "max_current_density_a_per_mm2": 77.26962282159973,
         "bulk_p99_current_density_a_per_mm2": 12.48156300039455
       },
       {
+        "preconditioner": "near",
+        "wall_ms_diagonal_preconditioner": 82941.64809701033,
         "grid": "uniform 0.25 mm (v1)",
         "frequency_hz": 1000000.0,
         "schema": "plane-opt-current-field-problem/v1",
@@ -316,13 +380,15 @@
         "branches": 23230,
         "operator": "SheetInductanceOperator",
         "kernel_bytes": 4359040,
-        "wall_ms": 82777.79714204371,
+        "wall_ms": 3530.1995840854943,
         "iterations": null,
         "converged": true,
-        "max_current_density_a_per_mm2": 75.70412836738166,
-        "bulk_p99_current_density_a_per_mm2": 15.17465785875666
+        "max_current_density_a_per_mm2": 75.70412834956363,
+        "bulk_p99_current_density_a_per_mm2": 15.174657818269754
       },
       {
+        "preconditioner": "near",
+        "wall_ms_diagonal_preconditioner": null,
         "grid": "graded 0.1 mm under components (v2)",
         "frequency_hz": 0.0,
         "schema": "plane-opt-current-field-problem/v2",
@@ -330,13 +396,15 @@
         "branches": 51545,
         "operator": "PfftSheetInductanceOperator",
         "kernel_bytes": 659349888,
-        "wall_ms": 29114.5471050404,
+        "wall_ms": 29434.637069003657,
         "iterations": null,
         "converged": true,
         "max_current_density_a_per_mm2": 45.046903753616284,
         "bulk_p99_current_density_a_per_mm2": 12.99167840928077
       },
       {
+        "preconditioner": "near",
+        "wall_ms_diagonal_preconditioner": 460228.7787050009,
         "grid": "graded 0.1 mm under components (v2)",
         "frequency_hz": 1000000.0,
         "schema": "plane-opt-current-field-problem/v2",
@@ -344,11 +412,11 @@
         "branches": 51545,
         "operator": "PfftSheetInductanceOperator",
         "kernel_bytes": 659349888,
-        "wall_ms": 453091.35127894115,
+        "wall_ms": 45705.126649932936,
         "iterations": null,
         "converged": true,
-        "max_current_density_a_per_mm2": 44.246677757869364,
-        "bulk_p99_current_density_a_per_mm2": 19.576598979930885
+        "max_current_density_a_per_mm2": 44.24667774933047,
+        "bulk_p99_current_density_a_per_mm2": 19.576598969441147
       }
     ]
   },
