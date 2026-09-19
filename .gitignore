@@ -26,3 +26,4 @@ experiments/*
 !experiments/thermal_native_benchmark.py
 !experiments/emc_native_benchmark.py
 !experiments/board_enclosure_acceptance.py
+!experiments/geometry_classify_benchmark.py
