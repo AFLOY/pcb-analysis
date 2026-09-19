@@ -664,30 +664,46 @@ def solve_sheet_case_cuda(
                     def count(_value: Any) -> None:
                         counter["restarts"] += 1
 
-                    # The norm of the explicitly left-preconditioned residual
-                    # is not the norm reported in the public contract.  A
-                    # tighter internal target keeps the original saddle-point
-                    # residual at or below the requested tolerance.
-                    krylov_tolerance = max(
-                        tolerance * 1e-3,
-                        10.0 * np.finfo(np.float64).eps,
-                    )
+                    # GMRES is run one restart cycle at a time and the public
+                    # saddle-point residual is checked between cycles, so the
+                    # solve stops when the requested tolerance is met and
+                    # ``max_iterations`` counts cycles as on the CPU path.
+                    # Aiming CuPy's own (left-preconditioned) criterion three
+                    # decades below the tolerance ran every solve to its cap.
                     effective_restart = min(restart, size)
-                    # SciPy interprets maxiter as restart cycles for the CPU
-                    # call above, while CuPy interprets it as total inner
-                    # iterations.  Preserve one public setting meaning.
-                    maximum_inner_iterations = (
-                        max_iterations * effective_restart
-                    )
-                    result, info = csl.gmres(
-                        linear_system,
-                        left_right_hand_side,
-                        rtol=krylov_tolerance,
-                        restart=restart,
-                        maxiter=maximum_inner_iterations,
-                        callback=count,
-                        callback_type="pr_norm",
-                    )
+                    rhs_norm = float(cp.linalg.norm(right_hand_side).get())
+                    left_norm = float(cp.linalg.norm(left_right_hand_side).get())
+                    result = cp.zeros(size, dtype=cp.complex128)
+                    residual = 1.0 if rhs_norm > 0.0 else 0.0
+                    cycles = 0
+                    floor = 100.0 * np.finfo(np.float64).eps
+                    while residual > tolerance and cycles < max_iterations:
+                        # CuPy judges the left-preconditioned residual; scale its
+                        # target by the current ratio of the two residuals so that
+                        # meeting it brings the saddle-point residual to the
+                        # requested tolerance, and stop when that target falls
+                        # below what float64 can resolve.
+                        raw = saddle(result) - right_hand_side
+                        preconditioned = float(cp.linalg.norm(precondition(raw)).get()) / max(left_norm, 1e-30)
+                        ratio = preconditioned / max(residual, 1e-300) if residual > 0.0 else 1.0
+                        target = 0.5 * tolerance * ratio
+                        if target < floor:
+                            break
+                        result, _info = csl.gmres(
+                            linear_system,
+                            left_right_hand_side,
+                            x0=result,
+                            rtol=target,
+                            restart=effective_restart,
+                            maxiter=effective_restart,
+                            callback=count,
+                            callback_type="pr_norm",
+                        )
+                        cycles += 1
+                        residual = float(
+                            (cp.linalg.norm(saddle(result) - right_hand_side)).get()
+                        ) / max(rhs_norm, 1e-30)
+                    info = 0 if residual <= tolerance else 1
                     current_device = cp.zeros(
                         mesh.branch_count, dtype=cp.complex128
                     )
@@ -696,21 +712,8 @@ def solve_sheet_case_cuda(
                         mesh.node_count, dtype=cp.complex128
                     )
                     voltage_device[keep] = result[branches:]
-                    residual = float(
-                        (
-                            cp.linalg.norm(
-                                saddle(result) - right_hand_side
-                            )
-                            / cp.maximum(
-                                cp.linalg.norm(right_hand_side),
-                                cp.asarray(1e-30),
-                            )
-                        ).get()
-                    )
-                    iterations = (
-                        counter["restarts"] * effective_restart
-                    )
-                    converged = info == 0 and residual <= tolerance
+                    iterations = counter["restarts"]
+                    converged = info == 0
                     factor_backend = (
                         "scipy_superlu_factor_cupy_triangular_solve"
                     )
@@ -749,9 +752,7 @@ def solve_sheet_case_cuda(
         prepare_ms=prepare_ms,
         solve_ms=solve_ms,
         total_ms=total_ms,
-        krylov_relative_tolerance=(
-            tolerance if frequency_hz == 0.0 else krylov_tolerance
-        ),
+        krylov_relative_tolerance=tolerance,
         memory_pool_peak_bytes=pool_peak,
         free_memory_before_bytes=int(free_before),
         free_memory_after_bytes=int(free_after),
