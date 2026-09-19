@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from geometry.cad_import import (
+    native_classify_available,
     board_thermal_mesh,
     board_vias,
     export_kicad_step,
@@ -207,6 +208,8 @@ def test_component_solids_bind_to_footprints_by_reference(tmp_path) -> None:
 
 @pytest.mark.skipif(not _library_model_present(), reason="needs the KiCad 3D model library (C_0603_1608Metric.step)")
 def test_component_footprints_drive_a_graded_grid_that_keeps_the_copper(tmp_path) -> None:
+    if not native_classify_available():
+        pytest.skip("the exact section rasteriser needs the geometry native extension")
     from geometry.cad_import import (
         board_refined_grid,
         board_thermal_mesh,

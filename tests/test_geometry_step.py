@@ -7,6 +7,7 @@ import pytest
 
 from electrical.sheet_peec.plane_opt_contract import PlaneOptProblem
 from geometry.cad_import import (
+    native_classify_available,
     BoardRaster,
     BoardSpec,
     BodyMap,
@@ -421,6 +422,8 @@ def test_nested_assembly_components_keep_their_placement(tmp_path) -> None:
 
 
 def test_graded_raster_conserves_copper_area_and_builds_a_graded_thermal_mesh(model) -> None:
+    if not native_classify_available():
+        pytest.skip("the exact section rasteriser needs the geometry native extension")
     """The same board on a graded grid: exact areas per layer, per-cell pitches in the thermal mesh."""
 
     from electrical.matrix_free_mpir_fem import TensorGrid

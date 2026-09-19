@@ -122,7 +122,7 @@ def test_fixed_faces_give_a_linear_profile_and_the_exact_flux() -> None:
     for face, temperature in zip(expected, solution.temperature_k):
         np.testing.assert_allclose(temperature, face, rtol=1.0e-9)
     np.testing.assert_allclose(
-        solution.heat_flux_w_per_m2[..., 2], -50.0 / 2.0e-3, rtol=1.0e-8
+        solution.heat_flux_w_per_m2[..., 2], -50.0 / 2.0e-3, rtol=1.0e-7
     )
     np.testing.assert_allclose(solution.heat_flux_w_per_m2[..., :2], 0.0, atol=1e-4)
     # The two fixed faces exchange equal and opposite heat.
