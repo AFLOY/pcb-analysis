@@ -71,11 +71,16 @@ install a specific release without PyPI, point pip at the release asset or
 at the tag:
 
 ```bash
-pip install https://github.com/AFLOY/pcb-analysis/releases/download/v0.6.0/pcb_analysis-0.6.0-py3-none-any.whl
-pip install 'git+https://github.com/AFLOY/pcb-analysis.git@v0.6.0'
+pip install https://github.com/AFLOY/pcb-analysis/releases/download/v0.7.0/pcb_analysis-0.7.0-py3-none-any.whl
+pip install 'git+https://github.com/AFLOY/pcb-analysis.git@v0.7.0'
 ```
 
 The release tag has to match the version in `pyproject.toml`.
+
+Version 0.7.0 adds the `geometry` top-level package (STEP input through
+OpenCASCADE, optional `cad` extra) and the `native` extra with the CMake build
+of the C++ kernels; nothing in `electrical`, `thermal`, `emc` or
+`multiphysics` moved, so no import path changes for existing users.
 
 ### From a checkout, CPU only
 
