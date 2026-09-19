@@ -36,7 +36,8 @@ jobs:
           import thermal.matrix_free_mpir_fem.native_hex as t
           import emc.tiled_dipole_superposition.native_dipole as e
           import electrical.matrix_free_mpir_fem.native_q1 as q
-          assert t.native_available() and e.native_available() and q.native_available()
+          import geometry.step_voxelize.mesh as g
+          assert t.native_available() and e.native_available() and q.native_available() and g.native_available()
           "
 
       - name: Run tests
@@ -53,14 +54,19 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install with the cad extra
+      - name: Install with the cad and native extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e '.[test,cad]'
-          python -c "from geometry.step_voxelize import ocp_available; assert ocp_available()"
+          pip install -e '.[test,cad,native]'
+          cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release -DPython_EXECUTABLE="$(which python)"
+          cmake --build build/native
+          python -c "
+          from geometry.step_voxelize import ocp_available, native_classify_available
+          assert ocp_available() and native_classify_available()
+          "
 
       - name: Run the STEP front-end tests
-        run: pytest tests/test_geometry_step.py -v --tb=short -rs
+        run: pytest tests/test_geometry_step.py tests/test_native_geometry.py -v --tb=short -rs
 
   # An editable install on whatever setuptools the runner ships exercises
   # neither the version this project says it needs nor the artefact people
