@@ -15,7 +15,8 @@ The front end is:
 - element conductivity with separate in-plane and through-plane values, so
   copper, anisotropic laminate, and plated vias are all just element
   materials;
-- heat input per element (Joule loss) or per node (component power);
+- heat input per element (Joule loss), per node array (heat handed over at
+  a contact), or spread over named nodes (component power);
 - Newton cooling on the top and bottom faces and fixed-temperature nodes;
 - an optional active-element mask, so a heat sink or enclosure voxelised
   onto the same kind of grid (`VoxelThermalMesh`, from a `VoxelSolidModel`)
@@ -279,6 +280,7 @@ board with a via field.
 | `native_hex.py`, `native/` | opt-in C++ action and two-level inner PCG (built in place) |
 | `coupling.py` | Joule loss of a `PCBConductionSolution` as thermal load |
 | `voxel.py` | `VoxelSolidModel` (material ids, fill, pitch, origin) and `VoxelThermalMesh` |
+| `contact.py` | `ContactMap` between a board face and a body, `planar_contact_map` from the two grids |
 
 The MPIR solver gained optional hooks: a system may define
 `precondition_low(vector)`, which replaces Jacobi scaling in the inner PCG and

@@ -451,9 +451,11 @@ class ThermalConductionProblem:
     """Steady conduction with convective faces and fixed-temperature nodes.
 
     ``element_heat_w`` is the total power released in every element; it is
-    lumped equally onto the element's eight corner nodes.  At least one
-    positive film coefficient or one fixed node is required, otherwise the
-    temperature level is undetermined.
+    lumped equally onto the element's eight corner nodes.  ``nodal_heat_w``
+    is power already lumped onto nodes, one value per node (the heat a
+    contact hands over through an interface).  At least one positive film
+    coefficient or one fixed node is required, otherwise the temperature
+    level is undetermined.
     """
 
     mesh: LayeredThermalMesh
@@ -462,6 +464,7 @@ class ThermalConductionProblem:
     fixed_temperature_k: float | np.ndarray | None = None
     heat_sources: tuple[HeatSource, ...] = ()
     element_heat_w: np.ndarray | None = None
+    nodal_heat_w: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         node_shape = self.mesh.node_shape
@@ -517,6 +520,17 @@ class ThermalConductionProblem:
             if np.any(element_heat[~self.mesh.active] != 0.0):  # type: ignore[index]
                 raise ValueError("element heat must be zero on inactive elements")
 
+        if self.nodal_heat_w is None:
+            nodal_heat = np.zeros(node_shape, dtype=np.float64)
+        else:
+            nodal_heat = np.asarray(self.nodal_heat_w, dtype=np.float64)
+            if nodal_heat.shape != node_shape:
+                raise ValueError("nodal_heat_w must match mesh.node_shape")
+            if not np.all(np.isfinite(nodal_heat)):
+                raise ValueError("nodal heat must be finite")
+            if np.any(nodal_heat[~active_nodes] != 0.0):
+                raise ValueError("nodal heat must be zero on inactive nodes")
+
         sources = tuple(self.heat_sources)
         for source in sources:
             for node in source.nodes:
@@ -530,6 +544,7 @@ class ThermalConductionProblem:
         object.__setattr__(self, "fixed_temperature_k", values.copy())
         object.__setattr__(self, "heat_sources", sources)
         object.__setattr__(self, "element_heat_w", element_heat.copy())
+        object.__setattr__(self, "nodal_heat_w", nodal_heat.copy())
 
 
 def _flat_index(node: Node, shape: tuple[int, int, int]) -> int:
@@ -876,7 +891,7 @@ class MatrixFreeThermalOperator:
     def nodal_load(self) -> np.ndarray:
         """Heat input per node in W: lumped element heat plus nodal sources."""
 
-        load = np.zeros(self.mesh.node_shape, dtype=np.float64)
+        load = self.problem.nodal_heat_w.copy()
         share = self.problem.element_heat_w / 8.0
         for target in self._corner_views(load):
             target[...] += share
