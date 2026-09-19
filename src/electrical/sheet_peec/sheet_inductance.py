@@ -227,6 +227,47 @@ def closed_form_mutual_inductance(
     return float(result) if result.ndim == 0 else result
 
 
+def closed_form_mutual_inductance_arrays(
+    extents_a: tuple[np.ndarray, np.ndarray, np.ndarray],
+    extents_b: tuple[np.ndarray, np.ndarray, np.ndarray],
+    offset_m: tuple[np.ndarray, np.ndarray, np.ndarray],
+    *,
+    check_precision: bool = True,
+) -> np.ndarray:
+    """The closed form of :func:`closed_form_mutual_inductance` with per-pair bar dimensions.
+
+    ``extents_*`` are ``(length, width, thickness)`` arrays broadcastable with
+    the offsets, so bars of a graded grid, every one a different size, are
+    evaluated in one call.  Used by the pFFT operator's near-field correction.
+    """
+
+    du, dv, dw = (np.asarray(value, dtype=np.float64) for value in offset_m)
+    la, wa, ta = (np.asarray(value, dtype=np.float64) for value in extents_a)
+    lb, wb, tb = (np.asarray(value, dtype=np.float64) for value in extents_b)
+    shape = np.broadcast(du, dv, dw, la, wa, ta, lb, wb, tb).shape
+    total = np.zeros(shape, dtype=np.float64)
+    largest = np.zeros(shape, dtype=np.float64)
+    for sx, tx in _AXIS_SIGNS:
+        x = du + sx * la / 2.0 + tx * lb / 2.0
+        for sy, ty in _AXIS_SIGNS:
+            y = dv + sy * wa / 2.0 + ty * wb / 2.0
+            for sz, tz in _AXIS_SIGNS:
+                z = dw + sz * ta / 2.0 + tz * tb / 2.0
+                value = _primitive(x, y, z)
+                total = total + (sx * tx) * (sy * ty) * (sz * tz) * value
+                largest = np.maximum(largest, np.abs(value))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        retained = np.where(largest > 0.0, np.abs(total) / largest, 1.0)
+    if check_precision and total.size and float(np.min(retained)) < 1e-11:
+        raise ValueError(
+            "partial inductance lost its precision to cancellation: only "
+            f"{float(np.min(retained)):.1e} of the summed magnitude survives; "
+            "the closed form is for cells near each other"
+        )
+    scale = _MU0_OVER_4PI / ((wa * ta) * (wb * tb))
+    return np.asarray(scale * total, dtype=np.float64)
+
+
 def closed_form_precision(
     cell: CellGeometry,
     other: CellGeometry,

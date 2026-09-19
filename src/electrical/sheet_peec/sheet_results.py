@@ -89,12 +89,15 @@ def cell_current_density_phasor(
         along_x = along_x / 2.0
         along_y = along_y / 2.0
 
+    # Current along x crosses the cell's y extent, current along y its x extent.
+    hx = mesh.grid.pitch_x_m * 1e3  # type: ignore[union-attr]
+    hy = mesh.grid.pitch_y_m * 1e3  # type: ignore[union-attr]
     density: dict[Cell, tuple[complex, complex]] = {}
     for (layer, row, col) in mesh.node_index:
-        area_mm2 = (mesh.pitch_m * 1e3) * (thickness_m[layer] * 1e3)
+        thickness_mm = thickness_m[layer] * 1e3
         density[(layer, row, col)] = (
-            complex(along_x[layer, row, col] / area_mm2),
-            complex(along_y[layer, row, col] / area_mm2),
+            complex(along_x[layer, row, col] / (hy[row] * thickness_mm)),
+            complex(along_y[layer, row, col] / (hx[col] * thickness_mm)),
         )
     return density
 

@@ -238,11 +238,12 @@ def resistance_ratio(
 def filament_links(
     stack: FilamentStack,
     shape: tuple[int, int],
-    pitch_m: float,
+    pitch_m: float | None,
     *,
     first_layer: int = 0,
     resistivity_ohm_m: float = COPPER_RESISTIVITY_OHM_M,
     occupancy: "np.ndarray | None" = None,
+    cell_area_m2: "np.ndarray | None" = None,
 ) -> tuple["ViaBranch", ...]:
     """Join the filaments of one conductor, because they are one piece of copper.
 
@@ -261,17 +262,20 @@ def filament_links(
     """
     from .sheet_peec import ViaBranch  # imported here to avoid a cycle
 
-    pitch = float(pitch_m)
-    if pitch <= 0.0:
-        raise ValueError("pitch must be positive")
     rows, cols = (int(value) for value in shape)
-    area = pitch * pitch
+    if cell_area_m2 is None:
+        if pitch_m is None or float(pitch_m) <= 0.0:
+            raise ValueError("pitch must be positive unless cell_area_m2 is given")
+        areas = np.full((rows, cols), float(pitch_m) ** 2)
+    else:
+        areas = np.asarray(cell_area_m2, dtype=np.float64)
+        if areas.shape != (rows, cols):
+            raise ValueError("cell_area_m2 must have shape (rows, cols)")
     links: list[ViaBranch] = []
     for index in range(len(stack) - 1):
         upper = first_layer + index
         lower = upper + 1
         span = (stack.thicknesses_m[index] + stack.thicknesses_m[index + 1]) / 2.0
-        resistance = resistivity_ohm_m * span / area
         for row in range(rows):
             for col in range(cols):
                 if occupancy is not None and not (
@@ -284,7 +288,7 @@ def filament_links(
                         col=col,
                         lower_layer=lower,
                         upper_layer=upper,
-                        resistance_ohm=resistance,
+                        resistance_ohm=resistivity_ohm_m * span / float(areas[row, col]),
                     )
                 )
     return tuple(links)

@@ -32,9 +32,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
+
+from electrical.matrix_free_mpir_fem.grid import TensorGrid
 import scipy.sparse as sp
 import scipy.sparse.csgraph as csgraph
 import scipy.sparse.linalg as spla
@@ -118,13 +120,21 @@ class Terminal:
 
 @dataclass
 class SheetMesh:
-    """The conductor: which cells are copper, and how they join."""
+    """The conductor: which cells are copper, and how they join.
+
+    The cells are those of a tensor grid: ``pitch_m`` for a uniform grid, or
+    ``grid`` (a ``TensorGrid`` in metres) for graded column widths and row
+    heights, in which case ``pitch_m`` may be ``None``.  A branch along x from
+    cell ``(r, c)`` to ``(r, c + 1)`` is a bar centred on the shared edge, as
+    long as the two half-cells and as wide as row ``r``; the y branch likewise.
+    """
 
     shape: tuple[int, int]
-    pitch_m: float
+    pitch_m: float | None
     stackup: SheetStackup
     occupancy: np.ndarray
     vias: tuple[ViaBranch, ...] = ()
+    grid: TensorGrid | None = None
 
     node_index: dict[Node, int] = field(init=False, repr=False)
     branch_x: list[tuple[int, int, int]] = field(init=False, repr=False)
@@ -137,6 +147,15 @@ class SheetMesh:
         occupancy = np.asarray(self.occupancy, dtype=bool)
         if occupancy.shape != expected:
             raise ValueError(f"occupancy must have shape {expected}")
+        if self.grid is None:
+            if self.pitch_m is None or float(self.pitch_m) <= 0.0:
+                raise ValueError("pitch_m must be positive unless a grid is given")
+            self.grid = TensorGrid.uniform(float(self.pitch_m), (rows, cols))
+        else:
+            if self.grid.shape != (rows, cols):
+                raise ValueError(f"grid shape {self.grid.shape} does not match {(rows, cols)}")
+            if self.pitch_m is None:
+                self.pitch_m = float(self.grid.pitch_x_m[0]) if self.grid.is_uniform else None
         self.shape = (rows, cols)
         self.occupancy = occupancy
 
@@ -185,6 +204,37 @@ class SheetMesh:
             if key not in seen:
                 seen.append(key)
         return tuple(seen)
+
+    @property
+    def is_uniform(self) -> bool:
+        return self.grid.is_uniform  # type: ignore[union-attr]
+
+    def branch_geometry(self, axis: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Centre x, centre y, length along the current and width of every possible branch of one axis.
+
+        Arrays are ``(rows, cols - 1)`` for ``"x"`` and ``(rows - 1, cols)`` for
+        ``"y"``, indexed like the operator's current grids, whether or not the
+        cells are copper.
+        """
+
+        grid = self.grid
+        assert grid is not None
+        hx, hy = grid.pitch_x_m, grid.pitch_y_m
+        xe, ye = grid.x_edges_m - grid.x_edges_m[0], grid.y_edges_m - grid.y_edges_m[0]
+        xc, yc = 0.5 * (xe[:-1] + xe[1:]), 0.5 * (ye[:-1] + ye[1:])
+        if axis == "x":
+            centre_x = np.broadcast_to(xe[1:-1][None, :], (hy.size, hx.size - 1))
+            centre_y = np.broadcast_to(yc[:, None], (hy.size, hx.size - 1))
+            length = np.broadcast_to((0.5 * (hx[:-1] + hx[1:]))[None, :], (hy.size, hx.size - 1))
+            width = np.broadcast_to(hy[:, None], (hy.size, hx.size - 1))
+        elif axis == "y":
+            centre_x = np.broadcast_to(xc[None, :], (hy.size - 1, hx.size))
+            centre_y = np.broadcast_to(ye[1:-1][:, None], (hy.size - 1, hx.size))
+            length = np.broadcast_to((0.5 * (hy[:-1] + hy[1:]))[:, None], (hy.size - 1, hx.size))
+            width = np.broadcast_to(hx[None, :], (hy.size - 1, hx.size))
+        else:
+            raise ValueError("axis must be 'x' or 'y'")
+        return (np.ascontiguousarray(centre_x), np.ascontiguousarray(centre_y), np.ascontiguousarray(length), np.ascontiguousarray(width))
 
     @property
     def node_count(self) -> int:
@@ -236,15 +286,17 @@ class SheetMesh:
     def resistances(self) -> np.ndarray:
         """Give each branch's resistance.
 
-        An in-plane branch of a uniform grid is one pitch long and one pitch
-        wide, so its resistance is the layer's sheet resistance whatever the
-        pitch is.
+        An in-plane branch is a bar ``length / width`` squares long, so its
+        resistance is the layer's sheet resistance times that ratio; on a
+        uniform grid the ratio is one whatever the pitch is.
         """
         values = np.empty(self.branch_count, dtype=np.float64)
         position = 0
-        for group in (self.branch_x, self.branch_y):
-            for layer, _row, _col in group:
-                values[position] = self.stackup.layers[layer].sheet_resistance_ohm
+        for axis, group in (("x", self.branch_x), ("y", self.branch_y)):
+            _cx, _cy, length, width = self.branch_geometry(axis)
+            squares = length / width
+            for layer, row, col in group:
+                values[position] = self.stackup.layers[layer].sheet_resistance_ohm * squares[row, col]
                 position += 1
         for via in self.via_branches:
             values[position] = via.resistance_ohm
@@ -571,10 +623,9 @@ def solve_sheet_case(
     # exactly solvable and, because the self term dominates the coupling,
     # close.  Its Schur complement is the sparse nodal admittance matrix, so it
     # is factored once and reused for every iteration.
-    inline_count = len(mesh.branch_x) + len(mesh.branch_y)
     full_diagonal = resistance + 1j * omega * np.concatenate(
         [
-            np.full(inline_count, _self_inductance(operator)),
+            _inline_self_inductance(mesh, operator),
             _vertical_self_inductance(mesh, operator),
         ]
     )
@@ -638,6 +689,9 @@ def _vertical_self_inductance(
     """Read each vertical branch's own partial inductance off the operator."""
     if not mesh.via_branches:
         return np.zeros(0, dtype=np.float64)
+    reporter = getattr(operator, "vertical_self_inductance", None)
+    if reporter is not None and tuple(mesh.vertical_levels) == tuple(operator.vertical_levels):
+        return np.asarray(reporter(mesh), dtype=np.float64)
     levels = mesh.vertical_levels
     if not levels or tuple(levels) != tuple(operator.vertical_levels):
         # No operator to read from; fall back to whatever the caller stated.
@@ -664,6 +718,19 @@ def _vertical_self_inductance(
         ],
         dtype=np.float64,
     )
+
+
+def _inline_self_inductance(mesh: SheetMesh, operator: Any) -> np.ndarray:
+    """Own partial inductance of every in-plane branch, in branch order.
+
+    An operator that knows the branch geometry (the graded-grid pFFT operator)
+    reports it per branch; the uniform convolution operator has one value.
+    """
+    reporter = getattr(operator, "branch_self_inductance", None)
+    if reporter is not None:
+        return np.asarray(reporter(mesh), dtype=np.float64)
+    inline_count = len(mesh.branch_x) + len(mesh.branch_y)
+    return np.full(inline_count, _self_inductance(operator))
 
 
 def _self_inductance(operator: SheetInductanceOperator) -> float:
