@@ -63,7 +63,15 @@ jobs:
           wheel-env/bin/python -c "
           import electrical.dice_peec, electrical.matrix_free_mpir_fem
           import thermal.matrix_free_mpir_fem, emc.tiled_dipole_superposition
-          import multiphysics.staggered_coupling
+          import multiphysics.staggered_coupling, geometry.step_voxelize
+          from importlib.resources import files
+          for package in ('electrical', 'thermal', 'emc', 'multiphysics', 'geometry'):
+              assert files(package).joinpath('py.typed').is_file(), package
+          # The wheel is pure Python: C++ sources ship, compiled objects do not.
+          import zipfile, glob
+          names = zipfile.ZipFile(glob.glob('$GITHUB_WORKSPACE/dist/*.whl')[0]).namelist()
+          assert any(n.endswith('point_in_mesh.cpp') for n in names)
+          assert not any(n.endswith('.so') for n in names)
           "
           wheel-env/bin/pcb-analysis-calibrate --help > /dev/null
 
