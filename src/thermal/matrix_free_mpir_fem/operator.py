@@ -50,7 +50,11 @@ class MatrixFreeThermalOperator:
         coarse_block_nodes: int | None = None,
         native: bool | None = None,
         native_threads: int | None = None,
+        capacity_per_s: np.ndarray | None = None,
     ) -> None:
+        """``capacity_per_s`` is the lumped nodal heat capacity over the time step,
+        ``C / Δt`` in W/K, for one backward-Euler step; ``None`` is steady state."""
+
         if runtime is not None and backend is not None:
             raise ValueError("pass either runtime or backend, not both")
         if preconditioner not in ("two-level", "jacobi"):
@@ -98,11 +102,22 @@ class MatrixFreeThermalOperator:
             self._robin_weights_high.append(weights)
             self._robin_rhs_weights_high.append(rhs_weights)
             self._robin_ambient_k.append(boundary.mean_ambient_k())
-        self._robin_total_high = (
+        self._robin_only_high = (
             np.sum(self._robin_weights_high, axis=0)
             if self._robin_weights_high
             else np.zeros(self.size, dtype=np.float64)
         )
+        if capacity_per_s is None:
+            self._capacity_high = np.zeros(self.size, dtype=np.float64)
+        else:
+            capacity = np.asarray(capacity_per_s, dtype=np.float64).reshape(-1)
+            if capacity.size != self.size:
+                raise ValueError("capacity_per_s must hold one value per node")
+            if not np.all(np.isfinite(capacity)) or np.any(capacity < 0.0):
+                raise ValueError("capacity_per_s must be finite and non-negative")
+            self._capacity_high = capacity
+        # The kernels see one diagonal addition: Robin conductance plus C / Δt.
+        self._robin_total_high = self._robin_only_high + self._capacity_high
         self._robin_rhs_high = (
             np.sum(self._robin_rhs_weights_high, axis=0)
             if self._robin_rhs_weights_high
@@ -345,7 +360,21 @@ class MatrixFreeThermalOperator:
         mask = self.problem.fixed_temperature_mask & self.active_nodes
         return float(np.mean(self.problem.fixed_temperature_k[mask]))
 
-    def build_rhs(self, reference_temperature_k: float = 0.0) -> np.ndarray:
+    def _capacity_load(self, previous_temperature_k: np.ndarray | None) -> np.ndarray:
+        """``C / Δt · T_n`` for a backward-Euler step, zero in steady state."""
+
+        if previous_temperature_k is None:
+            if np.any(self._capacity_high > 0.0):
+                raise ValueError("a transient operator needs previous_temperature_k")
+            return np.zeros(self.size, dtype=np.float64)
+        previous = np.asarray(previous_temperature_k, dtype=np.float64).reshape(-1)
+        if previous.size != self.size:
+            raise ValueError("previous_temperature_k must hold one value per node")
+        return self._capacity_high * np.where(np.isfinite(previous), previous, 0.0)
+
+    def build_rhs(
+        self, reference_temperature_k: float = 0.0, previous_temperature_k: np.ndarray | None = None
+    ) -> np.ndarray:
         """Right-hand side for the temperature rise above a reference.
 
         The unknown is ``theta = T - reference``.  Solving for the rise instead
@@ -353,7 +382,8 @@ class MatrixFreeThermalOperator:
         cancellation ``K (300 K) ~ 0`` that otherwise caps attainable accuracy
         at about ``eps * ||A|| * 300 K / ||q||``.  Fixed temperatures move onto
         the free rows through the unconstrained stiffness action, and their
-        own rows carry the shifted value.
+        own rows carry the shifted value.  A transient step adds ``C / Δt T_n``
+        from ``previous_temperature_k``.
         """
 
         reference = float(reference_temperature_k)
@@ -371,13 +401,27 @@ class MatrixFreeThermalOperator:
             self._local_through_high,
         ).reshape(-1)
         robin_rhs = self._robin_rhs_high - self._robin_total_high * reference
-        rhs = self.nodal_load() + robin_rhs - boundary_action
+        rhs = self.nodal_load() + robin_rhs + self._capacity_load(previous_temperature_k) - boundary_action
         rhs[mask] = shifted_fixed[mask]
         return rhs
 
     # ---------------------------------------------------------- post-process
-    def unconstrained_residual(self, temperature_k: np.ndarray) -> np.ndarray:
-        """``K T + R (T - T_amb) - q`` at every node, including fixed ones.
+    def stored_heat_w(
+        self, temperature_k: np.ndarray, previous_temperature_k: np.ndarray | None
+    ) -> np.ndarray:
+        """``C / Δt (T - T_n)`` per node: the heat going into the thermal mass this step."""
+
+        flat = np.asarray(temperature_k, dtype=np.float64).reshape(-1)
+        if previous_temperature_k is None:
+            return np.zeros(self.size, dtype=np.float64)
+        previous = np.asarray(previous_temperature_k, dtype=np.float64).reshape(-1)
+        finite = np.isfinite(flat) & np.isfinite(previous)
+        return np.where(finite, self._capacity_high * (flat - previous), 0.0)
+
+    def unconstrained_residual(
+        self, temperature_k: np.ndarray, previous_temperature_k: np.ndarray | None = None
+    ) -> np.ndarray:
+        """``K T + R (T - T_amb) + C/Δt (T - T_n) - q`` at every node, including fixed ones.
 
         At free nodes this is the solver's residual.  At fixed nodes its
         negative is the heat the fixed-temperature sink absorbs to hold that
@@ -396,8 +440,9 @@ class MatrixFreeThermalOperator:
         ).reshape(-1)
         return (
             conduction
-            + self._robin_total_high * flat
+            + self._robin_only_high * flat
             - self._robin_rhs_high
+            + self.stored_heat_w(flat, previous_temperature_k)
             - self.nodal_load()
         )
 

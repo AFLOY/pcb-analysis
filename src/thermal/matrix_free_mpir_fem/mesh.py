@@ -146,6 +146,9 @@ class LayeredThermalMesh:
         float | Sequence[float] | np.ndarray | None
     ) = None
     active: np.ndarray | None = None
+    volumetric_heat_capacity_j_per_m3_k: (
+        float | Sequence[float] | np.ndarray | None
+    ) = None
 
     def __post_init__(self) -> None:
         thickness = np.asarray(self.slab_thickness_m, dtype=np.float64)
@@ -202,8 +205,20 @@ class LayeredThermalMesh:
                 )
         in_plane = np.where(active, in_plane, 0.0)
         through = np.where(active, through, 0.0)
+        if self.volumetric_heat_capacity_j_per_m3_k is None:
+            capacity = None
+        else:
+            capacity = _broadcast_element_field(
+                self.volumetric_heat_capacity_j_per_m3_k, shape, "volumetric_heat_capacity_j_per_m3_k"
+            )
+            if not np.all(np.isfinite(capacity)) or np.any(capacity[active] <= 0.0):
+                raise ValueError(
+                    "volumetric_heat_capacity_j_per_m3_k must be finite and positive on active elements"
+                )
+            capacity = np.where(active, capacity, 0.0)
 
         object.__setattr__(self, "slab_thickness_m", tuple(thickness.tolist()))
+        object.__setattr__(self, "volumetric_heat_capacity_j_per_m3_k", capacity)
         object.__setattr__(self, "element_shape", (rows, cols))
         object.__setattr__(self, "conductivity_w_per_m_k", in_plane)
         object.__setattr__(self, "through_plane_conductivity_w_per_m_k", through)
@@ -230,6 +245,23 @@ class LayeredThermalMesh:
             (thickness * self.pitch_x_m * self.pitch_y_m)[:, None, None],
             self.element_grid_shape,
         ).copy()
+
+    @property
+    def has_heat_capacity(self) -> bool:
+        return self.volumetric_heat_capacity_j_per_m3_k is not None
+
+    def nodal_heat_capacity_j_per_k(self) -> np.ndarray:
+        """Element heat capacity ``ρ c V`` lumped equally onto the eight corners, per node."""
+
+        if self.volumetric_heat_capacity_j_per_m3_k is None:
+            raise ValueError(
+                "the mesh has no volumetric_heat_capacity_j_per_m3_k; a transient solve needs one"
+            )
+        element = self.volumetric_heat_capacity_j_per_m3_k * self.element_volume_m3 / 8.0
+        nodal = np.zeros(self.node_shape, dtype=np.float64)
+        for view in _corner_views(nodal):
+            view[...] += element
+        return nodal
 
     @property
     def is_full(self) -> bool:

@@ -32,6 +32,7 @@ class ThermalConductionSolution:
     radiation_iterations: int = 0
     radiation_converged: bool = True
     radiation_change_k: float = 0.0
+    stored_heat_w: float = 0.0
 
 
 def solve_thermal_conduction(
@@ -69,13 +70,43 @@ def solve_thermal_conduction(
     the true convection boundaries.
     """
 
+    return _solve(
+        problem, config=config, runtime=runtime, backend=backend, device_id=device_id,
+        initial_temperature_k=initial_temperature_k, preconditioner=preconditioner,
+        coarse_block_nodes=coarse_block_nodes, reference_temperature_k=reference_temperature_k,
+        native=native, native_threads=native_threads,
+        radiation_max_iterations=radiation_max_iterations, radiation_tolerance_k=radiation_tolerance_k,
+    )
+
+
+def _solve(
+    problem: ThermalConductionProblem,
+    *,
+    config: MPIRConfig | None = None,
+    runtime: LowPrecisionRuntime | None = None,
+    backend: RuntimeBackend | None = None,
+    device_id: int = 0,
+    initial_temperature_k: np.ndarray | float | None = None,
+    preconditioner: Preconditioner = "two-level",
+    coarse_block_nodes: int | None = None,
+    reference_temperature_k: float | None = None,
+    native: bool | None = None,
+    native_threads: int | None = None,
+    radiation_max_iterations: int = 25,
+    radiation_tolerance_k: float = 1.0e-4,
+    capacity_per_s: np.ndarray | None = None,
+    previous_temperature_k: np.ndarray | None = None,
+) -> ThermalConductionSolution:
+    """Steady solve, or one backward-Euler step when ``capacity_per_s`` is given."""
+
+    linear_options = dict(
+        config=config, runtime=runtime, backend=backend, device_id=device_id,
+        preconditioner=preconditioner, coarse_block_nodes=coarse_block_nodes,
+        reference_temperature_k=reference_temperature_k, native=native, native_threads=native_threads,
+        capacity_per_s=capacity_per_s, previous_temperature_k=previous_temperature_k,
+    )
     if not problem.radiation:
-        return _solve_linear(
-            problem, config=config, runtime=runtime, backend=backend, device_id=device_id,
-            initial_temperature_k=initial_temperature_k, preconditioner=preconditioner,
-            coarse_block_nodes=coarse_block_nodes, reference_temperature_k=reference_temperature_k,
-            native=native, native_threads=native_threads,
-        )
+        return _solve_linear(problem, initial_temperature_k=initial_temperature_k, **linear_options)
     if radiation_max_iterations < 1:
         raise ValueError("radiation_max_iterations must be positive")
     if not radiation_tolerance_k > 0.0:
@@ -100,12 +131,7 @@ def solve_thermal_conduction(
         linear = dataclasses.replace(
             problem, convection=tuple(problem.convection) + linearised, radiation=()
         )
-        solution = _solve_linear(
-            linear, config=config, runtime=runtime, backend=backend, device_id=device_id,
-            initial_temperature_k=current, preconditioner=preconditioner,
-            coarse_block_nodes=coarse_block_nodes, reference_temperature_k=reference_temperature_k,
-            native=native, native_threads=native_threads,
-        )
+        solution = _solve_linear(linear, initial_temperature_k=current, **linear_options)
         proposed = np.where(np.isfinite(solution.temperature_k), solution.temperature_k, current)
         change = float(np.max(np.abs(proposed - current)))
         current = proposed
@@ -137,6 +163,8 @@ def _solve_linear(
     reference_temperature_k: float | None,
     native: bool | None,
     native_threads: int | None,
+    capacity_per_s: np.ndarray | None = None,
+    previous_temperature_k: np.ndarray | None = None,
 ) -> ThermalConductionSolution:
     operator = MatrixFreeThermalOperator(
         problem,
@@ -147,7 +175,12 @@ def _solve_linear(
         coarse_block_nodes=coarse_block_nodes,
         native=native,
         native_threads=native_threads,
+        capacity_per_s=capacity_per_s,
     )
+    previous = None
+    if previous_temperature_k is not None:
+        previous = np.asarray(previous_temperature_k, dtype=np.float64).reshape(-1)
+        previous = np.where(np.isfinite(previous), previous, 0.0)
     reference = (
         operator.default_reference_temperature()
         if reference_temperature_k is None
@@ -155,7 +188,7 @@ def _solve_linear(
     )
     if not np.isfinite(reference):
         raise ValueError("reference_temperature_k must be finite")
-    rhs = operator.build_rhs(reference)
+    rhs = operator.build_rhs(reference, previous)
     if initial_temperature_k is None:
         initial = None
     else:
@@ -186,7 +219,7 @@ def _solve_linear(
         shift = float(np.mean(result.solution[free]))
         if abs(shift) > 0.0:
             reference += shift
-            rhs = operator.build_rhs(reference)
+            rhs = operator.build_rhs(reference, previous)
             resumed = solve_mpir(
                 operator, rhs, config=config, initial_guess=result.solution - shift
             )
@@ -206,10 +239,11 @@ def _solve_linear(
     temperature = result.solution.reshape(problem.mesh.node_shape) + reference
 
     load = operator.nodal_load()
-    residual = operator.unconstrained_residual(temperature)
+    residual = operator.unconstrained_residual(temperature, previous)
     fixed = operator.fixed_nodes.reshape(-1)
     convective = operator.convective_heat(temperature)
     fixed_heat = -float(np.sum(residual[fixed]))
+    stored = float(np.sum(operator.stored_heat_w(temperature, previous)))
     total_input = float(np.sum(load))
     heat_flux = operator.element_heat_flux(temperature)
     active_nodes = operator.active_nodes
@@ -224,6 +258,7 @@ def _solve_linear(
         total_heat_input_w=total_input,
         convective_heat_w=convective,
         fixed_temperature_heat_w=fixed_heat,
-        heat_balance_error_w=total_input - float(np.sum(convective)) - fixed_heat,
+        heat_balance_error_w=total_input - float(np.sum(convective)) - fixed_heat - stored,
         solve=result,
+        stored_heat_w=stored,
     )

@@ -26,6 +26,7 @@ from .radiation import (
     newton_linearisation,
 )
 from .solve import ThermalConductionSolution, solve_thermal_conduction
+from .transient import TimeSchedule, TransientStep, TransientThermalSolution, solve_thermal_transient
 from .contact import ContactMap, planar_contact_map
 from .coupling import element_joule_heat_w, via_joule_heat_sources
 from .two_level import AggregationCoarseCorrection, choose_block_size
@@ -48,6 +49,9 @@ __all__ = [
     "STEFAN_BOLTZMANN_W_PER_M2_K4",
     "ThermalConductionProblem",
     "ThermalConductionSolution",
+    "TimeSchedule",
+    "TransientStep",
+    "TransientThermalSolution",
     "VoxelMaterial",
     "VoxelSolidModel",
     "VoxelThermalMesh",
@@ -59,5 +63,6 @@ __all__ = [
     "exposed_element_faces",
     "planar_contact_map",
     "solve_thermal_conduction",
+    "solve_thermal_transient",
     "via_joule_heat_sources",
 ]
