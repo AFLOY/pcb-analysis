@@ -1,0 +1,166 @@
+{
+  "generated_at": "2026-09-19T17:03:23+00:00",
+  "environment": {
+    "platform": "Linux-6.12.0-211.54.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "cpu": "Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz",
+    "cpu_count": 12,
+    "compiler": "g++ (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)",
+    "native_extension_built": true,
+    "kicad_cli": "10.0.5",
+    "PCB_NATIVE_THREADS": "4",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "power_module": {
+    "board": "power_module",
+    "components_with_models": [
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6",
+      "C7",
+      "R1",
+      "R2",
+      "R3",
+      "R4"
+    ],
+    "heated_component": "C1",
+    "refinement": [
+      {
+        "rows": 200,
+        "cols": 161,
+        "cells": 32200,
+        "boxes": 11,
+        "fine_pitch_mm": 0.09980797549105636,
+        "coarse_pitch_mm": 0.5007665836105901,
+        "uniform_fine_cells": 121104,
+        "uniform_coarse_cells": 4761
+      },
+      {
+        "rows": 241,
+        "cols": 181,
+        "cells": 43621,
+        "boxes": 11,
+        "fine_pitch_mm": 0.10013515514821492,
+        "coarse_pitch_mm": 0.5008128004504453,
+        "uniform_fine_cells": 120409,
+        "uniform_coarse_cells": 4761
+      }
+    ],
+    "rise_k_reference": 104.46033277980979,
+    "runs": [
+      {
+        "grid": "uniform 0.5 mm",
+        "cells": 4900,
+        "rows": 70,
+        "cols": 70,
+        "thermal_nodes": 20164,
+        "raster_wall_ms": 204.59632691927254,
+        "solve_wall_ms": 946.2775480933487,
+        "inner_iterations": 975,
+        "converged": true,
+        "copper_area_mm2": [
+          68.58362445263775,
+          695.2362494911342
+        ],
+        "raster_copper_area_mm2": [
+          67.26273366443591,
+          693.9153587029324
+        ],
+        "peak_temperature_k": 393.5731685807917,
+        "heat_balance_error_w": 1.0773049119450206e-11,
+        "peak_error_vs_uniform_fine_k": -9.037164199018093,
+        "copper_area_rel_diff_vs_uniform_fine": [
+          5.3734794391857577e-14,
+          5.5067062021407764e-14
+        ]
+      },
+      {
+        "grid": "uniform 0.1 mm",
+        "cells": 120409,
+        "rows": 347,
+        "cols": 347,
+        "thermal_nodes": 484416,
+        "raster_wall_ms": 6.601441069506109,
+        "solve_wall_ms": 9834.910352015868,
+        "inner_iterations": 1200,
+        "converged": true,
+        "copper_area_mm2": [
+          68.58362445263407,
+          695.2362494910959
+        ],
+        "raster_copper_area_mm2": [
+          68.02266268259498,
+          694.6752877210569
+        ],
+        "peak_temperature_k": 402.61033277980977,
+        "heat_balance_error_w": 1.91509030855741e-11,
+        "peak_error_vs_uniform_fine_k": 0.0,
+        "copper_area_rel_diff_vs_uniform_fine": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "grid": "graded 0.1 mm under components, margin 1.0 mm, growth 1.4",
+        "cells": 32200,
+        "rows": 200,
+        "cols": 161,
+        "thermal_nodes": 130248,
+        "raster_wall_ms": 6.528740981593728,
+        "solve_wall_ms": 4233.13558998052,
+        "inner_iterations": 2400,
+        "converged": true,
+        "copper_area_mm2": [
+          68.58362445263795,
+          695.2362494911356
+        ],
+        "raster_copper_area_mm2": [
+          67.21214769871425,
+          693.8647727372119
+        ],
+        "peak_temperature_k": 399.8140165195418,
+        "heat_balance_error_w": 4.973799150320701e-12,
+        "peak_error_vs_uniform_fine_k": -2.796316260267986,
+        "copper_area_rel_diff_vs_uniform_fine": [
+          5.6621374255882984e-14,
+          5.706546346573305e-14
+        ]
+      },
+      {
+        "grid": "graded 0.1 mm under components, margin 2.0 mm, growth 1.20",
+        "cells": 43621,
+        "rows": 241,
+        "cols": 181,
+        "thermal_nodes": 176176,
+        "raster_wall_ms": 6.848781951703131,
+        "solve_wall_ms": 4447.914442047477,
+        "inner_iterations": 1600,
+        "converged": true,
+        "copper_area_mm2": [
+          68.58362445263792,
+          695.2362494911356
+        ],
+        "raster_copper_area_mm2": [
+          67.15785574810128,
+          693.8104807865989
+        ],
+        "peak_temperature_k": 399.71950515292673,
+        "heat_balance_error_w": -2.2615243011614439e-13,
+        "peak_error_vs_uniform_fine_k": -2.8908276268830377,
+        "copper_area_rel_diff_vs_uniform_fine": [
+          5.617728504603292e-14,
+          5.706546346573305e-14
+        ]
+      }
+    ],
+    "graded_ok": true
+  },
+  "decision": {
+    "component_driven_graded_grid": "adopted",
+    "criteria": "graded peak error below the coarse uniform error, under half the fine cells, copper area within 1e-9 of the fine grid (fused KiCad shapes, so the exact section coverage is grid independent)"
+  }
+}

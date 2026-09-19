@@ -32,3 +32,4 @@ experiments/*
 !experiments/electrothermal_enclosure_acceptance.py
 !experiments/thermal_transient_acceptance.py
 !experiments/tensor_grid_acceptance.py
+!experiments/kicad_refinement_acceptance.py
