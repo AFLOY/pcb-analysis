@@ -209,8 +209,8 @@ def dc_strip_case(
     peec_resistance = peec_solution.voltage_span_v()
     fem_resistance = fem_operator.joule_loss(fem_result.solution)
     fem_low_bytes = _array_bytes(
-        fem_operator._coefficient_low,
-        fem_operator._local_low,
+        fem_operator._coefficients_low,
+        fem_operator._unit_low,
         fem_operator._free_low,
         fem_operator._via_a_low,
         fem_operator._via_b_low,

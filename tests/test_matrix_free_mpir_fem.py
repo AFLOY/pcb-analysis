@@ -94,8 +94,9 @@ def test_uniform_strip_matches_closed_form_resistance_and_current_density() -> N
     assert solution.max_current_density_a_per_m2 == pytest.approx(
         1.0 / (width * thickness), rel=2.0e-10
     )
+    # Transverse current at the FP64 residual floor relative to the axial density.
     np.testing.assert_allclose(
-        solution.current_density_a_per_m2[..., 1], 0.0, atol=2.0e-6
+        solution.current_density_a_per_m2[..., 1], 0.0, atol=1.0e-9 / (width * thickness)
     )
 
 

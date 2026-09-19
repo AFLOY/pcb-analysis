@@ -47,15 +47,17 @@ def terminal_closure_dipoles(
 
     mesh = problem.mesh
     heights = np.asarray(layer_height_m, dtype=np.float64)
+    x_nodes = np.concatenate(([0.0], np.cumsum(mesh.pitch_x_m)))
+    y_nodes = np.concatenate(([0.0], np.cumsum(mesh.pitch_y_m)))
     centroids = []
     currents = []
     for terminal in problem.terminals:
-        nodes = np.asarray(terminal.nodes, dtype=np.float64)
+        nodes = np.asarray(terminal.nodes, dtype=np.int64)
         centroid = np.array(
             [
-                np.mean(nodes[:, 2]) * mesh.pitch_x_m,
-                np.mean(nodes[:, 1]) * mesh.pitch_y_m,
-                np.mean(heights[nodes[:, 0].astype(int)]),
+                np.mean(x_nodes[nodes[:, 2]]),
+                np.mean(y_nodes[nodes[:, 1]]),
+                np.mean(heights[nodes[:, 0]]),
             ]
         )
         centroids.append(centroid)
@@ -108,19 +110,15 @@ def dipoles_from_pcb_dc(
     if density.shape != (layers, rows, cols, 2):
         raise ValueError("current density must have shape (layers, rows, cols, 2)")
     thickness = np.asarray(mesh.layer_thickness_m, dtype=np.float64)
-    volume = np.broadcast_to(
-        thickness[:, None, None] * mesh.pitch_x_m * mesh.pitch_y_m, (layers, rows, cols)
-    )
+    volume = thickness[:, None, None] * mesh.cell_area_m2[None, :, :]
+    x_nodes = np.concatenate(([0.0], np.cumsum(mesh.pitch_x_m)))
+    y_nodes = np.concatenate(([0.0], np.cumsum(mesh.pitch_y_m)))
+    x_centres = 0.5 * (x_nodes[:-1] + x_nodes[1:])
+    y_centres = 0.5 * (y_nodes[:-1] + y_nodes[1:])
     active = mesh.element_active
     layer_index, row_index, col_index = np.nonzero(active)
 
-    positions = np.column_stack(
-        (
-            (col_index + 0.5) * mesh.pitch_x_m,
-            (row_index + 0.5) * mesh.pitch_y_m,
-            heights[layer_index],
-        )
-    )
+    positions = np.column_stack((x_centres[col_index], y_centres[row_index], heights[layer_index]))
     moments = np.zeros((positions.shape[0], 3), dtype=np.complex128)
     moments[:, :2] = density[active] * volume[active][:, None]
 
@@ -133,11 +131,7 @@ def dipoles_from_pcb_dc(
             upper_layer = via.upper[0]
             span = heights[upper_layer] - heights[lower_layer]
             via_positions.append(
-                (
-                    col * mesh.pitch_x_m,
-                    row * mesh.pitch_y_m,
-                    0.5 * (heights[upper_layer] + heights[lower_layer]),
-                )
+                (x_nodes[col], y_nodes[row], 0.5 * (heights[upper_layer] + heights[lower_layer]))
             )
             via_moments.append((0.0, 0.0, current * span))
         positions = np.vstack((positions, np.asarray(via_positions)))

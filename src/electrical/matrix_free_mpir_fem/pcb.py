@@ -10,12 +10,16 @@ assembled.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 import numpy as np
 
+from .grid import check_pitch_axis
 from .runtime import LowPrecisionRuntime, RuntimeBackend, make_float32_runtime
 from .solver import MPIRConfig, MPIRResult, solve_mpir
+from .two_level import AggregationCoarseCorrection
+
+Preconditioner = Literal["two-level", "jacobi"]
 
 
 COPPER_CONDUCTIVITY_S_PER_M = 1.0 / 1.724e-8
@@ -73,13 +77,15 @@ class LayeredPCBMesh:
     """Structured Q1 element mesh for one electrical conductor role.
 
     ``element_active`` has shape ``(layer, node_rows - 1, node_cols - 1)``.
+    ``pitch_x_m`` is one width for every column or one value per column,
+    ``pitch_y_m`` likewise per row (a graded tensor grid, see :mod:`.grid`).
     Conductivity can be a scalar, one value per layer, or one value per element.
     """
 
     element_active: np.ndarray
     layer_thickness_m: Sequence[float]
-    pitch_x_m: float
-    pitch_y_m: float
+    pitch_x_m: float | Sequence[float] | np.ndarray
+    pitch_y_m: float | Sequence[float] | np.ndarray
     conductivity_s_per_m: float | Sequence[float] | np.ndarray = (
         COPPER_CONDUCTIVITY_S_PER_M
     )
@@ -95,11 +101,8 @@ class LayeredPCBMesh:
             raise ValueError("layer_thickness_m must contain one value per layer")
         if not np.all(np.isfinite(thickness)) or np.any(thickness <= 0.0):
             raise ValueError("layer thicknesses must be finite and positive")
-        for name in ("pitch_x_m", "pitch_y_m"):
-            value = float(getattr(self, name))
-            if not np.isfinite(value) or value <= 0.0:
-                raise ValueError(f"{name} must be finite and positive")
-            object.__setattr__(self, name, value)
+        object.__setattr__(self, "pitch_x_m", check_pitch_axis(self.pitch_x_m, active.shape[2], "pitch_x_m"))
+        object.__setattr__(self, "pitch_y_m", check_pitch_axis(self.pitch_y_m, active.shape[1], "pitch_y_m"))
 
         conductivity = np.asarray(self.conductivity_s_per_m, dtype=np.float64)
         if conductivity.ndim == 0:
@@ -128,6 +131,30 @@ class LayeredPCBMesh:
     def size(self) -> int:
         return int(np.prod(self.node_shape))
 
+    @property
+    def uniform_pitch(self) -> bool:
+        return bool(np.all(self.pitch_x_m == self.pitch_x_m[0]) and np.all(self.pitch_y_m == self.pitch_y_m[0]))
+
+    @property
+    def cell_area_m2(self) -> np.ndarray:
+        """In-plane area of every cell, ``(rows, cols)``."""
+
+        return self.pitch_y_m[:, None] * self.pitch_x_m[None, :]
+
+    def element_coefficients(self) -> tuple[np.ndarray, np.ndarray]:
+        """Per-element factors of the two unit sheet stiffness matrices.
+
+        ``K_e = c_x U_x + c_y U_y`` with ``c_x = σ t h_y / h_x`` and
+        ``c_y = σ t h_x / h_y``; zero on inactive elements.
+        """
+
+        conductivity = np.asarray(self.conductivity_s_per_m, dtype=np.float64)
+        thickness = np.asarray(self.layer_thickness_m, dtype=np.float64)[:, None, None]
+        sheet = conductivity * thickness * self.element_active.astype(np.float64)
+        hx = self.pitch_x_m[None, None, :]
+        hy = self.pitch_y_m[None, :, None]
+        return np.ascontiguousarray(sheet * hy / hx), np.ascontiguousarray(sheet * hx / hy)
+
 
 @dataclass(frozen=True)
 class PCBConductionProblem:
@@ -151,15 +178,25 @@ class PCBConductionProblem:
         )
 
 
-def _local_stiffness(pitch_x_m: float, pitch_y_m: float) -> np.ndarray:
-    """Unit-sheet-conductance Q1 stiffness for a rectangular element."""
+_STIFFNESS_1D = np.array([[1.0, -1.0], [-1.0, 1.0]])
+_MASS_1D = np.array([[2.0, 1.0], [1.0, 2.0]]) / 6.0
 
-    stiffness_1d = np.array([[1.0, -1.0], [-1.0, 1.0]])
-    mass_1d = np.array([[2.0, 1.0], [1.0, 2.0]]) / 6.0
-    return (
-        (pitch_y_m / pitch_x_m) * np.kron(mass_1d, stiffness_1d)
-        + (pitch_x_m / pitch_y_m) * np.kron(stiffness_1d, mass_1d)
-    )
+
+def unit_sheet_matrices() -> tuple[np.ndarray, np.ndarray]:
+    """The two ``(4, 4)`` unit Q1 sheet stiffness matrices ``U_x, U_y``.
+
+    Local node ordering is ``2 dy + dx``.  A ``h_x × h_y`` element of sheet
+    conductance ``σ t`` has stiffness ``σ t (h_y / h_x U_x + h_x / h_y U_y)``.
+    """
+
+    return np.kron(_MASS_1D, _STIFFNESS_1D), np.kron(_STIFFNESS_1D, _MASS_1D)
+
+
+def _local_stiffness(pitch_x_m: float, pitch_y_m: float) -> np.ndarray:
+    """Unit-sheet-conductance Q1 stiffness for one rectangular element (uniform grids)."""
+
+    unit_x, unit_y = unit_sheet_matrices()
+    return (pitch_y_m / pitch_x_m) * unit_x + (pitch_x_m / pitch_y_m) * unit_y
 
 
 def _flat_index(node: Node, shape: tuple[int, int, int]) -> int:
@@ -172,7 +209,13 @@ def _flat_index(node: Node, shape: tuple[int, int, int]) -> int:
 
 
 class MatrixFreePCBOperator:
-    """Split FP64/FP32 element-by-element conductivity operator."""
+    """Split FP64/FP32 element-by-element conductivity operator.
+
+    ``preconditioner="two-level"`` (default) adds the patch-constant coarse
+    correction of :mod:`.two_level` to Jacobi scaling; a wide copper sheet or
+    a graded grid with elongated elements otherwise costs hundreds of inner
+    PCG iterations per outer step.  ``"jacobi"`` keeps the plain scaling.
+    """
 
     def __init__(
         self,
@@ -183,9 +226,13 @@ class MatrixFreePCBOperator:
         runtime: LowPrecisionRuntime | None = None,
         backend: RuntimeBackend | None = None,
         device_id: int = 0,
+        preconditioner: Preconditioner = "two-level",
+        coarse_block_nodes: int | None = None,
     ) -> None:
         if runtime is not None and backend is not None:
             raise ValueError("pass either runtime or backend, not both")
+        if preconditioner not in ("two-level", "jacobi"):
+            raise ValueError("preconditioner must be 'two-level' or 'jacobi'")
         self.high_dtype = np.float64
         self.inner_solver = "pcg"
         self.mesh = mesh
@@ -194,14 +241,10 @@ class MatrixFreePCBOperator:
             backend or "cpu", device_id=device_id
         )
         self.vias = tuple(vias)
-        self.local_stiffness = _local_stiffness(mesh.pitch_x_m, mesh.pitch_y_m)
-
-        conductivity = np.asarray(mesh.conductivity_s_per_m, dtype=np.float64)
-        thickness = np.asarray(mesh.layer_thickness_m, dtype=np.float64)[:, None, None]
-        self._coefficient_high = (
-            conductivity * thickness * mesh.element_active.astype(np.float64)
-        )
-        self._local_high = self.local_stiffness.astype(np.float64)
+        # K_e = c_x U_x + c_y U_y; the coefficients carry sheet conductance and
+        # the (graded) element dimensions.
+        self._unit_high = np.stack(unit_sheet_matrices())  # (2, 4, 4)
+        self._coefficients_high = np.stack(mesh.element_coefficients())  # (2, layers, rows, cols)
 
         active_nodes = np.zeros(mesh.node_shape, dtype=bool)
         active = mesh.element_active
@@ -234,8 +277,8 @@ class MatrixFreePCBOperator:
         self._via_b_high = np.asarray(via_b, dtype=np.int64)
         self._via_g_high = np.asarray(via_g, dtype=np.float64)
 
-        self._coefficient_low = self.runtime.from_host(self._coefficient_high)
-        self._local_low = self.runtime.from_host(self._local_high)
+        self._coefficients_low = self.runtime.from_host(self._coefficients_high)
+        self._unit_low = self.runtime.from_host(self._unit_high)
         self._free_low = self.runtime.namespace.asarray(self.free_nodes, dtype=bool)
         self._via_a_low = self.runtime.namespace.asarray(via_a, dtype=np.int64)
         self._via_b_low = self.runtime.namespace.asarray(via_b, dtype=np.int64)
@@ -243,8 +286,8 @@ class MatrixFreePCBOperator:
 
         diagonal = self._build_diagonal(
             np,
-            self._coefficient_high,
-            self._local_high,
+            self._coefficients_high,
+            self._unit_high,
             self.free_nodes,
             self._via_a_high,
             self._via_b_high,
@@ -252,7 +295,19 @@ class MatrixFreePCBOperator:
         )
         if np.any(diagonal[self.free_nodes.reshape(-1)] <= 0.0):
             raise ValueError("every free node must have positive conductivity coupling")
+        self._diagonal_high = diagonal
         self._diagonal_low = self.runtime.from_host(diagonal)
+        self.preconditioner = preconditioner
+        self.coarse_correction: AggregationCoarseCorrection | None = None
+        if preconditioner == "two-level":
+            self.coarse_correction = AggregationCoarseCorrection(
+                node_shape=mesh.node_shape,
+                free_nodes=self.free_nodes,
+                diagonal_high=diagonal,
+                apply_high=self.apply_high,
+                runtime=self.runtime,
+                block=coarse_block_nodes,
+            )
 
     @staticmethod
     def _element_views(grid: Any) -> tuple[Any, Any, Any, Any]:
@@ -267,8 +322,8 @@ class MatrixFreePCBOperator:
         self,
         vector: Any,
         xp: Any,
-        coefficient: Any,
-        local: Any,
+        coefficients: Any,
+        unit: Any,
         free: Any,
         via_a: Any,
         via_b: Any,
@@ -280,12 +335,10 @@ class MatrixFreePCBOperator:
         output = xp.zeros_like(working)
         targets = self._element_views(output)
         for row in range(4):
-            contribution = xp.zeros_like(coefficient)
+            contribution = xp.zeros_like(coefficients[0])
             for column in range(4):
-                contribution = (
-                    contribution
-                    + coefficient * local[row, column] * values[column]
-                )
+                weight = coefficients[0] * unit[0, row, column] + coefficients[1] * unit[1, row, column]
+                contribution = contribution + weight * values[column]
             targets[row][...] += contribution
 
         flat_working = working.reshape(-1)
@@ -299,17 +352,17 @@ class MatrixFreePCBOperator:
     @staticmethod
     def _build_diagonal(
         xp: Any,
-        coefficient: Any,
-        local: Any,
+        coefficients: Any,
+        unit: Any,
         free: Any,
         via_a: Any,
         via_b: Any,
         via_g: Any,
     ) -> Any:
-        diagonal = xp.zeros(free.shape, dtype=coefficient.dtype)
+        diagonal = xp.zeros(free.shape, dtype=coefficients.dtype)
         targets = MatrixFreePCBOperator._element_views(diagonal)
         for index in range(4):
-            targets[index][...] += coefficient * local[index, index]
+            targets[index][...] += coefficients[0] * unit[0, index, index] + coefficients[1] * unit[1, index, index]
         flat = diagonal.reshape(-1)
         if via_a.size:
             xp.add.at(flat, via_a, via_g)
@@ -323,8 +376,8 @@ class MatrixFreePCBOperator:
         return self._apply_impl(
             vector,
             np,
-            self._coefficient_high,
-            self._local_high,
+            self._coefficients_high,
+            self._unit_high,
             self.free_nodes,
             self._via_a_high,
             self._via_b_high,
@@ -335,8 +388,8 @@ class MatrixFreePCBOperator:
         return self._apply_impl(
             vector,
             self.runtime.namespace,
-            self._coefficient_low,
-            self._local_low,
+            self._coefficients_low,
+            self._unit_low,
             self._free_low,
             self._via_a_low,
             self._via_b_low,
@@ -345,6 +398,13 @@ class MatrixFreePCBOperator:
 
     def diagonal_low(self) -> Any:
         return self._diagonal_low
+
+    def precondition_low(self, vector: Any) -> Any:
+        """Low-precision preconditioner action used by the inner PCG."""
+
+        if self.coarse_correction is None:
+            return self.runtime.divide(vector, self._diagonal_low)
+        return self.coarse_correction(vector)
 
     def build_rhs(self, terminals: Sequence[CurrentTerminal]) -> np.ndarray:
         rhs = np.zeros(self.mesh.node_shape, dtype=np.float64)
@@ -369,8 +429,8 @@ class MatrixFreePCBOperator:
             self.mesh.node_shape
         )
         v00, v01, v10, v11 = self._element_views(potential)
-        field_x = -((v01 + v11) - (v00 + v10)) / (2.0 * self.mesh.pitch_x_m)
-        field_y = -((v10 + v11) - (v00 + v01)) / (2.0 * self.mesh.pitch_y_m)
+        field_x = -((v01 + v11) - (v00 + v10)) / (2.0 * self.mesh.pitch_x_m[None, None, :])
+        field_y = -((v10 + v11) - (v00 + v01)) / (2.0 * self.mesh.pitch_y_m[None, :, None])
         field = np.stack((field_x, field_y), axis=-1)
         return np.where(self.mesh.element_active[..., None], field, 0.0)
 
@@ -392,12 +452,9 @@ class MatrixFreePCBOperator:
             self.mesh.node_shape
         )
         element_values = np.stack(self._element_views(potential), axis=-1)
-        return self._coefficient_high * np.einsum(
-            "...i,ij,...j->...",
-            element_values,
-            self._local_high,
-            element_values,
-            optimize=True,
+        quadratic = lambda unit: np.einsum("...i,ij,...j->...", element_values, unit, element_values, optimize=True)
+        return self._coefficients_high[0] * quadratic(self._unit_high[0]) + self._coefficients_high[1] * quadratic(
+            self._unit_high[1]
         )
 
     def via_joule_loss(self, potential_v: np.ndarray) -> np.ndarray:
@@ -434,12 +491,16 @@ def solve_pcb_dc(
     backend: RuntimeBackend | None = None,
     device_id: int = 0,
     initial_potential_v: np.ndarray | None = None,
+    preconditioner: Preconditioner = "two-level",
+    coarse_block_nodes: int | None = None,
 ) -> PCBConductionSolution:
     """Solve a layered PCB's DC conduction problem with matrix-free MPIR.
 
     ``initial_potential_v`` warm-starts the outer refinement, for example with
     the potential of the previous iteration of a coupled analysis; NaN entries
     (inactive nodes of a reported solution) are treated as zero.
+    ``preconditioner`` selects the two-level (default) or Jacobi inner
+    preconditioner.
     """
 
     operator = MatrixFreePCBOperator(
@@ -449,6 +510,8 @@ def solve_pcb_dc(
         runtime=runtime,
         backend=backend,
         device_id=device_id,
+        preconditioner=preconditioner,
+        coarse_block_nodes=coarse_block_nodes,
     )
     rhs = operator.build_rhs(problem.terminals)
     initial = None

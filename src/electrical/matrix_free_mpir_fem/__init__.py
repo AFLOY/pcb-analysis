@@ -5,6 +5,7 @@ The physical front ends cover layered-PCB DC conduction and scalar-polarised
 contracts remain independent of either front end.
 """
 
+from .grid import TensorGrid, graded_edges, refined_grid
 from .pcb import (
     COPPER_CONDUCTIVITY_S_PER_M,
     CurrentTerminal,
@@ -68,9 +69,12 @@ __all__ = [
     "ScalarMaxwellProblem",
     "ScalarMaxwellSolution",
     "RuntimeBackend",
+    "TensorGrid",
     "ViaConnection",
     "propagation_constant_per_m",
+    "refined_grid",
     "cuda_available",
+    "graded_edges",
     "make_complex64_runtime",
     "make_float32_runtime",
     "skin_depth_m",
