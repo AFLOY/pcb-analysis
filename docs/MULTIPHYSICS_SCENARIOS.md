@@ -103,6 +103,21 @@ convective heat on the contact boundary to `1e-9` and the block's rejected heat
 to `1e-6`. Aitken converges in 6 interface iterations, a fixed relaxation of
 0.2 in 20, and the unrelaxed exchange is stopped as diverging after 9.
 
+The adopted measurement is `BOARD_ENCLOSURE_ACCEPTANCE_RESULTS.json`
+(`experiments/board_enclosure_acceptance.py`; Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz):
+
+| Run | Converged | Interface iterations | Wall time (ms) | Board diff (K) | Sink diff (K) |
+|---|---|---|---|---|---|
+| monolithic masked mesh (1989 nodes) | True | — | 434 | — | — |
+| partitioned, Aitken | True | 6 | 1244 | 3.6e-02 | 1.1e-02 |
+| partitioned, fixed ω = 0.2 | True | 20 | 3723 | 3.6e-02 | 1.1e-02 |
+| partitioned, unrelaxed | False | 9 (stopped) | 2209 | — | — |
+
+On this small case the monolithic mesh is about 3× faster than the
+partitioned iteration; the partitioned form is adopted for what the single
+grid cannot express (a body at another pitch or origin, several bodies, a
+body far larger than the board), not for speed.
+
 ## Emission scenarios
 
 `ElectroEmissionScenario` uses one DC solve as a phasor at every frequency of

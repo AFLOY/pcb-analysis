@@ -58,6 +58,28 @@ layered mesh (agreement to `1e-7` relative), a fin against the 1D fin solution
 (`2e-3` relative along the fin, base heat within 2 %), and the native and CUDA
 paths against the array path on a masked mesh with an internal void.
 
+`experiments/board_enclosure_acceptance.py` records the same checks with
+timings; the adopted run is `BOARD_ENCLOSURE_ACCEPTANCE_RESULTS.json`
+(Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz, NVIDIA GeForce GTX 1650, CuPy 14.1.1, NumPy 2.3.5).
+A 13312-element block with a cavity, solved as a plain mesh
+(15625 nodes, 536 ms) and inside a void grid (29791 nodes):
+
+| Path | Solve (ms) | Inner iterations | Max difference to plain (K) |
+|---|---|---|---|
+| block in void, array | 1423 | 57 | 5.1e-13 |
+| block in void, cpp-native-threads4 | 1256 | 56 | 1.2e-12 |
+| block in void, cuda | 1224 | 56 | 8.0e-13 |
+
+The masked grid carries 1.9× the nodes of the plain one for the same
+body, which is the cost of a bounding-box grid; it buys the ability to
+carve any body. The fin (1 mm thick, 20 mm long, `h = 10`, `k = 200`):
+
+| Elements along the fin | Max relative temperature error | Base heat error |
+|---|---|---|
+| 20 | 1.6e-07 | 8.4e-06 |
+| 40 | 4.1e-08 | 2.1e-06 |
+| 80 | 1.0e-08 | 5.2e-07 |
+
 Convection is a lumped Robin term. Every face element contributes
 `h · hx · hy / 4` to each of its four corner nodes, so a zero-order face
 integration adds a nodal conductance to the diagonal and `h A T_amb` to the

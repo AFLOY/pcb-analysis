@@ -1,0 +1,240 @@
+{
+  "generated_at": "2026-09-19T08:58:46+00:00",
+  "environment": {
+    "platform": "Linux-6.12.0-211.54.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "cupy": "14.1.1",
+    "device": "NVIDIA GeForce GTX 1650",
+    "cpu": "Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz",
+    "cpu_count": 12,
+    "compiler": "g++ (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)",
+    "native_extension_built": true,
+    "PCB_NATIVE_THREADS": "4",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "acceptance_2_block_in_void": {
+    "block_elements": 13312,
+    "grid_elements": 27000,
+    "nodes_plain": 15625,
+    "nodes_masked": 29791,
+    "plain": {
+      "timing": {
+        "median_ms": 535.9351059887558,
+        "min_ms": 533.8790309615433,
+        "repeats": 3
+      },
+      "solve": {
+        "converged": true,
+        "outer_iterations": 4,
+        "inner_iterations": 56,
+        "relative_residual": 1.4037089140431833e-11,
+        "low_operator": "numpy-fp32",
+        "max_temperature_k": 317.5052687307167,
+        "heat_balance_error_w": -4.263256414560601e-13
+      }
+    },
+    "masked_paths": {
+      "array": {
+        "timing": {
+          "median_ms": 1423.0847160797566,
+          "min_ms": 1417.6991289714351,
+          "repeats": 3
+        },
+        "solve": {
+          "converged": true,
+          "outer_iterations": 4,
+          "inner_iterations": 57,
+          "relative_residual": 7.1563800433168284e-12,
+          "low_operator": "numpy-fp32",
+          "max_temperature_k": 317.5052687307168,
+          "heat_balance_error_w": -4.263256414560601e-13
+        },
+        "max_abs_difference_k": 5.115907697472721e-13,
+        "relative_to_rise": 2.922495950316821e-14,
+        "nan_outside_body": true
+      },
+      "cpp-native-threads4": {
+        "timing": {
+          "median_ms": 1255.843225051649,
+          "min_ms": 1252.8141159564257,
+          "repeats": 3
+        },
+        "solve": {
+          "converged": true,
+          "outer_iterations": 4,
+          "inner_iterations": 56,
+          "relative_residual": 1.3840310696081496e-11,
+          "low_operator": "numpy-fp32",
+          "max_temperature_k": 317.505268730716,
+          "heat_balance_error_w": -3.481659405224491e-13
+        },
+        "max_abs_difference_k": 1.1937117960769683e-12,
+        "relative_to_rise": 6.819157217405916e-14,
+        "nan_outside_body": true
+      },
+      "cuda": {
+        "timing": {
+          "median_ms": 1223.7294829683378,
+          "min_ms": 1221.1465849541128,
+          "repeats": 3
+        },
+        "solve": {
+          "converged": true,
+          "outer_iterations": 4,
+          "inner_iterations": 56,
+          "relative_residual": 1.3505358916466762e-11,
+          "low_operator": "cupy-fp32",
+          "max_temperature_k": 317.50526873071647,
+          "heat_balance_error_w": -3.979039320256561e-13
+        },
+        "max_abs_difference_k": 7.958078640513122e-13,
+        "relative_to_rise": 4.5461048116039436e-14,
+        "nan_outside_body": true
+      }
+    }
+  },
+  "acceptance_3_fin": [
+    {
+      "elements_along_fin": 20,
+      "pitch_m": 0.001,
+      "mL": 0.2,
+      "timing": {
+        "median_ms": 69.55092994030565,
+        "min_ms": 68.72026005294174,
+        "repeats": 3
+      },
+      "solve": {
+        "converged": true,
+        "outer_iterations": 4,
+        "inner_iterations": 45,
+        "relative_residual": 2.04402077197724e-12,
+        "low_operator": "numpy-fp32",
+        "max_temperature_k": 350.00000000005,
+        "heat_balance_error_w": 1.803617810658409e-10
+      },
+      "max_relative_temperature_error": 1.6440423062630946e-07,
+      "base_heat_relative_error": 8.44457684163948e-06
+    },
+    {
+      "elements_along_fin": 40,
+      "pitch_m": 0.0005,
+      "mL": 0.2,
+      "timing": {
+        "median_ms": 86.70596301089972,
+        "min_ms": 86.56777290161699,
+        "repeats": 3
+      },
+      "solve": {
+        "converged": true,
+        "outer_iterations": 4,
+        "inner_iterations": 43,
+        "relative_residual": 9.259171373914315e-12,
+        "low_operator": "numpy-fp32",
+        "max_temperature_k": 349.99999999988046,
+        "heat_balance_error_w": 7.654697431469515e-10
+      },
+      "max_relative_temperature_error": 4.0776467115155625e-08,
+      "base_heat_relative_error": 2.1201403329829297e-06
+    },
+    {
+      "elements_along_fin": 80,
+      "pitch_m": 0.00025,
+      "mL": 0.2,
+      "timing": {
+        "median_ms": 162.67558198887855,
+        "min_ms": 161.30010096821934,
+        "repeats": 3
+      },
+      "solve": {
+        "converged": true,
+        "outer_iterations": 4,
+        "inner_iterations": 46,
+        "relative_residual": 5.679409155633554e-12,
+        "low_operator": "numpy-fp32",
+        "max_temperature_k": 349.9999999999434,
+        "heat_balance_error_w": -2.6811715347907494e-10
+      },
+      "max_relative_temperature_error": 1.0323196224249808e-08,
+      "base_heat_relative_error": 5.242561722492642e-07
+    }
+  ],
+  "acceptance_4_board_and_sink": {
+    "rise_k": 96.97254771344984,
+    "monolithic": {
+      "timing": {
+        "median_ms": 433.8478840654716,
+        "min_ms": 430.3670439403504,
+        "repeats": 3
+      },
+      "solve": {
+        "converged": true,
+        "outer_iterations": 6,
+        "inner_iterations": 617,
+        "relative_residual": 5.5213949260594697e-11,
+        "low_operator": "numpy-fp32",
+        "max_temperature_k": 396.97254771344984,
+        "heat_balance_error_w": 5.502842626015081e-11
+      },
+      "nodes": 1989
+    },
+    "contact_pairs": 36,
+    "conductance_per_area_w_per_m2_k": 10000.0,
+    "partitioned": {
+      "aitken": {
+        "timing": {
+          "median_ms": 1243.778137024492,
+          "min_ms": 1237.5131179578602,
+          "repeats": 3
+        },
+        "converged": true,
+        "interface_iterations": 6,
+        "interface_heat_w": 0.11290026862953487,
+        "board_inner_iterations_total": 1622,
+        "body_inner_iterations_total": 211,
+        "board_max_abs_difference_k": 0.03630731880184612,
+        "sink_max_abs_difference_k": 0.011424648842762508,
+        "board_relative_to_rise": 0.0003744082181808078,
+        "sink_relative_to_rise": 0.00011781322768297175,
+        "interface_heat_vs_board_contact_convection": 1.615178900885076e-13
+      },
+      "fixed_relaxation_0.2": {
+        "timing": {
+          "median_ms": 3722.797277965583,
+          "min_ms": 3708.129661041312,
+          "repeats": 3
+        },
+        "converged": true,
+        "interface_iterations": 20,
+        "interface_heat_w": 0.11290026881040889,
+        "board_inner_iterations_total": 4521,
+        "body_inner_iterations_total": 652,
+        "board_max_abs_difference_k": 0.036495165489782266,
+        "sink_max_abs_difference_k": 0.011409568279702853,
+        "board_relative_to_rise": 0.0003763453302023587,
+        "sink_relative_to_rise": 0.0001176577139482577,
+        "interface_heat_vs_board_contact_convection": 1.4615279376527135e-13
+      },
+      "unrelaxed": {
+        "timing": {
+          "median_ms": 2208.83038896136,
+          "min_ms": 2206.7785690305755,
+          "repeats": 3
+        },
+        "converged": false,
+        "interface_iterations": 9,
+        "interface_heat_w": 2912.066621691575,
+        "board_inner_iterations_total": 3117,
+        "body_inner_iterations_total": 344
+      }
+    }
+  },
+  "decision": {
+    "adopted": true,
+    "criteria": "masked mesh matches the plain mesh of the same body within 1e-6 of the rise on every available path with nan outside the body; fin within 5e-3 of the 1D solution and base heat within 2 % at the finest pitch, error non-increasing with refinement; partitioned board and sink within 2e-3 of the rise of the monolithic mesh with Aitken",
+    "block_paths_within_1e-6": true,
+    "fin_within_tolerance": true,
+    "fin_error_non_increasing": true,
+    "partitioned_within_2e-3": true
+  }
+}
