@@ -76,8 +76,8 @@ install a specific release without PyPI, point pip at the release asset or
 at the tag:
 
 ```bash
-pip install https://github.com/AFLOY/pcb-analysis/releases/download/v0.7.0/pcb_analysis-0.7.0-py3-none-any.whl
-pip install 'git+https://github.com/AFLOY/pcb-analysis.git@v0.7.0'
+pip install https://github.com/AFLOY/pcb-analysis/releases/download/v0.8.0/pcb_analysis-0.8.0-py3-none-any.whl
+pip install 'git+https://github.com/AFLOY/pcb-analysis.git@v0.8.0'
 ```
 
 The release tag has to match the version in `pyproject.toml`.
@@ -87,11 +87,11 @@ OpenCASCADE, optional `cad` extra) and the `native` extra with the CMake build
 of the C++ kernels; nothing in `electrical`, `thermal`, `emc` or
 `multiphysics` moved, so no import path changes for existing users.
 
-After 0.7.0 `cadquery-ocp` and `pypeec` became base dependencies and the
+Version 0.8.0 makes `cadquery-ocp` and `pypeec` base dependencies and the
 `cuda` extra carries CuPy only. `pip install 'pcb-analysis[cuda]'` still
 installs everything it did; `[cad]` is an empty alias.
 
-Also after 0.7.0 the electrical package was split by method: the sheet PEEC
+Version 0.8.0 also splits the electrical package by method: the sheet PEEC
 (`sheet_peec`, `sheet_operator`, `sheet_inductance`, `sheet_results`,
 `sheet_cuda`, `skin_filaments`, `skin_screen`, `plane_opt_contract`) moved to
 `electrical.sheet_peec`; the PyPEEC wrapper (`cuda_pypeec`, `pypeec_memory`)
