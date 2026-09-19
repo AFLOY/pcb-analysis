@@ -47,9 +47,44 @@ K_e = k_xy * [ (hy hz / hx) M⊗M⊗S + (hx hz / hy) M⊗S⊗M ]
 ```
 
 with the 1D stiffness `S = [[1, -1], [-1, 1]]` and mass `M = [[2, 1], [1, 2]] / 6`.
-Local node ordering is `4 dz + 2 dy + dx`. Only the two `(slabs, 8, 8)` unit
-tensors and the two `(slabs, rows, cols)` conductivity arrays are resident on
-the low-precision path; no global matrix is assembled.
+Local node ordering is `4 dz + 2 dy + dx`. The operator keeps the three
+constant `(8, 8)` unit tensors `U_x = M⊗M⊗S`, `U_y = M⊗S⊗M`, `U_z = S⊗M⊗M` and
+three `(slabs, rows, cols)` coefficient arrays `a_x = k_xy h_y h_z / h_x`,
+`a_y = k_xy h_x h_z / h_y`, `a_z = k_z h_x h_y / h_z`
+(`LayeredThermalMesh.element_coefficients`); no global matrix is assembled.
+Because the element dimensions live in the coefficients, `pitch_x_m` and
+`pitch_y_m` may be one value per column and per row: a graded tensor grid
+built by `electrical.matrix_free_mpir_fem.grid` (fine cells over a footprint
+plus a margin, geometric growth to the coarse pitch), on which the array,
+CUDA and C++ paths run unchanged. Face areas, cell areas, the contact map and
+the heat flux use the per-cell pitches.
+
+Measured on a 1 W, 2 × 2 mm patch in the top copper of a 30 × 20 mm three-slab
+board (`TENSOR_GRID_RESULTS.json`, `experiments/tensor_grid_acceptance.py`,
+Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz; the rise is 109.8 K on the finest grid, the peak
+error is against the uniform 0.125 mm grid):
+
+| Grid | Path | Cells | Pitch min / max (mm) | Wall (ms) | Inner iterations | Peak error (K) |
+|---|---|---|---|---|---|---|
+| uniform 0.5 mm | array | 2400 | 0.500 / 0.500 | 784 | 477 | +0.1193 |
+| uniform 0.5 mm | native | 2400 | 0.500 / 0.500 | 252 | 476 | +0.1193 |
+| uniform 0.25 mm | array | 9600 | 0.250 / 0.250 | 2571 | 428 | +0.0229 |
+| uniform 0.25 mm | native | 9600 | 0.250 / 0.250 | 1251 | 424 | +0.0229 |
+| uniform 0.125 mm | array | 38400 | 0.125 / 0.125 | 7577 | 511 | +0.0000 |
+| uniform 0.125 mm | native | 38400 | 0.125 / 0.125 | 2541 | 501 | -0.0000 |
+| graded 0.125 mm, margin 1 mm, growth 1.4 | array | 5829 | 0.125 / 0.501 | 2786 | 845 | -0.0799 |
+| graded 0.125 mm, margin 1 mm, growth 1.4 | native | 5829 | 0.125 / 0.501 | 1189 | 896 | -0.0799 |
+| graded 0.125 mm, margin 2 mm, growth 1.2 | array | 8364 | 0.125 / 0.502 | 3504 | 851 | -0.0093 |
+| graded 0.125 mm, margin 2 mm, growth 1.2 | native | 8364 | 0.125 / 0.502 | 1371 | 1175 | -0.0093 |
+
+Decision: adopted. A graded grid with a 2 mm margin and growth 1.2 reaches
+the 0.125 mm answer within 0.01 K on 22 % of its cells; the steeper grading
+(1 mm margin, growth 1.4) leaves 0.08 K, still below the uniform 0.5 mm
+error but a reminder that elongated cells next to a hot spot cost accuracy.
+The two-level preconditioner needs 1.7 to 2.3× more inner iterations on the
+graded grids than on the uniform ones, so the wall-time gain is smaller than
+the cell-count gain; a graded coarse space or a smoother aware of the cell
+aspect is the next increment there.
 
 Void elements carry zero conductivity, so they drop out of the action without
 any change to the kernels. A node touched by no active element has no
@@ -416,14 +451,14 @@ board with a via field.
 
 | Module | Responsibility |
 |---|---|
-| `mesh.py` | `LayeredThermalMesh`, active mask, exposed faces, corner views, unit element matrices |
+| `mesh.py` | `LayeredThermalMesh` (per-cell pitches, heat capacity), active mask, exposed faces, corner views, unit element matrices and per-element coefficients |
 | `boundaries.py` | `ConvectionBoundary`, `ExposedFaceConvection`, `HeatSource`, each lumping its own nodal conductance and load |
 | `radiation.py` | `RadiationBoundary`, `ExposedFaceRadiation`, their Newton linearisation into the convection types |
 | `problem.py` | `ThermalConductionProblem` validation |
 | `operator.py` | matrix-free hex Q1 operator on NumPy, CuPy or C++, RHS and heat-budget post-processing |
 | `solve.py` | `solve_thermal_conduction` (linear solve, Newton loop over the radiation boundaries, one backward-Euler step when given `C/Δt`), `ThermalConductionSolution` |
 | `transient.py` | `TimeSchedule`, `solve_thermal_transient`, `TransientThermalSolution` |
-| `two_level.py` | Jacobi + aggregation coarse correction on a layered node grid |
+| `two_level.py` | re-export of `electrical.matrix_free_mpir_fem.two_level` (Jacobi + aggregation coarse correction) |
 | `cuda.py` | fused node-owned gather kernel for the float32 action |
 | `native_hex.py`, `native/` | opt-in C++ action and two-level inner PCG (built in place) |
 | `coupling.py` | Joule loss of a `PCBConductionSolution` as thermal load |
@@ -438,9 +473,10 @@ before.
 
 ## Limitations and next increments
 
-- Structured rectangular mesh; pads and barrels are element columns, curved
-  bodies are voxel staircases whose partially filled voxels carry a
-  fill-scaled conductivity.
+- Structured tensor-product mesh (graded, rectangular cells); pads and
+  barrels are element columns, curved bodies are voxel staircases whose
+  partially filled voxels carry a fill-scaled conductivity, and a refinement
+  box refines whole row and column strips.
 - Convection is a film coefficient per face; no buoyancy correlation, so a
   natural-convection `h(ΔT, orientation)` has to be iterated by the caller.
 - Radiation is surface-to-ambient only (no view factors, no enclosure

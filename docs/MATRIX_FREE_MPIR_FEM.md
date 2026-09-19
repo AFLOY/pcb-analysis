@@ -52,15 +52,21 @@ For each active element `e`, the solver evaluates
 y_e += sigma_e * thickness_e * K_Q1 * x_e
 ```
 
-and accumulates its four nodal contributions. `K_Q1` is a constant 4-by-4
-rectangular-element tensor. Vias add pairwise conductance actions
-`g * (v_a - v_b)`. The global stiffness matrix is never assembled or stored.
-Only these items are resident for the low-precision path:
+and accumulates its four nodal contributions. `K_Q1 = (h_y / h_x) U_x + (h_x /
+h_y) U_y` is built from two constant 4-by-4 unit tensors (`U_x = M ⊗ S`, `U_y
+= S ⊗ M` with the 1D stiffness `S` and mass `M`), so the element dimensions
+enter only through two per-element coefficients `σ t h_y / h_x` and `σ t h_x /
+h_y`. The grid is therefore a tensor product of arbitrary column widths and
+row heights (`LayeredPCBMesh.pitch_x_m` / `pitch_y_m` scalar or per cell;
+`grid.py` builds graded grids, see "Graded tensor grids"). Vias add pairwise
+conductance actions `g * (v_a - v_b)`. The global stiffness matrix is never
+assembled or stored. Only these items are resident for the low-precision path:
 
-- FP32 sheet-conductance coefficients and the 4-by-4 element tensor;
+- the two FP32 coefficient arrays and the two 4-by-4 unit tensors;
 - the active/free-node mask;
 - compact via endpoint and conductance arrays;
-- the diagonal used by the Jacobi preconditioner;
+- the diagonal used by the Jacobi preconditioner and the small dense inverse
+  of the two-level coarse space (`two_level.py`, default on);
 - a small number of FP32 PCG vectors.
 
 The FP64 host path holds the physical coefficients and solution vector and is
@@ -77,13 +83,15 @@ The package is divided into three parts:
 | `solver.py` | Backend-independent outer MPIR plus inner PCG/GMRES control flow |
 | `runtime.py` | float32/complex64 vector primitives for NumPy or CuPy |
 | `pcb.py` | Q1 PCB mesh, matrix-free element/via action, physical outputs |
+| `grid.py` | `TensorGrid`, graded grid-line generation (`graded_edges`, `refined_grid`), cell overlap fractions |
+| `two_level.py` | Jacobi plus patch-constant aggregation coarse correction on a layered node grid (used by the DC and the thermal operators) |
 | `frequency_domain.py` | Scalar full-wave Q1 operator, fields, currents, and losses |
 
 `MatrixFreeMPIRSystem` is the solver-facing contract. A new physical operator
 provides `apply_high`, `apply_low`, and `diagonal_low`. It may also provide
 `precondition_low`, an SPD approximate inverse on the low-precision runtime
-that replaces the default Jacobi scaling in every inner solver; the thermal
-package uses this hook for its two-level preconditioner. A new accelerator
+that replaces the default Jacobi scaling in every inner solver; the DC and
+the thermal operators use this hook for the two-level preconditioner. A new accelerator
 provides the low-precision vector runtime. CUDA is optional and imported only
 when a CuPy runtime is constructed.
 
@@ -446,10 +454,46 @@ operator and require:
 - no assembled global matrix appears in device memory telemetry;
 - repeated runs are deterministic within the documented reduction tolerance.
 
+## Graded tensor grids
+
+`grid.graded_edges(start, end, coarse_pitch_m=, fine_pitch_m=, refine_m=[(a,
+b), ...], margin_m=, growth=)` places grid lines so that cells are
+`fine_pitch_m` wide over every refined interval widened by the margin,
+`coarse_pitch_m` far from them, and grow geometrically by about `growth`
+between: the target size `s(x) = min(H, h + (r − 1) d)` (distance `d` to the
+nearest interval) is integrated as `∫ dx / s`, and lines sit where the
+integral crosses whole numbers, so the last cell ends exactly at `end` and
+the count is the rounded integral. `refined_grid` does both axes from
+refinement boxes; `TensorGrid.cell_overlap_fraction` spreads a footprint
+power over exactly its area on any grid. Refining a box refines the whole
+strip of the board in each axis, the usual tensor-grid cost of keeping every
+kernel structured. The thermal and DC meshes take the resulting per-cell
+pitches; the electro-thermal scenarios require both to share the grid lines.
+
+The DC operator now defaults to the two-level preconditioner: with Jacobi
+alone a wide plane or a graded grid with elongated cells costs several
+hundred inner PCG iterations per outer step and hit the 200-iteration cap.
+Measured (`TENSOR_GRID_RESULTS.json`, `experiments/tensor_grid_acceptance.py`,
+Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz), `MPIRConfig(max_inner_iterations=4000)` so that Jacobi converges too:
+
+| Case | Elements | Two-level inner iterations | Jacobi inner iterations | Resistance error |
+|---|---|---|---|---|
+| 0.2 mm trace, graded length (one row) | 59 | 96 (15 ms) | 419 (35 ms) | 3.9e-13 |
+| 0.2 mm trace, graded length and rows 0.05/0.1/0.05 | 177 | 255 (34 ms) | 1208 (112 ms) | 2.1e-04 |
+| 40 x 60 mm plane, uniform 0.5 mm | 9600 | 54 (84 ms) | 821 (267 ms) | 3.0e-04 |
+
+The one-row trace is exact on the graded grid, as Q1 must be for a uniform
+current on any rectangle grid. The two multi-row cases carry a `2e-4` to
+`3e-4` error that is the terminals' equal nodal current shares (a uniform
+injection would weight the nodes by their row heights), not the
+discretisation. Decision: adopted. The thermal side of the same measurement
+is in `THERMAL_MPIR_FEM.md`.
+
 ## Current limitations and next physics increments
 
-- The meshes are structured and rectangular; curved pads and barrels are not
-  geometrically resolved.
+- The meshes are structured tensor grids (graded, but rectangular); curved
+  pads and barrels are not geometrically resolved, and a refinement box
+  refines its whole row and column strips.
 - Conductivity is scalar and isotropic within an element.
 - Field and current density are reported at element centres.
 - One reference node supplies the voltage gauge. Disconnected conductive

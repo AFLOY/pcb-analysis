@@ -23,7 +23,7 @@
 - `src/electrical/voxel_peec/`: PyPEECの3D voxel PEEC。配列契約(`contract`)、CUDA実行方針と
   計測(`cuda_pypeec`)、memory予測(`pypeec_memory`)。PyPEECが組立てとsolveを所有する。
   計測型2つを`dice_peec.controller`からimportする以外に`electrical`内の依存は持たない。
-- `src/electrical/matrix_free_mpir_fem/`: MPIR solverとNumPy/CuPy runtime、Q1 DC伝導、
+- `src/electrical/matrix_free_mpir_fem/`: MPIR solverとNumPy/CuPy runtime、二段preconditioner、tensor格子(`grid`)、Q1 DC伝導、
   2D周波数領域Maxwell、fused CUDA kernel。solverとruntimeはここが唯一の所有者である。
 - `src/thermal/matrix_free_mpir_fem/`: 定常・過渡(後退Euler)熱伝導の離散化、対流・輻射(Newton線形化)境界、
   二段preconditioner、CUDA kernel、電気→熱のJoule loss写像。solverとruntimeは`electrical`からimportし複製しない。
