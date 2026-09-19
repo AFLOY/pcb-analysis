@@ -19,7 +19,7 @@ It owns no field solve. Two decisions fix its shape:
 
 Rasterisation here means fixed-pitch sampling of B-rep solids: every cell or
 voxel is covered by `n × n` (or `n³`) sample points classified against the
-solids with `BRepClass3d_SolidClassifier`, and the inside fraction is the
+solids (see "Point classification"), and the inside fraction is the
 fill. The 2.5D layers are sampled at their centre `z` the same way rather
 than through section faces, so one code path serves both parts. Bounds come
 from `BRepBndLib::AddOptimal` without the shape tolerance, otherwise a 20 mm
@@ -54,6 +54,47 @@ places, in this precedence: the `plane-opt-current-field-problem/v1` mapping,
 an occupancy array given directly, or copper solids in the STEP. Mixing is
 allowed per layer. Without any copper, only the thermal path runs, with the
 board as bare laminate.
+
+## Point classification
+
+Three paths answer "is this point inside this solid", selectable per call
+(`method=`) or per process (`PCB_GEOMETRY_CLASSIFY`):
+
+- `occ`: `BRepClass3d_SolidClassifier` per point after a bounding-box
+  prefilter. Exact on the B-rep; one Python call per point.
+- `numpy` and `native`: the solid is tessellated once (`BRepMesh`, 5 µm
+  linear deflection, cached on the `StepSolid`) into outward-oriented
+  triangles, and the point's generalized winding number, the sum of the
+  signed solid angles of the triangles over `4π`, is 1 inside and 0 outside.
+  Unlike ray parity it has no degenerate ray/edge cases. `numpy` evaluates
+  it in chunks; `native` is the same sum in C++ (`native/point_in_mesh.cpp`,
+  OpenMP over points, module `_voxelize_native`), built by the root
+  `CMakeLists.txt` with the other kernels. `auto` picks `native` when built,
+  else `numpy`.
+
+Planar solids tessellate exactly, so the two winding-number paths reproduce
+`occ` cell for cell on boxes; a cylinder deviates by the deflection (a 0.3 mm
+via at 5 µm carries 248 triangles and 0.17 % less volume). `StepSolid.tessellate`
+rejects a mesh with inward orientation and `TriangleMesh.is_closed` checks
+watertightness. Measured by `experiments/geometry_classify_benchmark.py`
+(Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz, 12 logical CPUs, OCP 8.0.1.0.0, NumPy 2.3.5,
+g++ (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)); the adopted run is `GEOMETRY_CLASSIFY_RESULTS.json`:
+
+| Case | Path | Time (ms) | Speed-up vs occ | Max fill difference vs occ |
+|---|---|---|---|---|
+| copper layer at 0.25 mm, 3 samples per axis | occ | 4294.6 | — | — |
+| copper layer at 0.25 mm, 3 samples per axis | numpy | 419.7 | 10× | 0.000 |
+| copper layer at 0.25 mm, 3 samples per axis | native_threads1 | 55.7 | 77× | 0.000 |
+| copper layer at 0.25 mm, 3 samples per axis | native_threads4 | 16.8 | 256× | 0.000 |
+| copper layer at 0.25 mm, 3 samples per axis | native_threads6 | 12.0 | 359× | 0.000 |
+| heat sink voxels (0.5, 0.5, 1.0) mm, 2 samples per axis | occ | 2062.0 | — | — |
+| heat sink voxels (0.5, 0.5, 1.0) mm, 2 samples per axis | numpy | 151.6 | 14× | 0.000 |
+| heat sink voxels (0.5, 0.5, 1.0) mm, 2 samples per axis | native_threads1 | 26.5 | 78× | 0.000 |
+| heat sink voxels (0.5, 0.5, 1.0) mm, 2 samples per axis | native_threads4 | 8.1 | 254× | 0.000 |
+| heat sink voxels (0.5, 0.5, 1.0) mm, 2 samples per axis | native_threads6 | 6.1 | 340× | 0.000 |
+
+Decision: adopted (`native` is the default when built); the `occ` path stays
+as the exact reference for curved solids and for tests.
 
 ## Board path (2.5D)
 
@@ -157,6 +198,8 @@ requested.
 |---|---|
 | `geometry/step_voxelize/reader.py` | STEP load through `STEPCAFControl`, assembly flattening into named solids, point-in-solid tests, synthetic boxes and cylinders, `write_step` (the only module importing `OCP`) |
 | `geometry/step_voxelize/bodymap.py` | `BodyMap` (board stackup, copper, vias, bodies, ignore) and its exhaustive resolution against the model |
+| `geometry/step_voxelize/mesh.py` | `TriangleMesh`, NumPy winding number, path selection |
+| `geometry/step_voxelize/native/point_in_mesh.cpp` | C++ winding number over points (OpenMP), module `_voxelize_native` |
 | `geometry/step_voxelize/section.py` | per-layer sampling of the board outline and copper onto the routing grid (`BoardRaster`) |
 | `geometry/step_voxelize/voxelize.py` | 3D sampling of bodies onto a voxel grid, fill fraction, material precedence (`VoxelSolidModel`) |
 | `geometry/step_voxelize/contact.py` | board/voxel contact placement (origins, contact spec) feeding `thermal.matrix_free_mpir_fem.planar_contact_map` |
@@ -212,7 +255,7 @@ for the current path and the candidate, with the numbers written to
 | `geometry.step_voxelize`, `cad` extra, packaging and CI (acceptance 1, 5 on a synthetic STEP) | `feature/geometry-step-voxelize` | done; `tests/test_geometry_step.py` |
 | acceptance 5 on a KiCad export with copper enabled | — | not started; needs a real export as fixture |
 | electro-thermal `σ(T)` loop around the interface iteration | — | not started |
-| C++ or BVH point classification for large boards | — | not started; the Python loop over `BRepClass3d_SolidClassifier` costs about 25 µs per sample point on this host |
+| tessellation and C++ winding-number classification | `feature/geometry-native-classify` | done; `tests/test_native_geometry.py`, `GEOMETRY_CLASSIFY_RESULTS.json` |
 
 Measured on the synthetic fixture of `tests/test_geometry_step.py` (a 20 × 12 ×
 1.6 mm board, copper on both faces, one via, a 6 × 6 × 4 mm sink, one

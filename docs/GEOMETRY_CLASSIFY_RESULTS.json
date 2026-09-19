@@ -1,0 +1,158 @@
+{
+  "generated_at": "2026-09-19T09:15:12+00:00",
+  "environment": {
+    "platform": "Linux-6.12.0-211.54.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "ocp": "8.0.1.0.0",
+    "cpu": "Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz",
+    "cpu_count": 12,
+    "compiler": "g++ (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)",
+    "native_extension_built": true,
+    "thread_sweep": [
+      1,
+      4,
+      6
+    ],
+    "OPENBLAS_NUM_THREADS": "1",
+    "device": "cpu"
+  },
+  "definitions": {
+    "occ": "BRepClass3d_SolidClassifier per point after a bounding-box prefilter (exact on the B-rep)",
+    "numpy": "generalized winding number over the 5 um tessellation, chunked NumPy",
+    "native": "the same winding number in C++ with OpenMP over points",
+    "max_fill_difference": "largest per-cell difference of the sampled fill fraction against the occ path; one sample flipping changes a cell by 1/samples^d",
+    "decision_threads": "the first thread count in the sweep"
+  },
+  "cases": [
+    {
+      "case": "copper layer at 0.25 mm, 3 samples per axis",
+      "solids": 49,
+      "triangles": 6252,
+      "sample_points": 172800,
+      "covered_area_or_volume_fraction": 0.8866666666666667,
+      "paths": {
+        "occ": {
+          "timing": {
+            "median_ms": 4294.559963047504,
+            "min_ms": 4293.0319720180705,
+            "repeats": 3
+          }
+        },
+        "numpy": {
+          "timing": {
+            "median_ms": 419.7163749486208,
+            "min_ms": 416.4662789553404,
+            "repeats": 3
+          },
+          "max_fill_difference_vs_occ": 0.0,
+          "speedup_vs_occ": 10.232052451070604
+        },
+        "native_threads1": {
+          "threads": 1,
+          "timing": {
+            "median_ms": 55.70682801771909,
+            "min_ms": 54.995208978652954,
+            "repeats": 3
+          },
+          "max_fill_difference_vs_occ": 0.0,
+          "max_fill_difference_vs_numpy": 0.0,
+          "speedup_vs_occ": 77.0921647465101,
+          "speedup_vs_numpy": 7.534379354988915
+        },
+        "native_threads4": {
+          "threads": 4,
+          "timing": {
+            "median_ms": 16.787549015134573,
+            "min_ms": 16.63441094569862,
+            "repeats": 3
+          },
+          "max_fill_difference_vs_occ": 0.0,
+          "max_fill_difference_vs_numpy": 0.0,
+          "speedup_vs_occ": 255.8181637579021,
+          "speedup_vs_numpy": 25.001647028415615
+        },
+        "native_threads6": {
+          "threads": 6,
+          "timing": {
+            "median_ms": 11.951067950576544,
+            "min_ms": 11.932987021282315,
+            "repeats": 3
+          },
+          "max_fill_difference_vs_occ": 0.0,
+          "max_fill_difference_vs_numpy": 0.0,
+          "speedup_vs_occ": 359.3452887062136,
+          "speedup_vs_numpy": 35.11957062618599
+        }
+      }
+    },
+    {
+      "case": "heat sink voxels (0.5, 0.5, 1.0) mm, 2 samples per axis",
+      "solids": 9,
+      "triangles": 108,
+      "sample_points": 153600,
+      "covered_area_or_volume_fraction": 0.52,
+      "paths": {
+        "occ": {
+          "timing": {
+            "median_ms": 2061.968646943569,
+            "min_ms": 2046.0095730377361,
+            "repeats": 3
+          }
+        },
+        "numpy": {
+          "timing": {
+            "median_ms": 151.59000002313405,
+            "min_ms": 149.05629795975983,
+            "repeats": 3
+          },
+          "max_fill_difference_vs_occ": 0.0,
+          "speedup_vs_occ": 13.602273544619655
+        },
+        "native_threads1": {
+          "threads": 1,
+          "timing": {
+            "median_ms": 26.507477974519134,
+            "min_ms": 25.503808981738985,
+            "repeats": 3
+          },
+          "max_fill_difference_vs_occ": 0.0,
+          "max_fill_difference_vs_numpy": 0.0,
+          "speedup_vs_occ": 77.7881867496289,
+          "speedup_vs_numpy": 5.718763594516728
+        },
+        "native_threads4": {
+          "threads": 4,
+          "timing": {
+            "median_ms": 8.128226967528462,
+            "min_ms": 8.121825056150556,
+            "repeats": 3
+          },
+          "max_fill_difference_vs_occ": 0.0,
+          "max_fill_difference_vs_numpy": 0.0,
+          "speedup_vs_occ": 253.6800036688135,
+          "speedup_vs_numpy": 18.64982371047493
+        },
+        "native_threads6": {
+          "threads": 6,
+          "timing": {
+            "median_ms": 6.0639469884335995,
+            "min_ms": 6.062173051759601,
+            "repeats": 3
+          },
+          "max_fill_difference_vs_occ": 0.0,
+          "max_fill_difference_vs_numpy": 0.0,
+          "speedup_vs_occ": 340.0373800886745,
+          "speedup_vs_numpy": 24.9985694651153
+        }
+      }
+    }
+  ],
+  "decision": {
+    "adopted": true,
+    "criteria": "native at the decision thread count at least 2x faster than occ on every case, and every winding-number path within one flipped sample per cell of occ",
+    "minimum_speedup_vs_occ": 77.0921647465101,
+    "within_one_sample_of_occ": true,
+    "decision_path": "native_threads1"
+  }
+}
