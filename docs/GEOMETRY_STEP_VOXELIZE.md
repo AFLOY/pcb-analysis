@@ -74,6 +74,32 @@ cells they touch, independent of a fused zone's bounding box, which is what
 made the point path slow on a real board (see `KICAD_STEP_RESULTS.json`).
 Components, heat sinks and enclosures stay on the 3D voxel path below.
 
+## Layer thickness and skin effect
+
+The thickness a layer is given matters more than its section: the sheet PEEC
+cuts each layer's thickness into graded filaments to resolve the skin effect,
+so the 2.5D model is only as right as the thickness it receives. Two checks
+guard it:
+
+- `rasterize_board` measures each layer's copper thickness from the copper
+  solids (volume-weighted mean of their z extents, barrels excluded) and
+  warns when it differs from the stackup by more than `thickness_tolerance`
+  (5 %); `BoardRaster.thickness_mismatches` lists the layers, and
+  `thickness_source="measured"` on `plane_opt_problem_mapping` and
+  `board_thermal_mesh` uses the solids' value instead of the stackup's.
+- `skin_report(raster, frequency_hz)` classifies each layer by thickness over
+  skin depth at the analysis frequency: `uniform` below one skin depth,
+  `filaments` where the solver's graded filaments resolve the profile, and
+  `3d` above twenty skin depths or above 1 mm, where a sheet cannot represent
+  the conductor at all. `plane_opt_problem_mapping` runs the report when a
+  frequency is given and warns on `3d` layers; such conductors (busbars,
+  terminal blocks) belong on the voxel path with a 3D PEEC solve. Splitting
+  a thick layer into two stackup sheets was considered and not adopted: the
+  contract's vertical connections are per-cell lumped segments, two equal
+  sheets resolve the profile only up to about two skin depths, and the
+  solver's filaments already do the same job with a frequency-dependent
+  count and grading.
+
 ## Point classification
 
 Three paths answer "is this point inside this solid", selectable per call
@@ -285,6 +311,7 @@ requested.
 | `geometry/step_voxelize/bodymap.py` | `BodyMap` (board stackup, copper, vias, bodies, ignore) and its exhaustive resolution against the model |
 | `geometry/step_voxelize/kicad.py` | `kicad-cli` STEP export, stackup reading, z-window body map, y-down grid origin |
 | `geometry/step_voxelize/mesh.py` | `TriangleMesh`, NumPy winding number, path selection |
+| `geometry/step_voxelize/skin.py` | thickness over skin depth per layer, `uniform` / `filaments` / `3d` |
 | `geometry/step_voxelize/native/point_in_mesh.cpp` | C++ winding number over points (OpenMP) and the exact plane-section coverage rasteriser, module `_voxelize_native` |
 | `geometry/step_voxelize/section.py` | per-layer sampling of the board outline and copper onto the routing grid (`BoardRaster`) |
 | `geometry/step_voxelize/voxelize.py` | 3D sampling of bodies onto a voxel grid, fill fraction, material precedence (`VoxelSolidModel`) |
