@@ -321,3 +321,49 @@ def test_measured_thickness_and_skin_screening(model) -> None:
             ],
             frequency_hz=100.0e6,
         )
+
+
+def test_thick_conductor_goes_to_the_3d_voxel_peec() -> None:
+    pypeec = pytest.importorskip("pypeec")
+    from electrical.dice_peec import solve_voxel_peec
+    from geometry.step_voxelize import TerminalRegion, conductor_heat_w, conductor_problem_from_solids
+    from thermal.matrix_free_mpir_fem import ExposedFaceConvection, ThermalConductionProblem, solve_thermal_conduction
+
+    del pypeec
+    bar = box_solid("busbar", (0.0, 0.0, 0.0), (20.0 * MM, 4.0 * MM, 2.0 * MM))
+    pitch = (0.5 * MM, 0.5 * MM, 0.5 * MM)
+    problem, model = conductor_problem_from_solids(
+        [bar],
+        [
+            TerminalRegion("src", box_m=((-1e-9, -1e-9, -1e-9), (1.0 * MM, 5.0 * MM, 3.0 * MM)), current_a=20.0),
+            TerminalRegion("ref", box_m=((19.0 * MM, -1e-9, -1e-9), (21.0 * MM, 5.0 * MM, 3.0 * MM))),
+        ],
+        pitch_m=pitch,
+        name="busbar",
+    )
+    assert problem.shape == (4, 8, 40) and problem.conductor.all()
+    assert problem.terminals[0].voxels.sum() == 2 * 8 * 4
+    solution = solve_voxel_peec(problem)
+    assert solution.converged
+    analytic = 1.68e-8 * 19.0 * MM / (4.0 * MM * 2.0 * MM)  # between the terminal midplanes
+    assert solution.impedance_ohm["src"].real == pytest.approx(analytic, rel=2.0e-2)
+
+    # The same grid carries the thermal solve with the Joule heat as source.
+    heat = conductor_heat_w(solution, model)
+    assert heat.sum() == pytest.approx(solution.joule_loss_w)
+    mesh = body_thermal_mesh(model)
+    thermal = solve_thermal_conduction(
+        ThermalConductionProblem(mesh, convection=(ExposedFaceConvection(15.0, 300.0),), element_heat_w=heat)
+    )
+    assert thermal.solve.converged
+    assert thermal.total_heat_input_w == pytest.approx(solution.joule_loss_w)
+    assert thermal.max_temperature_k > 300.0
+    # Voxels coarser than the skin depth cannot resolve the AC profile: warn.
+    with pytest.warns(UserWarning, match="exceeds the skin depth"):
+        conductor_problem_from_solids(
+            [bar],
+            [TerminalRegion("src", box_m=((-1e-9, -1e-9, -1e-9), (1.0 * MM, 5.0 * MM, 3.0 * MM)), current_a=1.0),
+             TerminalRegion("ref", box_m=((19.0 * MM, -1e-9, -1e-9), (21.0 * MM, 5.0 * MM, 3.0 * MM)))],
+            pitch_m=pitch,
+            frequency_hz=1.0e6,
+        )

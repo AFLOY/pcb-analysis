@@ -26,6 +26,7 @@ from .bodymap import (
     resolve_bodies,
     select_solids,
 )
+from .conductors import TerminalRegion, conductor_heat_w, conductor_problem_from_solids
 from .contact import board_body_contact
 from .kicad import (
     KicadStackupEntry,
@@ -107,5 +108,8 @@ __all__ = [
     "SkinReport",
     "skin_report",
     "warn_if_not_sheet",
+    "TerminalRegion",
+    "conductor_heat_w",
+    "conductor_problem_from_solids",
     "write_step",
 ]
