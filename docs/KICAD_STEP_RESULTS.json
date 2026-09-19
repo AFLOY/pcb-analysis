@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-19T10:46:14+00:00",
+  "generated_at": "2026-09-19T11:17:44+00:00",
   "environment": {
     "platform": "Linux-6.12.0-211.54.1.el10_2.x86_64-x86_64-with-glibc2.39",
     "python": "3.12.14",
@@ -57,98 +57,54 @@
         "pitch_mm": 0.25
       },
       "timing_s": {
-        "kicad_cli_export": 0.5130527750588953,
-        "load_step": 1.0761655190726742,
-        "tessellate": 0.46551906189415604,
-        "plane_opt_reference": 0.15697894303593785
+        "kicad_cli_export": 0.5079573020339012,
+        "load_step": 1.0600321550155059,
+        "tessellate": 0.4641748199937865,
+        "plane_opt_reference": 0.1553769059246406
       },
       "rasters": [
         {
+          "method": "section",
           "supersample": 1,
           "sample_points": 38642,
-          "seconds": 0.2452906200196594,
+          "seconds": 0.023008443997241557,
           "threads": 6,
           "via_specs": 20,
           "layers": [
             {
               "layer": "B.Cu",
-              "step_cells": 1059,
+              "step_cells": 1064,
               "plane_opt_cells": 1212,
-              "iou": 0.8737623762376238,
-              "interior_cells": 18258,
+              "iou": 0.8747940691927513,
+              "interior_cells": 18261,
               "interior_disagreement": 0,
               "interior_step_only": 0,
               "interior_plane_opt_only": 0,
               "interior_plane_opt_only_fraction_of_copper": 0.0,
               "hole_cells_step_only": 0,
-              "hole_cells_plane_opt_only": 108,
-              "hole_cells_disagreeing": 108,
+              "hole_cells_plane_opt_only": 104,
+              "hole_cells_disagreeing": 104,
               "hole_disagreements_are_plane_opt_only": true,
-              "boundary_cells": 799,
-              "boundary_disagreement": 45,
-              "step_only_outside_holes": 0
-            },
-            {
-              "layer": "F.Cu",
-              "step_cells": 11078,
-              "plane_opt_cells": 11185,
-              "iou": 0.9898998927422238,
-              "interior_cells": 16824,
-              "interior_disagreement": 0,
-              "interior_step_only": 0,
-              "interior_plane_opt_only": 0,
-              "interior_plane_opt_only_fraction_of_copper": 0.0,
-              "hole_cells_step_only": 0,
-              "hole_cells_plane_opt_only": 108,
-              "hole_cells_disagreeing": 108,
-              "hole_disagreements_are_plane_opt_only": true,
-              "boundary_cells": 2233,
-              "boundary_disagreement": 5,
-              "step_only_outside_holes": 3
-            }
-          ]
-        },
-        {
-          "supersample": 3,
-          "sample_points": 347778,
-          "seconds": 1.947091355919838,
-          "threads": 6,
-          "via_specs": 20,
-          "layers": [
-            {
-              "layer": "B.Cu",
-              "step_cells": 1059,
-              "plane_opt_cells": 1212,
-              "iou": 0.8706754530477759,
-              "interior_cells": 18258,
-              "interior_disagreement": 0,
-              "interior_step_only": 0,
-              "interior_plane_opt_only": 0,
-              "interior_plane_opt_only_fraction_of_copper": 0.0,
-              "hole_cells_step_only": 0,
-              "hole_cells_plane_opt_only": 108,
-              "hole_cells_disagreeing": 108,
-              "hole_disagreements_are_plane_opt_only": true,
-              "boundary_cells": 799,
-              "boundary_disagreement": 49,
+              "boundary_cells": 796,
+              "boundary_disagreement": 48,
               "step_only_outside_holes": 2
             },
             {
               "layer": "F.Cu",
-              "step_cells": 11117,
+              "step_cells": 11127,
               "plane_opt_cells": 11185,
-              "iou": 0.9859305431878895,
-              "interior_cells": 16820,
+              "iou": 0.9868210151380231,
+              "interior_cells": 16823,
               "interior_disagreement": 0,
               "interior_step_only": 0,
               "interior_plane_opt_only": 0,
               "interior_plane_opt_only_fraction_of_copper": 0.0,
               "hole_cells_step_only": 0,
-              "hole_cells_plane_opt_only": 108,
-              "hole_cells_disagreeing": 108,
+              "hole_cells_plane_opt_only": 99,
+              "hole_cells_disagreeing": 99,
               "hole_disagreements_are_plane_opt_only": true,
-              "boundary_cells": 2237,
-              "boundary_disagreement": 50,
+              "boundary_cells": 2234,
+              "boundary_disagreement": 49,
               "step_only_outside_holes": 45
             }
           ]
@@ -193,88 +149,44 @@
         "pitch_mm": 0.25
       },
       "timing_s": {
-        "kicad_cli_export": 0.7606098010437563,
-        "load_step": 0.7975580820348114,
-        "tessellate": 0.6332839870592579,
-        "plane_opt_reference": 0.05192353902384639
+        "kicad_cli_export": 0.7375362149905413,
+        "load_step": 0.7848181308945641,
+        "tessellate": 0.670543011976406,
+        "plane_opt_reference": 0.054571964079514146
       },
       "rasters": [
         {
+          "method": "section",
           "supersample": 1,
           "sample_points": 101304,
-          "seconds": 1.0517341459635645,
+          "seconds": 0.08794570690952241,
           "threads": 6,
           "via_specs": 27,
           "layers": [
             {
               "layer": "B.Cu",
-              "step_cells": 883,
+              "step_cells": 884,
               "plane_opt_cells": 1496,
-              "iou": 0.5881174899866488,
+              "iou": 0.5845539280958721,
               "interior_cells": 48093,
               "interior_disagreement": 0,
               "interior_step_only": 0,
               "interior_plane_opt_only": 0,
               "interior_plane_opt_only_fraction_of_copper": 0.0,
-              "hole_cells_step_only": 0,
-              "hole_cells_plane_opt_only": 287,
-              "hole_cells_disagreeing": 287,
-              "hole_disagreements_are_plane_opt_only": true,
-              "boundary_cells": 2013,
-              "boundary_disagreement": 330,
-              "step_only_outside_holes": 2
-            },
-            {
-              "layer": "F.Cu",
-              "step_cells": 3369,
-              "plane_opt_cells": 3665,
-              "iou": 0.9077841063195009,
-              "interior_cells": 45329,
-              "interior_disagreement": 0,
-              "interior_step_only": 0,
-              "interior_plane_opt_only": 0,
-              "interior_plane_opt_only_fraction_of_copper": 0.0,
-              "hole_cells_step_only": 0,
-              "hole_cells_plane_opt_only": 287,
-              "hole_cells_disagreeing": 287,
-              "hole_disagreements_are_plane_opt_only": true,
-              "boundary_cells": 4777,
-              "boundary_disagreement": 53,
-              "step_only_outside_holes": 22
-            }
-          ]
-        },
-        {
-          "supersample": 3,
-          "sample_points": 911736,
-          "seconds": 8.716196418972686,
-          "threads": 6,
-          "via_specs": 27,
-          "layers": [
-            {
-              "layer": "B.Cu",
-              "step_cells": 883,
-              "plane_opt_cells": 1496,
-              "iou": 0.5870580386924616,
-              "interior_cells": 48097,
-              "interior_disagreement": 0,
-              "interior_step_only": 0,
-              "interior_plane_opt_only": 0,
-              "interior_plane_opt_only_fraction_of_copper": 0.0,
-              "hole_cells_step_only": 0,
-              "hole_cells_plane_opt_only": 292,
+              "hole_cells_step_only": 1,
+              "hole_cells_plane_opt_only": 291,
               "hole_cells_disagreeing": 292,
-              "hole_disagreements_are_plane_opt_only": true,
-              "boundary_cells": 2009,
-              "boundary_disagreement": 327,
-              "step_only_outside_holes": 3
+              "hole_disagreements_are_plane_opt_only": false,
+              "boundary_cells": 2013,
+              "boundary_disagreement": 332,
+              "step_only_outside_holes": 5
             },
             {
               "layer": "F.Cu",
-              "step_cells": 3362,
+              "step_cells": 3371,
               "plane_opt_cells": 3665,
-              "iou": 0.9038201029531292,
-              "interior_cells": 45330,
+              "iou": 0.9041948579161029,
+              "interior_cells": 45327,
               "interior_disagreement": 0,
               "interior_step_only": 0,
               "interior_plane_opt_only": 0,
@@ -283,9 +195,9 @@
               "hole_cells_plane_opt_only": 291,
               "hole_cells_disagreeing": 291,
               "hole_disagreements_are_plane_opt_only": true,
-              "boundary_cells": 4776,
-              "boundary_disagreement": 64,
-              "step_only_outside_holes": 26
+              "boundary_cells": 4779,
+              "boundary_disagreement": 63,
+              "step_only_outside_holes": 30
             }
           ]
         }
@@ -341,97 +253,93 @@
         "pitch_mm": 0.25
       },
       "timing_s": {
-        "kicad_cli_export": 21.13577336689923,
-        "load_step": 42.02988133695908,
-        "tessellate": 50.739161044941284,
-        "plane_opt_reference": 164.93640426697675
+        "kicad_cli_export": 21.014756174059585,
+        "load_step": 41.663242324022576,
+        "tessellate": 49.907265393063426,
+        "plane_opt_reference": 170.078856124077
       },
       "rasters": [
         {
+          "method": "section",
           "supersample": 1,
           "sample_points": 686196,
-          "seconds": 165.46584896801505,
+          "seconds": 1.3427795419702306,
           "threads": 6,
           "via_specs": 1724,
           "layers": [
             {
               "layer": "B.Cu",
-              "step_cells": 153265,
+              "step_cells": 153702,
               "plane_opt_cells": 156038,
-              "iou": 0.9822286878837206,
-              "interior_cells": 134850,
+              "iou": 0.9830086365295108,
+              "interior_cells": 135226,
               "interior_disagreement": 0,
               "interior_step_only": 0,
               "interior_plane_opt_only": 0,
               "interior_plane_opt_only_fraction_of_copper": 0.0,
-              "hole_cells_step_only": 0,
-              "hole_cells_plane_opt_only": 2728,
-              "hole_cells_disagreeing": 2728,
-              "hole_disagreements_are_plane_opt_only": true,
-              "boundary_cells": 25577,
-              "boundary_disagreement": 45,
-              "step_only_outside_holes": 0
+              "hole_cells_step_only": 11,
+              "hole_cells_plane_opt_only": 2393,
+              "hole_cells_disagreeing": 2404,
+              "hole_disagreements_are_plane_opt_only": false,
+              "boundary_cells": 25201,
+              "boundary_disagreement": 250,
+              "step_only_outside_holes": 148
             },
             {
               "layer": "In2.Cu",
-              "step_cells": 6905,
+              "step_cells": 4813,
               "plane_opt_cells": 6420,
-              "iou": 0.5463618428687478,
-              "interior_cells": 147253,
+              "iou": 0.7194244604316546,
+              "interior_cells": 150462,
               "interior_disagreement": 0,
               "interior_step_only": 0,
               "interior_plane_opt_only": 0,
               "interior_plane_opt_only_fraction_of_copper": 0.0,
-              "hole_cells_step_only": 2197,
-              "hole_cells_plane_opt_only": 1622,
-              "hole_cells_disagreeing": 3819,
+              "hole_cells_step_only": 86,
+              "hole_cells_plane_opt_only": 1601,
+              "hole_cells_disagreeing": 1687,
               "hole_disagreements_are_plane_opt_only": false,
-              "boundary_cells": 13174,
-              "boundary_disagreement": 90,
-              "step_only_outside_holes": 0
+              "boundary_cells": 9965,
+              "boundary_disagreement": 146,
+              "step_only_outside_holes": 27
             },
             {
               "layer": "In1.Cu",
-              "step_cells": 49215,
+              "step_cells": 47730,
               "plane_opt_cells": 49437,
-              "iou": 0.9273991872460143,
-              "interior_cells": 144236,
+              "iou": 0.9588146356214091,
+              "interior_cells": 146409,
               "interior_disagreement": 0,
               "interior_step_only": 0,
               "interior_plane_opt_only": 0,
               "interior_plane_opt_only_fraction_of_copper": 0.0,
-              "hole_cells_step_only": 1746,
-              "hole_cells_plane_opt_only": 1921,
-              "hole_cells_disagreeing": 3667,
+              "hole_cells_step_only": 70,
+              "hole_cells_plane_opt_only": 1785,
+              "hole_cells_disagreeing": 1855,
               "hole_disagreements_are_plane_opt_only": false,
-              "boundary_cells": 16191,
-              "boundary_disagreement": 49,
-              "step_only_outside_holes": 1
+              "boundary_cells": 14018,
+              "boundary_disagreement": 188,
+              "step_only_outside_holes": 98
             },
             {
               "layer": "F.Cu",
-              "step_cells": 69545,
+              "step_cells": 70914,
               "plane_opt_cells": 73596,
-              "iou": 0.9432927408734846,
-              "interior_cells": 120198,
-              "interior_disagreement": 184,
+              "iou": 0.9388727140997947,
+              "interior_cells": 120640,
+              "interior_disagreement": 169,
               "interior_step_only": 0,
-              "interior_plane_opt_only": 184,
-              "interior_plane_opt_only_fraction_of_copper": 0.002500135876949834,
-              "hole_cells_step_only": 0,
-              "hole_cells_plane_opt_only": 2750,
-              "hole_cells_disagreeing": 2750,
-              "hole_disagreements_are_plane_opt_only": true,
-              "boundary_cells": 40229,
-              "boundary_disagreement": 1243,
-              "step_only_outside_holes": 63
+              "interior_plane_opt_only": 169,
+              "interior_plane_opt_only_fraction_of_copper": 0.002296320452198489,
+              "hole_cells_step_only": 64,
+              "hole_cells_plane_opt_only": 2240,
+              "hole_cells_disagreeing": 2304,
+              "hole_disagreements_are_plane_opt_only": false,
+              "boundary_cells": 39787,
+              "boundary_disagreement": 2083,
+              "step_only_outside_holes": 873
             }
           ]
-        },
-        {
-          "supersample": 3,
-          "sample_points": 6175764,
-          "skipped": "above --max-points 2000000"
         }
       ]
     }
@@ -440,8 +348,8 @@
     "adopted": true,
     "criteria": "away from edges and holes the export never has copper plane_opt lacks (interior step-only = 0 on every layer); interior copper plane_opt has and the export lacks is at most 1 % of plane_opt's copper per layer (plane_opt paints non-plated holes, drills and zone clearance cut-outs, and keeps off-board stubs); via barrels equal KiCad vias plus through-hole pads; boundary disagreement below 20 % of boundary cells",
     "interior_step_only_zero": true,
-    "max_interior_plane_opt_only_fraction_of_copper": 0.002500135876949834,
+    "max_interior_plane_opt_only_fraction_of_copper": 0.002296320452198489,
     "vias_match": true,
-    "max_boundary_disagreement_fraction": 0.16393442622950818
+    "max_boundary_disagreement_fraction": 0.16492796820665673
   }
 }

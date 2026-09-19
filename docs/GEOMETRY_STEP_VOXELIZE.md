@@ -55,10 +55,30 @@ an occupancy array given directly, or copper solids in the STEP. Mixing is
 allowed per layer. Without any copper, only the thermal path runs, with the
 board as bare laminate.
 
+## Layer sections (2.5D)
+
+A conductor layer is the section of the copper solids at the layer's centre
+`z`. With the native extension that section is rasterised exactly
+(`method="section"`, the default for `sample_plane_fill` and
+`rasterize_board` when built): every triangle of a solid's tessellation that
+crosses the plane yields one oriented segment (direction `ẑ × n` for the
+outward normal `n`, so the loops run counter-clockwise around copper and
+need no stitching), and the segments are accumulated onto the cell grid with
+the signed-area scheme of font rasterisers (each segment adds area and cover
+terms, a prefix sum along `x` gives the fraction of every cell inside the
+loops). The result is the exact covered area per cell, so `supersample` does
+not apply and the quantisation of a 0.25 mm track on 0.25 mm cells
+disappears; solids of one layer touch but do not overlap, so their coverages
+add and are clamped to one. Cost is linear in the crossing triangles and the
+cells they touch, independent of a fused zone's bounding box, which is what
+made the point path slow on a real board (see `KICAD_STEP_RESULTS.json`).
+Components, heat sinks and enclosures stay on the 3D voxel path below.
+
 ## Point classification
 
 Three paths answer "is this point inside this solid", selectable per call
-(`method=`) or per process (`PCB_GEOMETRY_CLASSIFY`):
+(`method=`) or per process (`PCB_GEOMETRY_CLASSIFY`); they serve the 3D
+voxelisation and remain available for layers (`"occ"`, `"numpy"`, `"native"`):
 
 - `occ`: `BRepClass3d_SolidClassifier` per point after a bounding-box
   prefilter. Exact on the B-rep; one Python call per point.
@@ -138,21 +158,23 @@ copper, so the cells are split three ways: interior (no differing
 cell diagonal), boundary (the rest). The adopted run is
 `KICAD_STEP_RESULTS.json`:
 
-| Board | Layers | Solids / triangles | Grid | Export / load / raster (s) | Layer | Interior step-only | Interior plane_opt-only (% of copper) | Hole cells step / plane_opt only | Boundary disagreement |
+| Board | Layers | Solids / triangles | Grid | Export / load / tessellate / raster (s) | Layer | Interior step-only | Interior plane_opt-only (% of copper) | Hole cells step / plane_opt only | Boundary disagreement |
 |---|---|---|---|---|---|---|---|---|---|
-| `power_module` | 2 | 82 / 36656 | 139×139 @ 0.25 mm | 0.5 / 1.1 / 0.2 | B.Cu | 0 | 0 (0.00) | 0 / 108 | 45 / 799 |
-| | | | | | F.Cu | 0 | 0 (0.00) | 0 / 108 | 5 / 2233 |
-| `bldc_driver` | 2 | 171 / 49340 | 268×189 @ 0.25 mm | 0.8 / 0.8 / 1.1 | B.Cu | 0 | 0 (0.00) | 0 / 287 | 330 / 2013 |
-| | | | | | F.Cu | 0 | 0 (0.00) | 0 / 287 | 53 / 4777 |
-| `drone` | 4 | 6198 / 3936108 | 441×389 @ 0.25 mm | 21.1 / 42.0 / 165.5 | B.Cu | 0 | 0 (0.00) | 0 / 2728 | 45 / 25577 |
-| | | | | | In2.Cu | 0 | 0 (0.00) | 2197 / 1622 | 90 / 13174 |
-| | | | | | In1.Cu | 0 | 0 (0.00) | 1746 / 1921 | 49 / 16191 |
-| | | | | | F.Cu | 0 | 184 (0.25) | 0 / 2750 | 1243 / 40229 |
-Measured with KiCad 10.0.5, OCP 8.0.1.0.0, 6 threads for the winding-number kernel, one sample per cell (the three-sample raster of `drone`, 6.2 million points, is skipped above `--max-points`; on the two small boards it changes no interior cell). Decision: adopted; the largest interior plane_opt-only share is 0.25 % and the largest boundary disagreement 16 % of boundary cells.
+| `power_module` | 2 | 82 / 36656 | 139×139 @ 0.25 mm | 0.5 / 1.1 / 0.5 / 0.0 | B.Cu | 0 | 0 (0.00) | 0 / 104 | 48 / 796 |
+| | | | | | F.Cu | 0 | 0 (0.00) | 0 / 99 | 49 / 2234 |
+| `bldc_driver` | 2 | 171 / 49340 | 268×189 @ 0.25 mm | 0.7 / 0.8 / 0.7 / 0.1 | B.Cu | 0 | 0 (0.00) | 1 / 291 | 332 / 2013 |
+| | | | | | F.Cu | 0 | 0 (0.00) | 0 / 291 | 63 / 4779 |
+| `drone` | 4 | 6198 / 3936108 | 441×389 @ 0.25 mm | 21.0 / 41.7 / 49.9 / 1.3 | B.Cu | 0 | 0 (0.00) | 11 / 2393 | 250 / 25201 |
+| | | | | | In2.Cu | 0 | 0 (0.00) | 86 / 1601 | 146 / 9965 |
+| | | | | | In1.Cu | 0 | 0 (0.00) | 70 / 1785 | 188 / 14018 |
+| | | | | | F.Cu | 0 | 169 (0.23) | 64 / 2240 | 2083 / 39787 |
+Measured with KiCad 10.0.5, OCP 8.0.1.0.0, the exact section rasteriser (`method="section"`). The point path measured before it (winding number at one sample per cell, 6 threads) took 165.5 s for the four `drone` layers against 1.3 s here, with the same interior agreement; it is kept for the 3D bodies and as a cross-check, not for layers. Decision: adopted; the largest interior plane_opt-only share is 0.23 % and the largest boundary disagreement 16 % of boundary cells.
 
-
-Interior cells agree exactly on every layer of every board. Drill-hole
-disagreements are all plane_opt copper over an open hole in the export.
+Interior cells agree exactly on every layer of every board except 0.23 % of
+`drone`'s F.Cu, where plane_opt paints zone clearance cut-outs and an
+off-board track stub. Drill-hole cells differ in both directions: plane_opt
+paints drills and non-plated holes as copper, and it omits the inner-layer
+annular rings of through vias that the export carries.
 Boundary disagreements are largest where a 0.25 mm track runs exactly along
 a cell edge: plane_opt's `distance <= radius` rule paints both rows, the
 sampler one, and neither is wrong at that resolution. `tests/test_kicad_step.py`
@@ -169,10 +191,10 @@ faces, and rasterises them onto the routing grid:
 
 - `pitch_mm` and the grid origin are caller inputs, fixed for the whole
   board; every solver of this repository assumes one in-plane grid.
-- A cell is copper when the sampled fill exceeds a threshold (default 0.5).
-  The fill is computed by `n × n` supersampling of point-in-face tests
-  (`BRepClass_FaceClassifier`) with `n = 3` by default; the fill fraction is
-  also kept as a float array for the thermal conductivity blend.
+- A cell is copper when its fill exceeds a threshold (default 0.5). The
+  fill is the exact covered area on the section path, or the `n × n`
+  supersampled inside fraction on the point paths (`n = 3` by default); it
+  is also kept as a float array for the thermal conductivity blend.
 - Vias are solids whose section is a disc on two or more consecutive layer
   planes with the same centre; they become `ViaSpec` entries of a `ViaSet`.
 - Terminals are named cells: either from the plane-opt mapping or from
@@ -263,7 +285,7 @@ requested.
 | `geometry/step_voxelize/bodymap.py` | `BodyMap` (board stackup, copper, vias, bodies, ignore) and its exhaustive resolution against the model |
 | `geometry/step_voxelize/kicad.py` | `kicad-cli` STEP export, stackup reading, z-window body map, y-down grid origin |
 | `geometry/step_voxelize/mesh.py` | `TriangleMesh`, NumPy winding number, path selection |
-| `geometry/step_voxelize/native/point_in_mesh.cpp` | C++ winding number over points (OpenMP), module `_voxelize_native` |
+| `geometry/step_voxelize/native/point_in_mesh.cpp` | C++ winding number over points (OpenMP) and the exact plane-section coverage rasteriser, module `_voxelize_native` |
 | `geometry/step_voxelize/section.py` | per-layer sampling of the board outline and copper onto the routing grid (`BoardRaster`) |
 | `geometry/step_voxelize/voxelize.py` | 3D sampling of bodies onto a voxel grid, fill fraction, material precedence (`VoxelSolidModel`) |
 | `geometry/step_voxelize/contact.py` | board/voxel contact placement (origins, contact spec) feeding `thermal.matrix_free_mpir_fem.planar_contact_map` |
