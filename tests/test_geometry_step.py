@@ -367,3 +367,54 @@ def test_thick_conductor_goes_to_the_3d_voxel_peec() -> None:
             pitch_m=pitch,
             frequency_hz=1.0e6,
         )
+
+
+def test_nested_assembly_components_keep_their_placement(tmp_path) -> None:
+    """A solid two assembly levels down lands where the component puts it.
+
+    KiCad places every footprint model as ``board/<refdes>/<model>``; the
+    component label carries the placement and the solid sits below a
+    prototype assembly, so the flattener must accumulate the transforms.
+    """
+
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Trsf, gp_Vec
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPCAFControl import STEPCAFControl_Writer
+    from OCP.STEPControl import STEPControl_AsIs
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    def name(label, text):
+        TDataStd_Name.Set_s(label, TCollection_ExtendedString(text))
+
+    def shift(x, y, z):
+        trsf = gp_Trsf()
+        trsf.SetTranslation(gp_Vec(x, y, z))
+        return TopLoc_Location(trsf)
+
+    document = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
+    tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+    body = tool.NewShape()
+    name(body, "model")
+    inner = tool.AddComponent(body, tool.AddShape(BRepPrimAPI_MakeBox(1.6, 0.8, 0.8).Shape(), False), shift(0.0, 0.0, 0.5))
+    name(inner, "body")
+    root = tool.NewShape()
+    name(root, "board")
+    for reference, (x, y) in {"C1": (10.0, -20.0), "C2": (30.0, -5.0)}.items():
+        name(tool.AddComponent(root, body, shift(x, y, 1.6)), reference)
+    tool.UpdateAssemblies()
+    writer = STEPCAFControl_Writer()
+    writer.Transfer(document, STEPControl_AsIs)
+    path = tmp_path / "nested.step"
+    assert writer.Write(str(path)) == IFSelect_RetDone
+
+    model = load_step(path)
+    assert sorted(model.names) == ["board/C1/body", "board/C2/body"]
+    for reference, (x, y) in {"C1": (10.0, -20.0), "C2": (30.0, -5.0)}.items():
+        lo, hi = np.asarray(model.solid(f"board/{reference}/body").bounds_m) / 1e-3
+        assert np.allclose(lo, (x, y, 2.1), atol=1e-6)
+        assert np.allclose(hi, (x + 1.6, y + 0.8, 2.9), atol=1e-6)

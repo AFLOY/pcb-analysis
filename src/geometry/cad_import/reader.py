@@ -253,8 +253,25 @@ def _label_name(label: Any) -> str:
     return ""
 
 
-def _flatten(shape_tool: Any, label: Any, prefix: str, out: list[tuple[str, Any]]) -> None:
+def _flatten(
+    shape_tool: Any,
+    label: Any,
+    prefix: str,
+    out: list[tuple[str, Any]],
+    location: Any = None,
+) -> None:
+    """Walk an XCAF assembly tree and emit ``(path, placed shape)`` leaves.
+
+    ``location`` is the accumulated placement of the enclosing components.
+    ``GetShape_s`` on a component label applies only that component's own
+    transform, so a solid two levels down (KiCad places every footprint model
+    as ``board/<refdes>/<model>``) would otherwise land at the model's origin.
+    """
+
     from OCP.collections import Sequence_TDF_Label
+
+    def placed(shape: Any) -> Any:
+        return shape if location is None else shape.Moved(location)
 
     name = _label_name(label)
     if shape_tool.IsReference_s(label):
@@ -262,28 +279,30 @@ def _flatten(shape_tool: Any, label: Any, prefix: str, out: list[tuple[str, Any]
 
         referred = TDF_Label()
         if not shape_tool.GetReferredShape_s(label, referred):
-            out.append((f"{prefix}{name}", shape_tool.GetShape_s(label)))
+            out.append((f"{prefix}{name}", placed(shape_tool.GetShape_s(label))))
             return
         # A component label carries the placement; its name is the instance
         # name, else the referred prototype's name.
         name = name or _label_name(referred)
         if shape_tool.IsAssembly_s(referred):
+            own = shape_tool.GetLocation_s(label)
+            below = own if location is None else location.Multiplied(own)
             children = Sequence_TDF_Label()
             shape_tool.GetComponents_s(referred, children, False)
             joined = f"{prefix}{name}/" if name else prefix
             for index in range(1, children.Length() + 1):
-                _flatten(shape_tool, children.Value(index), joined, out)
+                _flatten(shape_tool, children.Value(index), joined, out, below)
             return
-        out.append((f"{prefix}{name}", shape_tool.GetShape_s(label)))
+        out.append((f"{prefix}{name}", placed(shape_tool.GetShape_s(label))))
         return
     if shape_tool.IsAssembly_s(label):
         children = Sequence_TDF_Label()
         shape_tool.GetComponents_s(label, children, False)
         joined = f"{prefix}{name}/" if name else prefix
         for index in range(1, children.Length() + 1):
-            _flatten(shape_tool, children.Value(index), joined, out)
+            _flatten(shape_tool, children.Value(index), joined, out, location)
         return
-    out.append((f"{prefix}{name}", shape_tool.GetShape_s(label)))
+    out.append((f"{prefix}{name}", placed(shape_tool.GetShape_s(label))))
 
 
 def _model_from_named_shapes(named: Sequence[tuple[str, Any]], source: str) -> StepModel:
