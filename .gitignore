@@ -27,3 +27,4 @@ experiments/*
 !experiments/emc_native_benchmark.py
 !experiments/board_enclosure_acceptance.py
 !experiments/geometry_classify_benchmark.py
+!experiments/kicad_step_acceptance.py
