@@ -465,3 +465,22 @@ def test_graded_raster_conserves_copper_area_and_builds_a_graded_thermal_mesh(mo
     np.testing.assert_array_equal(flipped.pitch_y_m, grid.pitch_y_m[::-1])
     np.testing.assert_array_equal(flipped.fill, graded.fill[:, ::-1])
     assert flipped.row_y_m(0) == pytest.approx(float(grid.y_centres_m[-1]))
+
+
+def test_narrow_copper_boxes_follow_thin_traces_and_ignore_wide_copper(model) -> None:
+    if not native_classify_available():
+        pytest.skip("the exact section rasteriser needs the geometry native extension")
+    from geometry.cad_import import narrow_copper_boxes
+
+    body_map = _body_map()
+    resolved = resolve_bodies(model, body_map)
+    zs = [layer.center_z_mm for layer in body_map.board.layers]
+    # The synthetic board: a 6 x 2 mm trace, a 6 x 6 mm pad, a 18 x 10 mm plane and a 0.6 mm barrel.
+    boxes = narrow_copper_boxes(resolved, zs, width_threshold_mm=2.5, tile_mm=2.0)
+    assert boxes
+    covers_trace = [b for b in boxes if b.y0_m >= 4.9e-3 and b.y1_m <= 7.1e-3 and b.x0_m >= 0.9e-3]
+    assert covers_trace and all(b.x1_m - b.x0_m <= 2.0e-3 + 1e-9 for b in covers_trace)
+    # Nothing on the wide pad or plane away from the trace and the barrel.
+    assert not [b for b in boxes if b.x0_m > 8.5e-3 and b.y1_m < 4.5e-3]
+    # The barrel sits inside the plane and the trace, so below the trace width nothing is narrow.
+    assert narrow_copper_boxes(resolved, zs, width_threshold_mm=1.0) == ()

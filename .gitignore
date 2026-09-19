@@ -34,3 +34,4 @@ experiments/*
 !experiments/tensor_grid_acceptance.py
 !experiments/kicad_refinement_acceptance.py
 !experiments/sheet_pfft_acceptance.py
+!experiments/trace_refinement_probe.py
