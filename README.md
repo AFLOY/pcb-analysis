@@ -462,7 +462,18 @@ python -m pip install -r requirements.txt
 
 # Run tests from the repository root
 python -m pytest tests/ -v
+
+# Optional C++ kernels (pybind11, OpenMP), built in place next to the packages
+# that load them.  Tests that need them are skipped until this has run.
+pip install -e '.[native]'
+cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native
 ```
+
+`CMakeLists.txt` is the one list of native targets; `-DPCB_NATIVE_OPENMP=OFF`
+drops OpenMP and `-DPCB_NATIVE_MARCH=x86-64-v3` (for example) replaces the
+`-march=native` default. The per-package `native/build.py` scripts remain as
+the single-file fallback.
 
 CI runs the suite on Python 3.11–3.13, then builds a wheel and source
 distribution with the oldest supported setuptools and imports both

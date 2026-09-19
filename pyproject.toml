@@ -38,6 +38,7 @@ cuda = [
   "pypeec==5.8.0",
 ]
 test = ["pytest>=8,<9"]
+native = ["pybind11>=2.12,<4"]
 
 [project.urls]
 Homepage = "https://github.com/AFLOY/pcb-analysis"
