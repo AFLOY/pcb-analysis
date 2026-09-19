@@ -30,3 +30,4 @@ experiments/*
 !experiments/kicad_step_acceptance.py
 !experiments/voxel_peec_acceptance.py
 !experiments/electrothermal_enclosure_acceptance.py
+!experiments/thermal_transient_acceptance.py

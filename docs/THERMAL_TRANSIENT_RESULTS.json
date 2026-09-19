@@ -1,0 +1,136 @@
+{
+  "generated_at": "2026-09-19T15:14:15+00:00",
+  "environment": {
+    "platform": "Linux-6.12.0-211.54.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "cupy": "14.1.1",
+    "cpu": "Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz",
+    "cpu_count": 12,
+    "compiler": "g++ (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)",
+    "native_extension_built": true,
+    "PCB_NATIVE_THREADS": "4",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "lumped_cooling": {
+    "tau_s": 345.0,
+    "end_s": 400.0,
+    "start_k": 350.0,
+    "cases": [
+      {
+        "step_s": 40.0,
+        "steps": 10,
+        "final_k": 316.6938256616773,
+        "analytic_k": 315.68339823439123,
+        "time_error_k": 1.0104274272860607,
+        "max_deviation_from_discrete_backward_euler_k": 0.0001236475362134115,
+        "max_heat_balance_error_w": 8.493691860955721e-13,
+        "wall_ms": 212.54321793094277
+      },
+      {
+        "step_s": 20.0,
+        "steps": 20,
+        "final_k": 316.19932401768585,
+        "analytic_k": 315.68339823439123,
+        "time_error_k": 0.5159257832946196,
+        "max_deviation_from_discrete_backward_euler_k": 0.00012461893510362643,
+        "max_heat_balance_error_w": 7.90366036507173e-13,
+        "wall_ms": 407.53021999262273
+      },
+      {
+        "step_s": 10.0,
+        "steps": 40,
+        "final_k": 315.9441728592322,
+        "analytic_k": 315.68339823439123,
+        "time_error_k": 0.2607746248409626,
+        "max_deviation_from_discrete_backward_euler_k": 0.00012488966643786625,
+        "max_heat_balance_error_w": 1.0222066249010453e-12,
+        "wall_ms": 709.7507819999009
+      },
+      {
+        "step_s": 5.0,
+        "steps": 80,
+        "final_k": 315.814533615754,
+        "analytic_k": 315.68339823439123,
+        "time_error_k": 0.13113538136275338,
+        "max_deviation_from_discrete_backward_euler_k": 0.00012495257385580771,
+        "max_heat_balance_error_w": 1.5260917529680285e-12,
+        "wall_ms": 1424.1218650713563
+      },
+      {
+        "step_s": 2.5,
+        "steps": 160,
+        "final_k": 315.74918640798984,
+        "analytic_k": 315.68339823439123,
+        "time_error_k": 0.06578817359860523,
+        "max_deviation_from_discrete_backward_euler_k": 0.0001249803132168381,
+        "max_heat_balance_error_w": 5.684311008002929e-11,
+        "wall_ms": 2834.449611022137
+      }
+    ],
+    "error_ratio_per_halving": [
+      1.958474377523125,
+      1.9784355307164754,
+      1.9885908908107304,
+      1.9932971868599432
+    ]
+  },
+  "board_to_steady": {
+    "nodes": 10004,
+    "steady": {
+      "wall_ms": 763.8813040684909,
+      "max_temperature_k": 475.8093352999469,
+      "rise_k": 175.8093352999469,
+      "inner_iterations": 476
+    },
+    "runs": [
+      {
+        "schedule": "geometric 0.01 s x1.6, array",
+        "steps_taken": 27,
+        "steps_in_schedule": 30,
+        "end_time_s": 5408.62589430712,
+        "reached_steady": true,
+        "wall_ms": 13828.827705932781,
+        "wall_per_step_ms": 512.1788039234364,
+        "inner_iterations_total": 7354,
+        "final_max_diff_from_steady_k": 0.0007743267947262211,
+        "max_heat_balance_error_w": 1.2449495601085658e-10,
+        "time_to_half_rise_s": 78.68944138116083
+      },
+      {
+        "schedule": "geometric 0.01 s x1.6, native",
+        "steps_taken": 27,
+        "steps_in_schedule": 30,
+        "end_time_s": 5408.62589430712,
+        "reached_steady": true,
+        "wall_ms": 5762.9621180240065,
+        "wall_per_step_ms": 213.44304140829652,
+        "inner_iterations_total": 6969,
+        "final_max_diff_from_steady_k": 0.0007743285148080759,
+        "max_heat_balance_error_w": 1.2807464810915548e-10,
+        "time_to_half_rise_s": 78.68944138116083
+      },
+      {
+        "schedule": "uniform 10 s, array",
+        "steps_taken": 163,
+        "steps_in_schedule": 200,
+        "end_time_s": 1630.0,
+        "reached_steady": true,
+        "wall_ms": 63389.599974034354,
+        "wall_per_step_ms": 388.8932513744439,
+        "inner_iterations_total": 29359,
+        "final_max_diff_from_steady_k": 0.002939850461586957,
+        "max_heat_balance_error_w": 2.343047119036023e-10,
+        "time_to_half_rise_s": 70.0
+      }
+    ]
+  },
+  "decision": {
+    "backward_euler_on_steady_operator": "adopted",
+    "criteria": {
+      "lumping": "marched maximum within 5e-4 K of the exact discrete backward-Euler law",
+      "time_order": "analytic error ratio per step halving in (1.8, 2.2)",
+      "steady_state": "geometric and uniform marches end within 2e-3 of the rise from the steady solve"
+    }
+  }
+}
