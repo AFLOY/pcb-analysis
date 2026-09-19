@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-19T18:37:26+00:00",
+  "generated_at": "2026-09-19T19:55:28+00:00",
   "environment": {
     "platform": "Linux-6.12.0-211.54.1.el10_2.x86_64-x86_64-with-glibc2.39",
     "python": "3.12.14",
@@ -16,7 +16,7 @@
         "order": 1,
         "near_radius_cells": 2,
         "uniform 0.2 mm": {
-          "build_ms": 51.711324020288885,
+          "build_ms": 33.45326893031597,
           "cells": 80,
           "errors": {
             "x": {
@@ -32,7 +32,7 @@
           }
         },
         "graded 0.1-0.5 mm": {
-          "build_ms": 379.53502603340894,
+          "build_ms": 214.08083103597164,
           "cells": 216,
           "errors": {
             "x": {
@@ -43,7 +43,7 @@
             "y": {
               "relative_frobenius": 0.003755327328897551,
               "worst_entry_over_max": 0.0029288183754507344,
-              "diagonal_relative": 1.1479228853959898e-14
+              "diagonal_relative": 1.136668739460735e-14
             }
           }
         }
@@ -52,13 +52,13 @@
         "order": 2,
         "near_radius_cells": 3,
         "uniform 0.2 mm": {
-          "build_ms": 66.3358150050044,
+          "build_ms": 38.86336204595864,
           "cells": 80,
           "errors": {
             "x": {
               "relative_frobenius": 0.00014318653287172473,
               "worst_entry_over_max": 0.00030479904189597423,
-              "diagonal_relative": 7.261825122024183e-16
+              "diagonal_relative": 6.051520935020153e-16
             },
             "y": {
               "relative_frobenius": 0.0001995750479713406,
@@ -68,7 +68,7 @@
           }
         },
         "graded 0.1-0.5 mm": {
-          "build_ms": 932.9105300130323,
+          "build_ms": 373.42478707432747,
           "cells": 216,
           "errors": {
             "x": {
@@ -88,7 +88,7 @@
         "order": 3,
         "near_radius_cells": 3,
         "uniform 0.2 mm": {
-          "build_ms": 85.50679904874414,
+          "build_ms": 42.68751002382487,
           "cells": 80,
           "errors": {
             "x": {
@@ -104,7 +104,7 @@
           }
         },
         "graded 0.1-0.5 mm": {
-          "build_ms": 1490.7738119363785,
+          "build_ms": 438.92250291537493,
           "cells": 216,
           "errors": {
             "x": {
@@ -124,23 +124,23 @@
         "order": 3,
         "near_radius_cells": 4,
         "uniform 0.2 mm": {
-          "build_ms": 101.4442479936406,
+          "build_ms": 44.34596898499876,
           "cells": 80,
           "errors": {
             "x": {
-              "relative_frobenius": 2.9906278608787046e-10,
+              "relative_frobenius": 2.990627852534013e-10,
               "worst_entry_over_max": 4.974992880109864e-10,
               "diagonal_relative": 3.6309125610120917e-16
             },
             "y": {
-              "relative_frobenius": 2.820984220288465e-10,
-              "worst_entry_over_max": 7.311731826065265e-10,
+              "relative_frobenius": 2.820984219867775e-10,
+              "worst_entry_over_max": 7.31173186388727e-10,
               "diagonal_relative": 7.261825122024183e-16
             }
           }
         },
         "graded 0.1-0.5 mm": {
-          "build_ms": 2088.9313749503344,
+          "build_ms": 625.9562519844621,
           "cells": 216,
           "errors": {
             "x": {
@@ -160,23 +160,23 @@
         "order": 3,
         "near_radius_cells": 5,
         "uniform 0.2 mm": {
-          "build_ms": 92.13745000306517,
+          "build_ms": 44.754186063073575,
           "cells": 80,
           "errors": {
             "x": {
-              "relative_frobenius": 2.9906278608787046e-10,
+              "relative_frobenius": 2.990627852534013e-10,
               "worst_entry_over_max": 4.974992880109864e-10,
               "diagonal_relative": 3.6309125610120917e-16
             },
             "y": {
-              "relative_frobenius": 2.820984220288465e-10,
-              "worst_entry_over_max": 7.311731826065265e-10,
+              "relative_frobenius": 2.820984219867775e-10,
+              "worst_entry_over_max": 7.31173186388727e-10,
               "diagonal_relative": 7.261825122024183e-16
             }
           }
         },
         "graded 0.1-0.5 mm": {
-          "build_ms": 2518.790762987919,
+          "build_ms": 764.0268970280886,
           "cells": 216,
           "errors": {
             "x": {
@@ -196,23 +196,23 @@
         "order": 4,
         "near_radius_cells": 5,
         "uniform 0.2 mm": {
-          "build_ms": 133.05526203475893,
+          "build_ms": 50.32729101367295,
           "cells": 80,
           "errors": {
             "x": {
-              "relative_frobenius": 2.99062787060347e-10,
-              "worst_entry_over_max": 4.974992993575882e-10,
-              "diagonal_relative": 6.051520935020153e-16
+              "relative_frobenius": 2.9906278669942845e-10,
+              "worst_entry_over_max": 4.974993069219894e-10,
+              "diagonal_relative": 4.841216748016122e-16
             },
             "y": {
-              "relative_frobenius": 2.8209842154585455e-10,
-              "worst_entry_over_max": 7.311731939531282e-10,
+              "relative_frobenius": 2.820984219568079e-10,
+              "worst_entry_over_max": 7.311731977353288e-10,
               "diagonal_relative": 6.051520935020153e-16
             }
           }
         },
         "graded 0.1-0.5 mm": {
-          "build_ms": 4200.281202909537,
+          "build_ms": 1010.9451790340245,
           "cells": 216,
           "errors": {
             "x": {
@@ -239,9 +239,9 @@
         "cells": 1200,
         "branches": 4550,
         "kernel_bytes": 271040,
-        "build_ms": 75.87656693067402,
-        "apply_ms": 0.4724188009276986,
-        "solve_ms": 1223.8287249347195,
+        "build_ms": 77.6319830911234,
+        "apply_ms": 0.430649402551353,
+        "solve_ms": 1197.9052510578185,
         "gmres_iterations": 221,
         "converged": true,
         "joule_loss_w": 0.012862381651385871,
@@ -253,9 +253,9 @@
         "cells": 48,
         "branches": 142,
         "kernel_bytes": 11200,
-        "build_ms": 50.732623087242246,
-        "apply_ms": 0.19881201442331076,
-        "solve_ms": 63.57049196958542,
+        "build_ms": 49.99537696130574,
+        "apply_ms": 0.19437801092863083,
+        "solve_ms": 62.479420099407434,
         "gmres_iterations": 69,
         "converged": true,
         "joule_loss_w": 0.011379142857100524,
@@ -267,13 +267,13 @@
         "cells": 1200,
         "branches": 4550,
         "kernel_bytes": 15003936,
-        "build_ms": 1646.4065810432658,
-        "apply_ms": 2.3351228097453713,
-        "solve_ms": 2127.040855004452,
+        "build_ms": 195.61280799098313,
+        "apply_ms": 2.839254611171782,
+        "solve_ms": 2144.9949640082195,
         "gmres_iterations": 227,
         "converged": true,
-        "joule_loss_w": 0.012859676159860145,
-        "loss_rel_diff_vs_uniform_fine": -0.00021034141258247097
+        "joule_loss_w": 0.012859676159862558,
+        "loss_rel_diff_vs_uniform_fine": -0.00021034141239484327
       },
       {
         "grid": "graded 0.1 mm at the ends, 0.5 mm between",
@@ -281,13 +281,13 @@
         "cells": 510,
         "branches": 1928,
         "kernel_bytes": 4174800,
-        "build_ms": 1580.7368620298803,
-        "apply_ms": 1.2447608169168234,
-        "solve_ms": 988.6997090652585,
+        "build_ms": 248.57248598709702,
+        "apply_ms": 1.2599418172612786,
+        "solve_ms": 987.2806050116196,
         "gmres_iterations": 216,
         "converged": true,
-        "joule_loss_w": 0.012859118525538393,
-        "loss_rel_diff_vs_uniform_fine": -0.00025369530588659206
+        "joule_loss_w": 0.012859118525532742,
+        "loss_rel_diff_vs_uniform_fine": -0.00025369530632601833
       }
     ]
   },
@@ -302,7 +302,7 @@
         "branches": 23230,
         "operator": "SheetInductanceOperator",
         "kernel_bytes": 4359040,
-        "wall_ms": 313.2433609571308,
+        "wall_ms": 301.4417359372601,
         "iterations": null,
         "converged": true,
         "max_current_density_a_per_mm2": 77.26962282159973,
@@ -316,7 +316,7 @@
         "branches": 23230,
         "operator": "SheetInductanceOperator",
         "kernel_bytes": 4359040,
-        "wall_ms": 81971.41899401322,
+        "wall_ms": 82777.79714204371,
         "iterations": null,
         "converged": true,
         "max_current_density_a_per_mm2": 75.70412836738166,
@@ -330,7 +330,7 @@
         "branches": 51545,
         "operator": "PfftSheetInductanceOperator",
         "kernel_bytes": 659349888,
-        "wall_ms": 209432.45326296892,
+        "wall_ms": 29114.5471050404,
         "iterations": null,
         "converged": true,
         "max_current_density_a_per_mm2": 45.046903753616284,
@@ -344,11 +344,11 @@
         "branches": 51545,
         "operator": "PfftSheetInductanceOperator",
         "kernel_bytes": 659349888,
-        "wall_ms": 629376.0015600128,
+        "wall_ms": 453091.35127894115,
         "iterations": null,
         "converged": true,
-        "max_current_density_a_per_mm2": 44.246677757869385,
-        "bulk_p99_current_density_a_per_mm2": 19.57659897993089
+        "max_current_density_a_per_mm2": 44.246677757869364,
+        "bulk_p99_current_density_a_per_mm2": 19.576598979930885
       }
     ]
   },

@@ -291,7 +291,10 @@ transform with the precorrected FFT:
    subtracted and the exact Hoer–Love partial inductance of the two bars
    (per-pair dimensions, `closed_form_mutual_inductance_arrays`) is added, as
    one sparse precorrection built once.  The self terms are therefore exact
-   and the preconditioner reads them per branch.
+   and the preconditioner reads them per branch.  Bars are sampled at Gauss
+   points over their extent (three along, two across) so the far field of a
+   bar longer than a grid cell stays right, and the near radius is measured
+   from the bars' edges.
 
 Vertical branches (barrels and filament links) get the same treatment on
 their level pairs.  `SheetMesh` takes the grid (`grid=`, `pitch_m=None`),
@@ -310,23 +313,27 @@ in-plane operator (x / y) against the convolution operator on a uniform
 
 | Order | Near radius (cells) | Uniform x / y | Graded x / y | Build, graded (ms) |
 |---|---|---|---|---|
-| 1 | 2 | 2.5e-03 / 2.4e-03 | 3.0e-03 / 3.8e-03 | 380 |
-| 2 | 3 | 1.4e-04 / 2.0e-04 | 3.7e-04 / 5.2e-04 | 933 |
-| 3 | 3 | 1.2e-04 / 1.4e-04 | 3.3e-04 / 4.5e-04 | 1491 |
-| 3 | 4 | 3.0e-10 / 2.8e-10 | 6.7e-05 / 1.3e-04 | 2089 |
-| 3 | 5 | 3.0e-10 / 2.8e-10 | 2.7e-05 / 5.0e-05 | 2519 |
-| 4 | 5 | 3.0e-10 / 2.8e-10 | 5.7e-06 / 1.2e-05 | 4200 |
+| 1 | 2 | 2.5e-03 / 2.4e-03 | 3.0e-03 / 3.8e-03 | 214 |
+| 2 | 3 | 1.4e-04 / 2.0e-04 | 3.7e-04 / 5.2e-04 | 373 |
+| 3 | 3 | 1.2e-04 / 1.4e-04 | 3.3e-04 / 4.5e-04 | 439 |
+| 3 | 4 | 3.0e-10 / 2.8e-10 | 6.7e-05 / 1.3e-04 | 626 |
+| 3 | 5 | 3.0e-10 / 2.8e-10 | 2.7e-05 / 5.0e-05 | 764 |
+| 4 | 5 | 3.0e-10 / 2.8e-10 | 5.7e-06 / 1.2e-05 | 1011 |
 
-The default is order 3, radius 4. A 12 × 1 mm strip line at 1e+06 Hz
+The default is order 3, radius 3, on a projection grid of twice the finest
+cell. The near terms (one closed form per distinct bar pair and offset, one
+grid stencil product per distinct configuration) are the build's cost; the
+grid products run in C++ with OpenMP when `electrical.sheet_peec.native` is
+built (`native_available()`), else in NumPy. A 12 × 1 mm strip line at 1e+06 Hz
 (F.Cu go, B.Cu return, 35 µm copper cut into filaments), loss relative to the
 uniform 0.1 mm convolution solve:
 
 | Grid | Operator | Branches | Kernel (MB) | Build (ms) | Apply (ms) | Solve (ms) | GMRES | Loss rel. diff |
 |---|---|---|---|---|---|---|---|---|
-| uniform 0.1 mm | SheetInductanceOperator | 4550 | 0.27 | 76 | 0.5 | 1224 | 221 | +0.00e+00 |
-| uniform 0.5 mm | SheetInductanceOperator | 142 | 0.01 | 51 | 0.2 | 64 | 69 | -1.15e-01 |
-| uniform 0.1 mm, pFFT | PfftSheetInductanceOperator | 4550 | 15.00 | 1646 | 2.3 | 2127 | 227 | -2.10e-04 |
-| graded 0.1 mm at the ends, 0.5 mm between | PfftSheetInductanceOperator | 1928 | 4.17 | 1581 | 1.2 | 989 | 216 | -2.54e-04 |
+| uniform 0.1 mm | SheetInductanceOperator | 4550 | 0.27 | 78 | 0.4 | 1198 | 221 | +0.00e+00 |
+| uniform 0.5 mm | SheetInductanceOperator | 142 | 0.01 | 50 | 0.2 | 62 | 69 | -1.15e-01 |
+| uniform 0.1 mm, pFFT | PfftSheetInductanceOperator | 4550 | 15.00 | 196 | 2.8 | 2145 | 227 | -2.10e-04 |
+| graded 0.1 mm at the ends, 0.5 mm between | PfftSheetInductanceOperator | 1928 | 4.17 | 249 | 1.3 | 987 | 216 | -2.54e-04 |
 
 `power_module` from KiCad (fused copper, y-down raster, terminals at the two
 ends of the largest B.Cu copper piece, barrels off the copper dropped),
@@ -335,16 +342,20 @@ through `solve_plane_opt_problem`:
 | Grid | f (Hz) | Schema | Operator | Cells | Branches | Kernel (MB) | Wall (s) | J max (A/mm²) | J p99 (A/mm²) |
 |---|---|---|---|---|---|---|---|---|---|
 | uniform 0.25 mm (v1) | 0e+00 | v1 | SheetInductanceOperator | 19321 | 23230 | 4.4 | 0.3 | 77.270 | 12.482 |
-| uniform 0.25 mm (v1) | 1e+06 | v1 | SheetInductanceOperator | 19321 | 23230 | 4.4 | 82.0 | 75.704 | 15.175 |
-| graded 0.1 mm under components (v2) | 0e+00 | v2 | PfftSheetInductanceOperator | 32200 | 51545 | 659.3 | 209.4 | 45.047 | 12.992 |
-| graded 0.1 mm under components (v2) | 1e+06 | v2 | PfftSheetInductanceOperator | 32200 | 51545 | 659.3 | 629.4 | 44.247 | 19.577 |
+| uniform 0.25 mm (v1) | 1e+06 | v1 | SheetInductanceOperator | 19321 | 23230 | 4.4 | 82.8 | 75.704 | 15.175 |
+| graded 0.1 mm under components (v2) | 0e+00 | v2 | PfftSheetInductanceOperator | 32200 | 51545 | 659.3 | 29.1 | 45.047 | 12.992 |
+| graded 0.1 mm under components (v2) | 1e+06 | v2 | PfftSheetInductanceOperator | 32200 | 51545 | 659.3 | 453.1 | 44.247 | 19.577 |
 
-Decision: adopted. The pFFT build is dominated by the near
-precorrection (one closed form per near pair); its application is one
-coarse-grid FFT pair per layer pair and axis plus two sparse products, so the
-cost of the AC solve follows the branch count of the graded grid, not the
-fine pitch.  The uniform convolution operator stays the choice for uniform
-grids: it is exact to its 24-cell seam and cheaper to build.
+Decision: adopted. On `power_module` the component-driven grid has 2.2× the
+branches of the uniform 0.25 mm grid, so its solves are slower, not faster:
+the DC wall time is the operator build (29 s, of which the C++ near terms
+are about 10 s and the row deduplication 9 s; the NumPy near terms took
+200 s), the 1 MHz wall time is the GMRES iterations over 51k branches with a
+precorrection of 53 M non-zeros. The pFFT pays off where the fine cells are a
+small part of the board (the strip line: 42 % of the branches, the same
+loss); a fine pitch chosen to the trace width rather than to 0.1 mm keeps the
+branch count down. The uniform convolution operator stays the choice for
+uniform grids: it is exact to its 24-cell seam and cheaper to build.
 
 ## What is not done
 
@@ -387,8 +398,17 @@ implicit CPU fallback. CuPy 14 builds the sparse LU factors with SciPy
 SuperLU, then uploads the factors and performs each triangular solve on CUDA;
 the result records this as
 `scipy_superlu_factor_cupy_triangular_solve`.
-`max_iterations` means restart cycles on both paths; the CUDA adapter converts
-it to CuPy's total-inner-iteration limit.
+`max_iterations` means restart cycles on both paths. The CUDA adapter runs
+CuPy's GMRES one restart cycle at a time and checks the public saddle-point
+residual between cycles: CuPy judges the left-preconditioned residual, whose
+norm differs from the public one by a problem-dependent factor, so each
+cycle's internal target is the tolerance scaled by the current ratio of the
+two residuals (halved), and the loop stops when the public residual meets
+the tolerance or when that target falls below `100 eps`. Before this the
+adapter aimed three decades below the tolerance, ran every solve to its
+iteration cap and reported `converged=False` with residuals well inside the
+tolerance; at `1e-9` it now converges in three cycles on the test problems,
+matching the CPU currents to `1e-10`.
 
 An undriven copper island is omitted as both nodes and branches. Omitting only
 its KCL columns while retaining its KVL rows allows the dense inductance
