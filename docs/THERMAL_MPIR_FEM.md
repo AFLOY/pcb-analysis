@@ -276,3 +276,7 @@ before.
 - The coarse space is capped at 2,048 unknowns by a dense inverse. Boards
   beyond a few hundred thousand nodes will want a sparse coarse solve or a
   third level.
+- Heat sinks and enclosures are not part of the layered mesh. The planned
+  `VoxelThermalMesh` (same Q1 hexahedra with an active-element mask and
+  convection on any exposed face) and its interface coupling to the board are
+  specified in `GEOMETRY_STEP_VOXELIZE.md`.

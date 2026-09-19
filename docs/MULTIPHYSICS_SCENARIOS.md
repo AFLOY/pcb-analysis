@@ -105,6 +105,10 @@ decade in field and that the FCC Class B limits at 3 m are read correctly.
   (immunity) scenario is provided.
 - The scenarios share one in-plane element grid; the thermal stack may add
   laminate slabs but not refine the footprint.
+- No scenario yet joins the board to a separately meshed heat sink or
+  enclosure. The staggered interface iteration for that
+  (`BoardEnclosureThermalScenario`) is specified in
+  `GEOMETRY_STEP_VOXELIZE.md`.
 
 `examples/coupled_scenarios_demo.py` runs the electro-thermal iteration on a
 two-layer loop and then evaluates its emission, printing the iteration history,

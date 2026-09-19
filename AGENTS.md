@@ -4,7 +4,8 @@
 
 - 設計の正本は`docs/DESIGN.md`と`docs/REQUIREMENTS.md`、各packageの契約は
   `docs/MATRIX_FREE_MPIR_FEM.md`、`docs/SHEET_PEEC.md`、`docs/THERMAL_MPIR_FEM.md`、
-  `docs/EMC_DIPOLE_SUPERPOSITION.md`、`docs/MULTIPHYSICS_SCENARIOS.md`である。
+  `docs/EMC_DIPOLE_SUPERPOSITION.md`、`docs/MULTIPHYSICS_SCENARIOS.md`、
+  `docs/GEOMETRY_STEP_VOXELIZE.md`である。
 - 採用判定はbenchmark dataで行う。同じfixture、同じ精度要求、同じdeviceで現行実装と
   候補を突き合わせ、solve時間、inner/outer反復数、到達残差、解の差、storageを記録する。
   単体testの合格、画像、個別指標の改善だけで採用方式を変更しない。
@@ -25,9 +26,13 @@
   limit。場のsolverを持たない。
 - `src/multiphysics/staggered_coupling/`: 上記を連結するscenarioだけを置く。物理の離散化
   や新しいsolverをここへ書かない。
+- `src/geometry/step_voxelize/`: STEP(OpenCASCADE、`OCP`)の読込、2.5D板の断面
+  ラスタライズ、3D物体のvoxel化、板とvoxelの接触map。solverを持たず、`OCP`は
+  `reader.py`だけがimportし、公開結果は配列とdataclassに限る。
 
 importは`electrical` ← `thermal` ← `multiphysics`、`electrical` ← `emc` ←
-`multiphysics`の一方向であり、`electrical`は他packageをimportしない。package境界を越えて
+`multiphysics`、`electrical`/`thermal` ← `geometry` ← `multiphysics`の一方向であり、
+`electrical`は他packageをimportしない。package境界を越えて
 `_`始まりの名前をimportしない。新しい物理は`src/<physics>/<method+acceleration>/`へ置き、
 既存packageの中へ足さない。
 
