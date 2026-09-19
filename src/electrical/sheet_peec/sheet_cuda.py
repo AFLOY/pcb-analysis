@@ -24,6 +24,7 @@ from .sheet_peec import (
     _components,
     _components_with_terminals,
     _inline_self_inductance,
+    _near_impedance,
     _self_inductance,
     _source_vector,
     _vertical_self_inductance,
@@ -394,6 +395,7 @@ def solve_sheet_case_cuda(
     restart: int = 60,
     device_id: int = 0,
     cupy_module: Any | None = None,
+    preconditioner: str = "near",
 ) -> tuple[SheetSolution, CudaSheetTelemetry]:
     """Solve one sheet case with cuFFT, CuPy sparse algebra, and CUDA GMRES."""
     cp = cupy_module if cupy_module is not None else _import_cupy()
@@ -409,6 +411,8 @@ def solve_sheet_case_cuda(
         raise ValueError("the operator and the mesh must share a shape")
     if len(operator.stackup) != len(mesh.stackup):
         raise ValueError("the operator and the mesh must share a stackup")
+    if preconditioner not in ("near", "diagonal"):
+        raise ValueError("preconditioner must be 'near' or 'diagonal'")
     frequency_hz = float(frequency_hz)
     if not math.isfinite(frequency_hz) or frequency_hz < 0.0:
         raise ValueError("frequency must be finite and non-negative")
@@ -612,31 +616,45 @@ def solve_sheet_case_cuda(
                             ]
                         )
 
-                    full_diagonal_cpu = resistance + 1j * omega * np.concatenate(
-                        [
-                            _inline_self_inductance(mesh, operator),
-                            _vertical_self_inductance(mesh, operator),
-                        ]
-                    )
-                    diagonal = cp.asarray(
-                        full_diagonal_cpu[active_branches]
-                    )
-                    schur = (
-                        reduced.T @ csp.diags(1.0 / diagonal) @ reduced
-                    ).tocsc()
-                    factored = csl.splu(schur)
+                    if preconditioner == "near" and hasattr(operator, "near_inductance"):
+                        # Sparse near-field impedance in the saddle-point
+                        # matrix, factored once (SciPy SuperLU factors, CUDA
+                        # triangular solves as for the Schur complement).
+                        import scipy.sparse as sp
 
-                    def precondition(vector: Any) -> Any:
-                        rhs_current = vector[:branches]
-                        rhs_node = vector[branches:]
-                        node = factored.solve(
-                            rhs_node
-                            + reduced.T @ (rhs_current / diagonal)
+                        near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
+                        saddle_cpu = sp.bmat([[near_cpu, -reduced_cpu], [reduced_cpu.T, None]], format="csc")
+                        factored = csl.splu(csp.csc_matrix(saddle_cpu))
+
+                        def precondition(vector: Any) -> Any:
+                            return factored.solve(vector)
+
+                    else:
+                        full_diagonal_cpu = resistance + 1j * omega * np.concatenate(
+                            [
+                                _inline_self_inductance(mesh, operator),
+                                _vertical_self_inductance(mesh, operator),
+                            ]
                         )
-                        current = (
-                            rhs_current + reduced @ node
-                        ) / diagonal
-                        return cp.concatenate([current, node])
+                        diagonal = cp.asarray(
+                            full_diagonal_cpu[active_branches]
+                        )
+                        schur = (
+                            reduced.T @ csp.diags(1.0 / diagonal) @ reduced
+                        ).tocsc()
+                        factored = csl.splu(schur)
+
+                        def precondition(vector: Any) -> Any:
+                            rhs_current = vector[:branches]
+                            rhs_node = vector[branches:]
+                            node = factored.solve(
+                                rhs_node
+                                + reduced.T @ (rhs_current / diagonal)
+                            )
+                            current = (
+                                rhs_current + reduced @ node
+                            ) / diagonal
+                            return cp.concatenate([current, node])
 
                     right_hand_side = cp.concatenate(
                         [
@@ -678,6 +696,10 @@ def solve_sheet_case_cuda(
                     cycles = 0
                     floor = 100.0 * np.finfo(np.float64).eps
                     while residual > tolerance and cycles < max_iterations:
+                        # Cycles grow from ten inner iterations towards ``restart``:
+                        # a well-preconditioned solve converges in a few tens of
+                        # iterations and must not pay for a full cycle to find out.
+                        cycle_length = min(effective_restart, 10 * 2**cycles)
                         # CuPy judges the left-preconditioned residual; scale its
                         # target by the current ratio of the two residuals so that
                         # meeting it brings the saddle-point residual to the
@@ -694,8 +716,8 @@ def solve_sheet_case_cuda(
                             left_right_hand_side,
                             x0=result,
                             rtol=target,
-                            restart=effective_restart,
-                            maxiter=effective_restart,
+                            restart=cycle_length,
+                            maxiter=cycle_length,
                             callback=count,
                             callback_type="pr_norm",
                         )

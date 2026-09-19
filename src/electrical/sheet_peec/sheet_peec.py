@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -466,6 +466,7 @@ def solve_sheet_case(
     tolerance: float = 1e-10,
     max_iterations: int = 400,
     restart: int = 60,
+    preconditioner: str = "near",
 ) -> SheetSolution:
     """Solve one excitation of the mesh.
 
@@ -474,9 +475,18 @@ def solve_sheet_case(
     ``A^T Y A V = I_source``, the familiar nodal admittance form.  At zero
     frequency ``Z`` is diagonal and that reduction is exact and direct.  Above
     it, ``Z`` couples every branch to every other and is applied through the
-    operator's transforms, so the reduction is carried out by a Krylov method
-    with the diagonal of ``Z`` as the preconditioner.
+    operator's transforms, so the reduction is carried out by a Krylov method.
+
+    ``preconditioner="near"`` (default) factors the saddle-point matrix with
+    ``Z`` replaced by ``R + j omega L_near``, the exact partial inductance of
+    each branch with itself and its neighbours within the operator's
+    preconditioner radius (``operator.near_inductance(mesh)``), by sparse LU;
+    ``"diagonal"`` keeps only the self terms, which is exactly solvable
+    through a Schur complement but leaves every mutual term to the Krylov
+    iterations.
     """
+    if preconditioner not in ("near", "diagonal"):
+        raise ValueError("preconditioner must be 'near' or 'diagonal'")
     if operator.shape != mesh.shape:
         raise ValueError("the operator and the mesh must share a shape")
     if len(operator.stackup) != len(mesh.stackup):
@@ -619,27 +629,9 @@ def solve_sheet_case(
             [impedance(currents) - reduced @ voltages, reduced.T @ currents]
         )
 
-    # Preconditioner: the same system with Z replaced by its diagonal, which is
-    # exactly solvable and, because the self term dominates the coupling,
-    # close.  Its Schur complement is the sparse nodal admittance matrix, so it
-    # is factored once and reused for every iteration.
-    full_diagonal = resistance + 1j * omega * np.concatenate(
-        [
-            _inline_self_inductance(mesh, operator),
-            _vertical_self_inductance(mesh, operator),
-        ]
+    precondition = _build_preconditioner(
+        mesh, operator, preconditioner, omega, resistance, active_branches, reduced, branches
     )
-    diagonal = full_diagonal[active_branches]
-    schur = (reduced.T @ sp.diags(1.0 / diagonal) @ reduced).tocsc()
-    factored = spla.splu(schur)
-
-    def precondition(vector: np.ndarray) -> np.ndarray:
-        rhs_current = vector[:branches]
-        rhs_node = vector[branches:]
-        # Block factorisation of [[D, -A], [A^T, 0]].
-        node = factored.solve(rhs_node + reduced.T @ (rhs_current / diagonal))
-        current = (rhs_current + reduced @ node) / diagonal
-        return np.concatenate([current, node])
 
     right_hand_side = np.concatenate(
         [np.zeros(branches, dtype=np.complex128), injected[keep]]
@@ -681,6 +673,55 @@ def solve_sheet_case(
         grounded_node=grounded,
         undriven_nodes=dropped,
     )
+
+
+def _near_impedance(
+    mesh: SheetMesh, operator: Any, omega: float, resistance: np.ndarray, active_branches: np.ndarray
+) -> sp.csr_matrix:
+    """``R + j omega L_near`` over the active branches: the sparse near-field impedance."""
+
+    near = operator.near_inductance(mesh)
+    active_index = np.flatnonzero(active_branches)
+    near = near[active_index][:, active_index]
+    return (sp.diags(resistance[active_branches]) + 1j * omega * near).tocsr()
+
+
+def _build_preconditioner(
+    mesh: SheetMesh,
+    operator: Any,
+    kind: str,
+    omega: float,
+    resistance: np.ndarray,
+    active_branches: np.ndarray,
+    reduced: sp.csr_matrix,
+    branches: int,
+) -> Callable[[np.ndarray], np.ndarray]:
+    """The approximate inverse of the saddle-point matrix used by the inner GMRES."""
+
+    if kind == "near" and hasattr(operator, "near_inductance"):
+        impedance = _near_impedance(mesh, operator, omega, resistance, active_branches)
+        saddle = sp.bmat([[impedance, -reduced], [reduced.T, None]], format="csc")
+        factored = spla.splu(saddle)
+        return factored.solve
+    # The same system with Z replaced by its diagonal, which is exactly
+    # solvable: its Schur complement is the sparse nodal admittance matrix,
+    # factored once and reused for every iteration.
+    full_diagonal = resistance + 1j * omega * np.concatenate(
+        [_inline_self_inductance(mesh, operator), _vertical_self_inductance(mesh, operator)]
+    )
+    diagonal = full_diagonal[active_branches]
+    schur = (reduced.T @ sp.diags(1.0 / diagonal) @ reduced).tocsc()
+    factored = spla.splu(schur)
+
+    def precondition(vector: np.ndarray) -> np.ndarray:
+        rhs_current = vector[:branches]
+        rhs_node = vector[branches:]
+        # Block factorisation of [[D, -A], [A^T, 0]].
+        node = factored.solve(rhs_node + reduced.T @ (rhs_current / diagonal))
+        current = (rhs_current + reduced @ node) / diagonal
+        return np.concatenate([current, node])
+
+    return precondition
 
 
 def _vertical_self_inductance(

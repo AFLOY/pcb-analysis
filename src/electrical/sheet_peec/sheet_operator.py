@@ -32,6 +32,8 @@ boards with few layers, which is what these are.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 
 from .sheet_inductance import (
@@ -298,6 +300,67 @@ class SheetInductanceOperator:
             for level in range(len(self.vertical_levels))
         ]
         return flux_x, flux_y, self._convolve_z(padded_z)
+
+    def near_inductance(self, mesh: Any, radius_cells: int = 1) -> Any:
+        """Exact partial inductance between branches within ``radius_cells`` of each other, in mesh branch order.
+
+        Read off the convolution tables: the coupling of two like-directed
+        branches ``(dr, dc)`` apart on layers ``(a, b)`` is one table entry.
+        Self terms included, axes uncoupled, vertical branches among
+        themselves.  This is the sparse ``L`` of the solver's near-field
+        preconditioner.
+        """
+
+        import scipy.sparse as sp
+
+        rows, cols = self.shape
+        layer_count = len(self.stackup)
+        tables = {
+            key: np.fft.irfft2(spectrum, s=self.padded) for key, spectrum in self._kernels.items()
+        }
+        tables_z = {key: np.fft.irfft2(spectrum, s=self.padded) for key, spectrum in self._kernels_z.items()}
+        padded_rows, padded_cols = self.padded
+        count = mesh.branch_count
+        entries_i: list[int] = []
+        entries_j: list[int] = []
+        values: list[float] = []
+        offset = 0
+        span = range(-radius_cells, radius_cells + 1)
+        for axis, group in (("x", mesh.branch_x), ("y", mesh.branch_y)):
+            index = {branch: position + offset for position, branch in enumerate(group)}
+            for layer, row, col in group:
+                source = index[(layer, row, col)]
+                for other in range(layer_count):
+                    key = (axis, min(layer, other), max(layer, other))
+                    table = tables[key]
+                    for dr in span:
+                        for dc in span:
+                            target = index.get((other, row + dr, col + dc))
+                            if target is None:
+                                continue
+                            entries_i.append(source)
+                            entries_j.append(target)
+                            values.append(float(table[dr % padded_rows, dc % padded_cols]))
+            offset += len(group)
+        levels = list(self.vertical_levels)
+        if mesh.via_branches and levels:
+            index_of = {key: position for position, key in enumerate(levels)}
+            index = {
+                (index_of[(via.lower_layer, via.upper_layer)], via.row, via.col): position + offset
+                for position, via in enumerate(mesh.via_branches)
+            }
+            for (level, row, col), source in index.items():
+                for other in range(len(levels)):
+                    table = tables_z[(min(level, other), max(level, other))]
+                    for dr in span:
+                        for dc in span:
+                            target = index.get((other, row + dr, col + dc))
+                            if target is None:
+                                continue
+                            entries_i.append(source)
+                            entries_j.append(target)
+                            values.append(float(table[dr % padded_rows, dc % padded_cols]))
+        return sp.csr_matrix((values, (entries_i, entries_j)), shape=(count, count))
 
     def dense_matrix(self, axis: str = "x") -> np.ndarray:
         """Assemble the same operator as a dense matrix, for checking.

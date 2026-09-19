@@ -167,6 +167,7 @@ class PfftSheetInductanceOperator:
         order: int = 3,
         near_radius_cells: int = 3,
         native: bool | None = None,
+        preconditioner_radius_cells: int = 1,
     ) -> None:
         if order < 1 or order > 5:
             raise ValueError("order must lie in [1, 5]")
@@ -179,6 +180,11 @@ class PfftSheetInductanceOperator:
         self.stackup: SheetStackup = mesh.stackup
         self.order = int(order)
         self.near_radius_cells = int(near_radius_cells)
+        if preconditioner_radius_cells < 0 or preconditioner_radius_cells > near_radius_cells:
+            raise ValueError("preconditioner_radius_cells must lie in [0, near_radius_cells]")
+        self.preconditioner_radius_cells = int(preconditioner_radius_cells)
+        self._near_exact: dict[str, sp.csr_matrix] = {}
+        self._near_exact_z: sp.csr_matrix | None = None
         # The C++ near-field kernel when built, unless native=False; native=True demands it.
         if native and _native is None:
             raise ImportError("the sheet pFFT native extension is not built; run python -m electrical.sheet_peec.native.build")
@@ -358,8 +364,14 @@ class PfftSheetInductanceOperator:
         ef, ei = pairs["exact_first"], pairs["exact_inverse"]
         gf, gi = pairs["grid_first"], pairs["grid_inverse"]
         blocks = []
+        near_blocks = []
         self_values = np.zeros((len(layers), count))
         diagonal_pairs = bi == bj
+        reach = self.preconditioner_radius_cells * self.grid.pitch_m * (1.0 + 1.0e-9)
+        fhx, fhy = half_x.reshape(-1), half_y.reshape(-1)
+        near_mask = (np.abs(flat_cx[bj] - flat_cx[bi]) <= reach + fhx[bi] + fhx[bj]) & (
+            np.abs(flat_cy[bj] - flat_cy[bi]) <= reach + fhy[bi] + fhy[bj]
+        )
         # Both terms depend on the layer pair only through the separation (and
         # the exact one through the two thicknesses), so each distinct
         # combination is evaluated once and reused across layer pairs.
@@ -389,9 +401,12 @@ class PfftSheetInductanceOperator:
                 exact = exact_cache[key][ei]
                 approximate = grid_cache[sep][gi]
                 blocks.append(sp.csr_matrix((exact - approximate, (bi, bj)), shape=(count, count)))
+                near_blocks.append(sp.csr_matrix((exact[near_mask], (bi[near_mask], bj[near_mask])), shape=(count, count)))
                 if a == b:
                     self_values[a, bi[diagonal_pairs]] = exact[diagonal_pairs]
-        correction = sp.bmat([[blocks[a * len(layers) + b] for b in range(len(layers))] for a in range(len(layers))], format="csr")
+        n = len(layers)
+        correction = sp.bmat([[blocks[a * n + b] for b in range(n)] for a in range(n)], format="csr")
+        self._near_exact[axis] = sp.bmat([[near_blocks[a * n + b] for b in range(n)] for a in range(n)], format="csr")
         return correction, self_values
 
     def _build_vertical_correction(self, centre_x: np.ndarray, centre_y: np.ndarray) -> tuple[sp.csr_matrix, np.ndarray]:
@@ -409,8 +424,13 @@ class PfftSheetInductanceOperator:
         fx, fy = centre_x.reshape(-1), centre_y.reshape(-1)
         levels = len(self.vertical_levels)
         blocks = []
+        near_blocks = []
         self_values = np.zeros((levels, count))
         diagonal_pairs = bi == bj
+        reach = self.preconditioner_radius_cells * self.grid.pitch_m * (1.0 + 1.0e-9)
+        near_mask = (np.abs(fx[bj] - fx[bi]) <= reach + (fhx[bi] + fhx[bj]) / 2.0) & (
+            np.abs(fy[bj] - fy[bi]) <= reach + (fhy[bi] + fhy[bj]) / 2.0
+        )
         grid_cache: dict[float, np.ndarray] = {}
         ui, uj = bi[ef], bj[ef]
         gi_, gj_ = bi[gf], bj[gf]
@@ -430,9 +450,11 @@ class PfftSheetInductanceOperator:
                     grid_cache[sep] = self._grid_pair_coupling(self._projection_z, gi_, gj_, sep)
                 approximate = (span_a * span_b * grid_cache[sep])[gi]
                 blocks.append(sp.csr_matrix((exact - approximate, (bi, bj)), shape=(count, count)))
+                near_blocks.append(sp.csr_matrix((exact[near_mask], (bi[near_mask], bj[near_mask])), shape=(count, count)))
                 if a == b:
                     self_values[a, bi[diagonal_pairs]] = exact[diagonal_pairs]
         correction = sp.bmat([[blocks[a * levels + b] for b in range(levels)] for a in range(levels)], format="csr")
+        self._near_exact_z = sp.bmat([[near_blocks[a * levels + b] for b in range(levels)] for a in range(levels)], format="csr")
         return correction, self_values
 
     # -------------------------------------------------------------------- apply
@@ -536,6 +558,47 @@ class PfftSheetInductanceOperator:
         return np.asarray(
             [self._self_z[index_of[(via.lower_layer, via.upper_layer)], via.row * cols + via.col] for via in mesh.via_branches]
         )
+
+    def near_inductance(self, mesh: SheetMesh) -> sp.csr_matrix:
+        """Exact partial inductance between branches within the preconditioner radius, in mesh branch order.
+
+        Self terms included; branches of different axes do not couple; vertical
+        branches couple among themselves.  This is the sparse ``L`` the
+        solver's near-field preconditioner adds to the resistances.
+        """
+
+        count = mesh.branch_count
+        rows_i: list[np.ndarray] = []
+        cols_j: list[np.ndarray] = []
+        values: list[np.ndarray] = []
+        offset = 0
+        for axis, group in (("x", mesh.branch_x), ("y", mesh.branch_y)):
+            n_cols = self._geometry[axis][0].shape[1]
+            per_layer = self._geometry[axis][0].size
+            flat = np.asarray([layer * per_layer + row * n_cols + col for layer, row, col in group], dtype=np.int64)
+            lookup = np.full(len(self.stackup) * per_layer, -1, dtype=np.int64)
+            lookup[flat] = np.arange(flat.size) + offset
+            block = self._near_exact[axis].tocoo()
+            keep = (lookup[block.row] >= 0) & (lookup[block.col] >= 0)
+            rows_i.append(lookup[block.row[keep]])
+            cols_j.append(lookup[block.col[keep]])
+            values.append(block.data[keep])
+            offset += flat.size
+        if mesh.via_branches and self._near_exact_z is not None:
+            rows, cols = self.shape
+            index_of = {key: position for position, key in enumerate(self.vertical_levels)}
+            flat = np.asarray(
+                [index_of[(via.lower_layer, via.upper_layer)] * rows * cols + via.row * cols + via.col for via in mesh.via_branches],
+                dtype=np.int64,
+            )
+            lookup = np.full(len(self.vertical_levels) * rows * cols, -1, dtype=np.int64)
+            lookup[flat] = np.arange(flat.size) + offset
+            block = self._near_exact_z.tocoo()
+            keep = (lookup[block.row] >= 0) & (lookup[block.col] >= 0)
+            rows_i.append(lookup[block.row[keep]])
+            cols_j.append(lookup[block.col[keep]])
+            values.append(block.data[keep])
+        return sp.csr_matrix((np.concatenate(values), (np.concatenate(rows_i), np.concatenate(cols_j))), shape=(count, count))
 
     def dense_matrix(self, axis: str = "x") -> np.ndarray:
         """Assemble the in-plane operator of one axis densely, for checks on small meshes."""
