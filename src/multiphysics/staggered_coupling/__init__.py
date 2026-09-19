@@ -53,6 +53,7 @@ from .scenarios import (
     SheetPeecEmissionResult,
     SheetPeecEmissionScenario,
     ThermalScenario,
+    ThermalTransientScenario,
     run_scenario,
     run_scenarios,
 )
@@ -84,6 +85,7 @@ __all__ = [
     "SheetPeecEmissionScenario",
     "TemperatureFixedPoint",
     "ThermalScenario",
+    "ThermalTransientScenario",
     "conductivity_at_temperature",
     "electrical_layer_temperature_k",
     "evaluate_emission",

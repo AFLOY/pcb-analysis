@@ -7,6 +7,7 @@ dispatches on its type and returns the matching result.  The chains are:
 |---|---|---|
 | ``ElectricalScenario`` | DC conduction | — |
 | ``ThermalScenario`` | heat conduction | — |
+| ``ThermalTransientScenario`` | backward-Euler heat conduction over a time schedule | — |
 | ``ElectroThermalScenario`` | both, iterated | Joule heat → T → σ(T) |
 | ``ElectroEmissionScenario`` | DC conduction, dipole fields | J → radiated field |
 | ``ElectroThermalEmissionScenario`` | all three | σ(T)-converged J → radiated field |
@@ -33,7 +34,10 @@ from electrical.matrix_free_mpir_fem import (
 from thermal.matrix_free_mpir_fem import (
     ThermalConductionProblem,
     ThermalConductionSolution,
+    TimeSchedule,
+    TransientThermalSolution,
     solve_thermal_conduction,
+    solve_thermal_transient,
 )
 
 from .board_enclosure import (
@@ -69,6 +73,18 @@ class ElectricalScenario:
 @dataclass(frozen=True)
 class ThermalScenario:
     problem: ThermalConductionProblem
+    config: MPIRConfig | None = None
+
+
+@dataclass(frozen=True)
+class ThermalTransientScenario:
+    """Heat conduction marched from ``initial_temperature_k`` through ``schedule``."""
+
+    problem: ThermalConductionProblem
+    schedule: TimeSchedule
+    initial_temperature_k: Any = None
+    until_steady: bool = False
+    store: str = "all"
     config: MPIRConfig | None = None
 
 
@@ -144,6 +160,20 @@ def _(scenario: ElectricalScenario, *, backend: str | None = None, device_id: in
 def _(scenario: ThermalScenario, *, backend: str | None = None, device_id: int = 0) -> ThermalConductionSolution:
     return solve_thermal_conduction(
         scenario.problem, config=scenario.config, backend=backend, device_id=device_id
+    )
+
+
+@run_scenario.register
+def _(scenario: ThermalTransientScenario, *, backend: str | None = None, device_id: int = 0) -> TransientThermalSolution:
+    return solve_thermal_transient(
+        scenario.problem,
+        scenario.schedule,
+        initial_temperature_k=scenario.initial_temperature_k,
+        until_steady=scenario.until_steady,
+        store=scenario.store,
+        config=scenario.config,
+        backend=backend,
+        device_id=device_id,
     )
 
 
