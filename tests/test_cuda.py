@@ -15,7 +15,7 @@ from electrical.dice_peec.cuda_pypeec import (
     voxel_cache_bytes,
 )
 from electrical.dice_peec.delta_peec import SparseDelta
-from electrical.dice_peec._bench_utils import (
+from dice_bench_utils import (  # tests-only helpers, next to this file
     _select_candidate,
     ranking_consistent,
     relative_difference,
