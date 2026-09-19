@@ -76,8 +76,8 @@ install a specific release without PyPI, point pip at the release asset or
 at the tag:
 
 ```bash
-pip install https://github.com/AFLOY/pcb-analysis/releases/download/v0.8.0/pcb_analysis-0.8.0-py3-none-any.whl
-pip install 'git+https://github.com/AFLOY/pcb-analysis.git@v0.8.0'
+pip install https://github.com/AFLOY/pcb-analysis/releases/download/v0.8.1/pcb_analysis-0.8.1-py3-none-any.whl
+pip install 'git+https://github.com/AFLOY/pcb-analysis.git@v0.8.1'
 ```
 
 The release tag has to match the version in `pyproject.toml`.
@@ -101,6 +101,20 @@ and the voxel contract (`voxel_peec` → `contract`) moved to
 are not re-exported; update imports as
 `from electrical.sheet_peec import solve_sheet_case` and
 `from electrical.voxel_peec import CudaPyPeecExecutor`.
+
+Version 0.8.1 adds, without moving any import path: surface-to-ambient
+radiation and backward-Euler transient conduction in `thermal`; the `σ(T)`
+loop around the board/body interface (`ElectroThermalEnclosureScenario`);
+graded tensor grids (`electrical.matrix_free_mpir_fem.grid`) in the thermal
+and DC solvers, the section rasteriser and the sheet PEEC (precorrected FFT,
+`electrical.sheet_peec.sheet_pfft`, with a C++ near-field kernel built like
+the other native modules); component-driven grid refinement from KiCad STEP
+exports; the plane-opt problem schema `v2` whose grid carries `x_edges_mm` /
+`y_edges_mm` (v1 still accepted); a near-field preconditioner that is now the
+default of the sheet solves (`preconditioner="diagonal"` restores the old
+one); and a CUDA sheet solve that stops on the requested tolerance.
+`LayeredThermalMesh.pitch_x_m` / `pitch_y_m` and `LayeredPCBMesh.pitch_x_m` /
+`pitch_y_m` are now per-cell arrays (scalars are still accepted on input).
 
 ### From a checkout, CPU only
 

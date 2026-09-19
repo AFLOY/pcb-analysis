@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pcb-analysis"
-version = "0.8.0"
+version = "0.8.1"
 description = "CUDA-accelerated PEEC, matrix-free FEM, and radiated-emission evaluation for electrical, thermal, and EMC PCB analysis"
 readme = "README.md"
 license = { file = "LICENSE" }
