@@ -24,11 +24,16 @@ The front end is:
 - Newton cooling on every exposed face of the active elements
   (`ExposedFaceConvection`, restrictable by direction), and a per-face
   ambient temperature on the top and bottom boundaries, which is how a
-  separately meshed body presents its contact temperature to the board.
+  separately meshed body presents its contact temperature to the board;
+- grey surface-to-ambient radiation from the top or bottom face
+  (`RadiationBoundary`) or from every exposed face (`ExposedFaceRadiation`),
+  solved by Newton's method on the `T⁴` term inside
+  `solve_thermal_conduction` (see "Radiation").
 
-Transient conduction, radiation, and temperature-dependent conductivity are
-not implemented. The nonlinear coupling back into the electrical
-solve (copper resistivity rising with temperature) is left to the caller.
+Transient conduction, temperature-dependent conductivity and view factors
+between surfaces are not implemented. The nonlinear coupling back into the
+electrical solve (copper resistivity rising with temperature) is left to
+`multiphysics.staggered_coupling`.
 
 ## Discretisation
 
@@ -98,6 +103,8 @@ The heat flux is `-k ∇T` at the element centre from the trilinear gradient.
 |---|---|
 | `total_heat_input_w` | sum of element heat and nodal sources |
 | `convective_heat_w` | heat removed by each convection boundary, in problem order |
+| `radiative_heat_w` | heat removed by each radiation boundary, in problem order |
+| `radiation_iterations`, `radiation_converged`, `radiation_change_k` | Newton steps on the radiation term, whether the last step moved the nodes less than the tolerance, and by how much |
 | `fixed_temperature_heat_w` | heat absorbed by the fixed-temperature nodes |
 | `heat_balance_error_w` | input minus removal; equals minus the solver residual summed over free nodes |
 
@@ -125,6 +132,56 @@ free-node temperature and continues from the current iterate. The remaining
 unknown is the small in-plane variation, whose residual is accurate, and the
 solve finishes in a few more outer steps. The returned `MPIRResult` sums the
 iteration counts of both stages and concatenates their histories.
+
+## Radiation
+
+A surface at `T` facing an environment at `T_amb` with emissivity `ε` loses
+`q = ε σ (T⁴ − T_amb⁴)`. `RadiationBoundary(side, ε, T_amb)` puts it on the
+top or bottom face with per-face arrays allowed, `ExposedFaceRadiation(ε,
+T_amb, directions)` on every exposed face of the active elements with
+per-element arrays allowed; both live in `problem.radiation`. The problem is
+then nonlinear and `solve_thermal_conduction` iterates: each radiating face is
+replaced by the Newton linearisation at the current iterate `T_k`,
+
+```text
+q ≈ h_k (T − T_eff,k),   h_k = 4 ε σ T_k³,   T_eff,k = T_k − (T_k⁴ − T_amb⁴) / (4 T_k³),
+```
+
+which is an ordinary `ConvectionBoundary` / `ExposedFaceConvection` with a
+per-face coefficient and ambient (both accept arrays for this), the linear
+problem is solved warm-started, and the two repeat until the nodes move less
+than `radiation_tolerance_k` (default `1e-4 K`, at most
+`radiation_max_iterations = 25`). Conduction is linear, so this is Newton's
+method on the whole problem. The secant form `h = ε σ (T² + T_amb²)(T + T_amb)`
+with the true ambient was not used: its fixed-point gain is about
+`−3 (T − T_amb) / T`, so it oscillates once the rise exceeds a third of the
+absolute temperature, while Newton converges monotonically from the ambient
+start and needs one confirming step when warm-started from the answer.
+
+The linearised coefficient is built each step from the mean corner temperature
+of the face (top/bottom) or of the element (exposed faces); the operator and
+its two-level coarse matrix are rebuilt per step. The model is grey, diffuse
+and sees only its ambient: no view factors between surfaces, so a board inside
+a case radiates to the case's *given* inner temperature, not to its computed
+field.
+
+Measured on a uniformly heated 8 × 10 × 1 mm plate radiating from its top
+face, `ε = 0.9`, `T_amb = 298.15 K`, against the analytic surface temperature
+`(T_amb⁴ + P / (ε σ A))^¼` (`ELECTROTHERMAL_ENCLOSURE_RESULTS.json`,
+`experiments/electrothermal_enclosure_acceptance.py`):
+
+| Boundary | P (W) | Surface rise (K) | Relative error | Newton steps | Heat balance (W) |
+|---|---|---|---|---|---|
+| RadiationBoundary top | 0.05 | 78.6 | -2.5e-14 | 5 | 1.1e-14 |
+| ExposedFaceRadiation +z | 0.05 | 78.6 | 6.9e-12 | 5 | 1.4e-14 |
+| RadiationBoundary top | 0.60 | 329.2 | -5.4e-14 | 9 | 1.4e-13 |
+| ExposedFaceRadiation +z | 0.60 | 329.2 | 3.4e-10 | 9 | 1.4e-13 |
+| RadiationBoundary top | 3.00 | 630.2 | 1.5e-11 | 13 | -1.8e-10 |
+| ExposedFaceRadiation +z | 3.00 | 630.2 | 3.8e-09 | 13 | -2.8e-14 |
+
+Decision: adopted. The bottom of the plate sits `q t / 2k` above the surface,
+as it must for volumetric heating, and the radiated heat equals the input to
+FP64 rounding.
 
 ## Two-level preconditioner
 
@@ -298,9 +355,10 @@ board with a via field.
 |---|---|
 | `mesh.py` | `LayeredThermalMesh`, active mask, exposed faces, corner views, unit element matrices |
 | `boundaries.py` | `ConvectionBoundary`, `ExposedFaceConvection`, `HeatSource`, each lumping its own nodal conductance and load |
+| `radiation.py` | `RadiationBoundary`, `ExposedFaceRadiation`, their Newton linearisation into the convection types |
 | `problem.py` | `ThermalConductionProblem` validation |
 | `operator.py` | matrix-free hex Q1 operator on NumPy, CuPy or C++, RHS and heat-budget post-processing |
-| `solve.py` | `solve_thermal_conduction`, `ThermalConductionSolution` |
+| `solve.py` | `solve_thermal_conduction` (linear solve, Newton loop over the radiation boundaries), `ThermalConductionSolution` |
 | `two_level.py` | Jacobi + aggregation coarse correction on a layered node grid |
 | `cuda.py` | fused node-owned gather kernel for the float32 action |
 | `native_hex.py`, `native/` | opt-in C++ action and two-level inner PCG (built in place) |
@@ -319,9 +377,13 @@ before.
 - Structured rectangular mesh; pads and barrels are element columns, curved
   bodies are voxel staircases whose partially filled voxels carry a
   fill-scaled conductivity.
-- Convection is a film coefficient per face; no buoyancy or radiation.
-- Linear steady state only. Radiation and `k(T)` require a Newton loop around
-  this solver; the thermal-electrical feedback through `ρ(T)` likewise.
+- Convection is a film coefficient per face; no buoyancy correlation, so a
+  natural-convection `h(ΔT, orientation)` has to be iterated by the caller.
+- Radiation is surface-to-ambient only (no view factors, no enclosure
+  radiosity); a board inside a case radiates to a given case temperature.
+- Steady state only, with `k` independent of temperature; `k(T)` would join
+  the radiation Newton loop. The thermal-electrical feedback through `ρ(T)`
+  lives in `multiphysics.staggered_coupling`.
 - The coarse space is capped at 2,048 unknowns by a dense inverse. Boards
   beyond a few hundred thousand nodes will want a sparse coarse solve or a
   third level.

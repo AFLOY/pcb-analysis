@@ -15,6 +15,7 @@ fields between the solvers and iterates where a field feeds back.
 | `ElectroThermalEmissionScenario` | all three | `σ(T)`-converged `J` → field; cold `J` → field for comparison |
 | `SheetPeecEmissionScenario` | sheet PEEC at each frequency, dipole superposition | `J(f)` → field |
 | `BoardEnclosureThermalScenario` | board conduction and one conduction solve per body, iterated | contact heat → body `T` → board Robin ambient |
+| `ElectroThermalEnclosureScenario` | DC conduction, then board and bodies, iterated | Joule heat → board/body `T` (contact exchange, radiation) → `σ(T)`, via `R(T)` |
 
 `run_scenario` dispatches on the dataclass type; `run_scenarios` runs a list.
 The `backend` argument reaches every solver (`"cpu"`, `"cuda"`, `"auto"`).
@@ -118,6 +119,44 @@ partitioned iteration; the partitioned form is adopted for what the single
 grid cannot express (a body at another pitch or origin, several bodies, a
 body far larger than the board), not for speed.
 
+## σ(T) around the board and its bodies
+
+`ElectroThermalEnclosureScenario(electro_thermal, bodies)` wraps the interface
+iteration above in the copper resistivity loop: an electrical solve gives the
+Joule heat, `run_board_enclosure_thermal` solves the board *and* the bodies to
+a common contact temperature, the copper conductivity and via resistances
+follow the board temperature (the same `TemperatureFixedPoint` with Aitken
+relaxation as `ElectroThermalScenario`), repeat. Each interface iteration is
+warm-started from the previous outer step (`initial=`), so after the first
+pass it costs two to four board/body solves. Radiating faces on the board or
+on a body (`radiation=` on the scenario and on the body problems) are solved
+inside every thermal solve by the Newton loop of `solve_thermal_conduction`,
+so one outer loop closes `σ(T)`, the contact exchange and radiation together.
+
+### Verification
+
+`tests/test_electro_thermal_enclosure.py` and
+`experiments/electrothermal_enclosure_acceptance.py` drive a two-layer 6 A
+loop (0.5 mm grid, 35 µm copper) with a 6 × 2 × 3 mm aluminium block on a
+1 µm, 0.01 W/mK interface, once as one masked electro-thermal mesh
+(`ElectroThermalScenario`, the reference) and once through the contact map,
+with and without `ε = 0.9` radiation from the board top, the board edges and
+the block. Adopted measurement `ELECTROTHERMAL_ENCLOSURE_RESULTS.json`
+(Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz):
+
+| Radiation | Rise (K) | Outer iterations ref / part | Interface iterations per outer step | Loss ratio ref / part | Board diff (K) | Sink diff (K) | Wall ref / part (ms) |
+|---|---|---|---|---|---|---|---|
+| no | 199.0 | 6 / 6 | 6, 6, 4, 4, 2, 2 | 1.7858 / 1.7859 | 4.1e-02 | 3.6e-02 | 1604 / 4370 |
+| yes | 104.7 | 7 / 7 | 9, 8, 6, 5, 4, 3, 2 | 1.4138 / 1.4139 | 1.9e-02 | 1.5e-02 | 3917 / 13465 |
+
+Decision: adopted; every difference is below `3e-3` of the rise and the loss
+ratios agree to `2e-3`. Radiation lowers the rise of this small, mostly
+radiating assembly from 199 K to 105 K and the loss increase from 79 % to 41 %.
+The partitioned route is 2.7 to 3.4 times slower than the single mesh here, as
+for the thermal-only case; it is adopted for bodies the single grid cannot
+express, not for speed. The residual difference is the monolithic mesh's cooled
+interface sliver, which the contact model omits.
+
 ## Emission scenarios
 
 `ElectroEmissionScenario` uses one DC solve as a phasor at every frequency of
@@ -157,12 +196,16 @@ decade in field and that the FCC Class B limits at 3 m are read correctly.
   current pattern is frequency-independent. Use `SheetPeecEmissionScenario`
   where skin and proximity effects matter, at the cost of one sheet solve
   per frequency.
-- Radiation does not feed back into the currents, and no susceptibility
-  (immunity) scenario is provided.
+- Electromagnetic radiation does not feed back into the currents, and no
+  susceptibility (immunity) scenario is provided.
 - The scenarios share one in-plane element grid; the thermal stack may add
   laminate slabs but not refine the footprint.
-- `BoardEnclosureThermalScenario` is thermal only; wrapping it in the
-  copper `σ(T)` loop of `ElectroThermalScenario` is the next increment.
+- Thermal radiation is surface-to-ambient (see `THERMAL_MPIR_FEM.md`): a
+  board inside a case radiates to a given case temperature, not to the case's
+  computed field.
+- The thermal solves are steady; a transient (0 s to steady state) would add
+  a lumped heat capacity to the operator diagonal and time-step the same
+  loop, and is not implemented.
 - The contact model carries no in-plane conduction inside the joint and no
   cooling of the joint's edge; a thick or conductive interface material
   belongs in the body mesh instead.

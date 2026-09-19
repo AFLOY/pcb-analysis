@@ -25,8 +25,8 @@
   計測型2つを`dice_peec.controller`からimportする以外に`electrical`内の依存は持たない。
 - `src/electrical/matrix_free_mpir_fem/`: MPIR solverとNumPy/CuPy runtime、Q1 DC伝導、
   2D周波数領域Maxwell、fused CUDA kernel。solverとruntimeはここが唯一の所有者である。
-- `src/thermal/matrix_free_mpir_fem/`: 定常熱伝導の離散化、二段preconditioner、CUDA
-  kernel、電気→熱のJoule loss写像。solverとruntimeは`electrical`からimportし複製しない。
+- `src/thermal/matrix_free_mpir_fem/`: 定常熱伝導の離散化、対流・輻射(Newton線形化)境界、
+  二段preconditioner、CUDA kernel、電気→熱のJoule loss写像。solverとruntimeは`electrical`からimportし複製しない。
 - `src/emc/tiled_dipole_superposition/`: 電流分布を読むadapter、dipole場、遠方界、規格
   limit。場のsolverを持たない。
 - `src/multiphysics/staggered_coupling/`: 上記を連結するscenarioだけを置く。物理の離散化
