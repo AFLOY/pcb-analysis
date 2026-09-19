@@ -162,3 +162,44 @@ def test_step_copper_agrees_with_plane_opt_away_from_edges_and_drills(exported, 
     thermal = board_thermal_mesh(raster)
     assert thermal.mesh.element_grid_shape == (3, rows, cols)
     assert thermal.mesh.active.mean() > 0.99
+
+
+def _library_model_present() -> bool:
+    from geometry.cad_import import default_kicad_model_dir
+
+    directory = default_kicad_model_dir()
+    return directory is not None and (directory / "Capacitor_SMD.3dshapes" / "C_0603_1608Metric.step").is_file()
+
+
+@pytest.mark.skipif(not _library_model_present(), reason="needs the KiCad 3D model library (C_0603_1608Metric.step)")
+def test_component_solids_bind_to_footprints_by_reference(tmp_path) -> None:
+    """KiCad names each footprint model by its reference designator and places it at the footprint origin."""
+
+    from geometry.cad_import import default_kicad_model_dir, kicad_component_solids, read_kicad_footprints
+
+    path = export_kicad_step(
+        BOARD, tmp_path / "power_module_components.step", model_dir=default_kicad_model_dir(),
+        extra_args=("--no-dnp",),
+    )
+    model = load_step(path)
+    footprints = read_kicad_footprints(BOARD)
+    components = kicad_component_solids(model)
+
+    # The library holds the 0603 chip models; parts without a resolvable model are skipped by kicad-cli.
+    with_library_model = {
+        reference for reference, footprint in footprints.items()
+        if footprint.footprint in ("Capacitor_SMD:C_0603_1608Metric", "Resistor_SMD:R_0603_1608Metric")
+    }
+    assert with_library_model and with_library_model <= set(components)
+    assert set(components) <= set(footprints)
+
+    laminate = max((s for s in model.solids if s.name.split("/")[1].startswith("=>")), key=lambda s: s.volume_m3)
+    board_top_mm = laminate.bounds_m[1][2] / 1e-3
+    for reference in sorted(with_library_model):
+        lo, hi = model.bounds_m(components[reference])
+        centre_mm = (lo + hi) / 2 / 1e-3
+        x_mm, y_mm = footprints[reference].step_xy_mm
+        assert math.hypot(centre_mm[0] - x_mm, centre_mm[1] - y_mm) < 0.05, reference
+        # F.Cu parts stand on the board: above the laminate, within the copper and mask thickness.
+        assert footprints[reference].layer == "F.Cu"
+        assert board_top_mm <= lo[2] / 1e-3 <= board_top_mm + 0.1, reference

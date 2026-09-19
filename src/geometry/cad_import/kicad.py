@@ -17,9 +17,10 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from .bodymap import BoardSpec, BodyMap, CopperSpec, LayerSpec, ViaSpec
+from .reader import StepModel, StepSolid
 
 KICAD_STEP_COPPER_FLAGS: tuple[str, ...] = (
     "--include-tracks",
@@ -49,9 +50,18 @@ def export_kicad_step(
     kicad_cli: str = "kicad-cli",
     components: bool = True,
     substitute_models: bool = True,
+    model_dir: str | Path | None = None,
+    define_vars: Mapping[str, str] | None = None,
     extra_args: Sequence[str] = (),
 ) -> Path:
-    """Export a ``.kicad_pcb`` to STEP with copper as solids."""
+    """Export a ``.kicad_pcb`` to STEP with copper as solids.
+
+    ``kicad-cli`` does not read the GUI's path configuration, so footprint
+    models referenced through ``${KICAD<major>_3DMODEL_DIR}`` are skipped
+    (with a warning per footprint) unless the variable is defined here:
+    ``model_dir`` defines it for the running KiCad major version, and
+    ``define_vars`` passes any further ``--define-var`` pairs.
+    """
 
     board_path = Path(board)
     if not board_path.is_file():
@@ -63,11 +73,116 @@ def export_kicad_step(
         command.append("--no-components")
     if substitute_models:
         command.append("--subst-models")
+    variables = dict(define_vars or {})
+    if model_dir is not None:
+        variables.setdefault(kicad_model_dir_variable(kicad_cli), str(Path(model_dir)))
+    for key, value in variables.items():
+        command += ["--define-var", f"{key}={value}"]
     command += [*extra_args, "--output", str(out), str(board_path)]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0 or not out.is_file():
         raise RuntimeError(f"kicad-cli failed ({result.returncode}): {result.stderr.strip() or result.stdout.strip()}")
     return out
+
+
+def kicad_model_dir_variable(kicad_cli: str = "kicad-cli") -> str:
+    """``KICAD<major>_3DMODEL_DIR`` for the installed ``kicad-cli`` (default major 10)."""
+
+    version = kicad_cli_version(kicad_cli) or ""
+    match = re.match(r"\s*(\d+)", version)
+    major = match.group(1) if match else "10"
+    return f"KICAD{major}_3DMODEL_DIR"
+
+
+def default_kicad_model_dir(kicad_cli: str = "kicad-cli") -> Path | None:
+    """The user or system ``3dmodels`` directory of the installed KiCad, if present."""
+
+    variable = kicad_model_dir_variable(kicad_cli)
+    major = variable[len("KICAD") : -len("_3DMODEL_DIR")]
+    candidates = [
+        Path.home() / ".local" / "share" / "kicad" / f"{major}.0" / "3dmodels",
+        Path("/usr/share/kicad/3dmodels"),
+        Path(f"/usr/share/kicad-{major}/3dmodels"),
+    ]
+    for candidate in candidates:
+        if candidate.is_dir() and any(candidate.iterdir()):
+            return candidate
+    return None
+
+
+# ------------------------------------------------------------------ footprints
+_FOOTPRINT = re.compile(r'\(footprint\s+"(?P<name>[^"]*)"(?P<body>.*?)\n\t\)\n', re.S)
+_FOOTPRINT_LAYER = re.compile(r'^\s*\(layer\s+"(?P<layer>[^"]+)"\)', re.M)
+_FOOTPRINT_AT = re.compile(r"^\s*\(at\s+(?P<x>[-+0-9.eE]+)\s+(?P<y>[-+0-9.eE]+)(?:\s+(?P<rot>[-+0-9.eE]+))?\s*\)", re.M)
+_FOOTPRINT_PROPERTY = re.compile(r'\(property\s+"(?P<key>[^"]+)"\s+"(?P<value>[^"]*)"')
+
+
+@dataclass(frozen=True)
+class KicadFootprint:
+    """One placed footprint of a ``.kicad_pcb``: where KiCad puts its 3D model."""
+
+    reference: str
+    footprint: str
+    x_mm: float
+    y_mm: float
+    rotation_deg: float
+    layer: str
+    properties: Mapping[str, str]
+
+    @property
+    def step_xy_mm(self) -> tuple[float, float]:
+        """The footprint origin in the STEP frame (KiCad negates y on export)."""
+
+        return (self.x_mm, -self.y_mm)
+
+
+def read_kicad_footprints(board: str | Path) -> dict[str, KicadFootprint]:
+    """Footprints of a ``.kicad_pcb`` keyed by reference designator.
+
+    The ``(property "Key" "Value")`` fields of each footprint come along, so a
+    design can carry per-part data (a thermal model name, junction-to-case and
+    junction-to-board resistances, a power) as custom fields.
+    """
+
+    text = Path(board).read_text(encoding="utf-8")
+    out: dict[str, KicadFootprint] = {}
+    for match in _FOOTPRINT.finditer(text):
+        body = match.group("body")
+        properties = {m.group("key"): m.group("value") for m in _FOOTPRINT_PROPERTY.finditer(body)}
+        reference = properties.get("Reference")
+        layer = _FOOTPRINT_LAYER.search(body)
+        at = _FOOTPRINT_AT.search(body)
+        if reference is None or at is None:
+            continue
+        if reference in out:
+            raise ValueError(f"reference designator {reference!r} is used by two footprints")
+        out[reference] = KicadFootprint(
+            reference=reference,
+            footprint=match.group("name"),
+            x_mm=float(at.group("x")),
+            y_mm=float(at.group("y")),
+            rotation_deg=float(at.group("rot") or 0.0),
+            layer=layer.group("layer") if layer else "",
+            properties=properties,
+        )
+    return out
+
+
+def kicad_component_solids(model: StepModel) -> dict[str, tuple[StepSolid, ...]]:
+    """Solids of a KiCad STEP export grouped by reference designator.
+
+    KiCad places each footprint's 3D model as an assembly component named by
+    the reference designator, so after flattening its solids are
+    ``<board>/<refdes>/<model path>``. Copper and the board body are direct
+    children (``<board>/=>[...]``) and are not components.
+    """
+
+    out: dict[str, list[StepSolid]] = {}
+    for solid in model.solids:
+        parts = solid.name.split("/")
+        if len(parts) >= 3 and not parts[1].startswith("=>"):
+            out.setdefault(parts[1], []).append(solid)
+    return {reference: tuple(solids) for reference, solids in out.items()}
 
 
 _STACKUP_LAYER = re.compile(
@@ -249,8 +364,13 @@ def kicad_step_body_map(
 
 __all__ = [
     "KICAD_STEP_COPPER_FLAGS",
+    "KicadFootprint",
     "KicadStackupEntry",
+    "default_kicad_model_dir",
     "export_kicad_step",
+    "kicad_component_solids",
+    "kicad_model_dir_variable",
+    "read_kicad_footprints",
     "layers_from_kicad_stackup",
     "read_kicad_stackup",
     "kicad_cli_available",

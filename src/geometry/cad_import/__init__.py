@@ -29,6 +29,11 @@ from .bodymap import (
 from .conductors import TerminalRegion, conductor_heat_w, conductor_problem_from_solids
 from .contact import board_body_contact
 from .kicad import (
+    KicadFootprint,
+    default_kicad_model_dir,
+    kicad_component_solids,
+    kicad_model_dir_variable,
+    read_kicad_footprints,
     KicadStackupEntry,
     export_kicad_step,
     layers_from_kicad_stackup,
@@ -92,6 +97,11 @@ __all__ = [
     "voxelize_bodies",
     "winding_numbers_numpy",
     "export_kicad_step",
+    "KicadFootprint",
+    "default_kicad_model_dir",
+    "kicad_component_solids",
+    "kicad_model_dir_variable",
+    "read_kicad_footprints",
     "kicad_cli_available",
     "kicad_cli_version",
     "kicad_step_body_map",
