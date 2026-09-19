@@ -78,8 +78,11 @@ class BoardThermalModel:
     slab_names: tuple[str, ...]
 
 
-def board_thermal_mesh(raster: BoardRaster) -> BoardThermalModel:
+def board_thermal_mesh(raster: BoardRaster, *, thickness_source: str = "stackup") -> BoardThermalModel:
     """Copper slabs blended by fill, laminate slabs between them, outline as mask.
+
+    ``thickness_source="measured"`` sizes each copper slab from the copper
+    solids' own thickness, keeping the layer centred where the stackup puts it.
 
     The board's own thickness beyond the outermost copper is not modelled:
     the mesh runs from the bottom of the lowest layer to the top of the
@@ -95,18 +98,24 @@ def board_thermal_mesh(raster: BoardRaster) -> BoardThermalModel:
     layer_slabs: list[int] = []
     laminate = np.full((rows, cols), spec.laminate_conductivity_w_per_m_k)
     laminate_z = np.full((rows, cols), spec.laminate_through_conductivity_w_per_m_k)
+    def half(index: int) -> float:
+        return raster.layer_thickness_mm(index, source=thickness_source) / 2.0
+
     for index, layer in enumerate(spec.layers):
         if index > 0:
-            gap = layer.bottom_z_mm - spec.layers[index - 1].top_z_mm
+            previous = spec.layers[index - 1]
+            gap = (layer.center_z_mm - half(index)) - (previous.center_z_mm + half(index - 1))
+            if gap < -1.0e-9:
+                raise ValueError(f"layers {previous.name} and {layer.name} overlap with the measured thickness")
             if gap > 1.0e-9:
                 thickness.append(gap * MM)
                 in_plane.append(laminate)
                 through.append(laminate_z)
-                names.append(f"laminate:{spec.layers[index - 1].name}-{layer.name}")
+                names.append(f"laminate:{previous.name}-{layer.name}")
         fill = raster.fill[index]
         copper = spec.copper_conductivity_w_per_m_k
         layer_slabs.append(len(thickness))
-        thickness.append(layer.thickness_mm * MM)
+        thickness.append(2.0 * half(index) * MM)
         in_plane.append(fill * copper + (1.0 - fill) * laminate)
         # Through the thickness the copper and laminate act in parallel too.
         through.append(fill * copper + (1.0 - fill) * laminate_z)
@@ -156,22 +165,31 @@ def plane_opt_problem_mapping(
     name: str = "board",
     role: str = "step-geometry",
     vias: ViaSet | None = None,
+    thickness_source: str = "stackup",
 ) -> dict[str, Any]:
     """The ``plane-opt-current-field-problem/v1`` mapping for this board.
 
     ``terminals`` are passed through as the schema expects them
     (``name``, ``pad``, ``current_a``, ``cells`` of ``layer``/``x``/``y``);
     the front end contributes grid, layers, conductor masks and vias.
+    ``thickness_source="measured"`` writes the copper solids' own thickness
+    per layer instead of the stackup value.  Layers too thick for a sheet at
+    ``frequency_hz`` raise a warning (see :mod:`.skin`); the sheet PEEC's
+    filaments handle everything below that limit.
     """
+
+    from .skin import skin_report, warn_if_not_sheet
 
     rows, cols = raster.shape
     occupancy = raster.occupancy
+    if frequency_hz > 0.0:
+        warn_if_not_sheet(skin_report(raster, frequency_hz, thickness_source=thickness_source))
     layers = [
         {
             "name": layer.name,
             "order": index,
             "center_z_mm": layer.center_z_mm,
-            "thickness_mm": layer.thickness_mm,
+            "thickness_mm": raster.layer_thickness_mm(index, source=thickness_source),
             "resistivity_ohm_m": layer.resistivity_ohm_m,
         }
         for index, layer in enumerate(raster.layers)

@@ -252,3 +252,71 @@ def test_synthetic_model_needs_no_file() -> None:
     assert model.names == ("PCB", "Cu_B1_plane")
     with pytest.raises(KeyError):
         model.solid("nope")
+
+
+def test_measured_thickness_and_skin_screening(model) -> None:
+    import warnings
+
+    from geometry.step_voxelize import skin_report
+
+    body_map = _body_map()
+    resolved = resolve_bodies(model, body_map)
+    raster = rasterize_board(resolved, body_map.board, pitch_mm=0.5)
+    # The fixture's copper is 35 um thick, as the stackup says.
+    assert raster.measured_thickness_mm == pytest.approx((0.035, 0.035), rel=1.0e-6)
+    assert raster.thickness_mismatches() == ()
+    assert raster.layer_thickness_mm(1, source="measured") == pytest.approx(0.035)
+
+    # A stackup that claims 70 um gets a warning and the measured value on request.
+    thick = BoardSpec(
+        "PCB",
+        (LayerSpec("B1", center_z_mm=-0.0175, thickness_mm=0.035), LayerSpec("F1", center_z_mm=1.6175, thickness_mm=0.070)),
+    )
+    wrong_map = BodyMap(board=thick, copper=body_map.copper, vias=body_map.vias, bodies=body_map.bodies)
+    with pytest.warns(UserWarning, match="F1: the copper solids are 0.0350 mm thick"):
+        wrong = rasterize_board(resolve_bodies(model, wrong_map), thick, pitch_mm=0.5)
+    assert wrong.thickness_mismatches() == (("F1", 0.070, pytest.approx(0.035)),)
+    mapping = plane_opt_problem_mapping(
+        wrong,
+        terminals=[
+            {"name": "src", "pad": "P1", "current_a": 1.0, "cells": [{"layer": "F1", "x": 2, "y": 11}]},
+            {"name": "ret", "pad": "P2", "current_a": -1.0, "cells": [{"layer": "B1", "x": 30, "y": 11}]},
+        ],
+        thickness_source="measured",
+    )
+    assert mapping["layers"][1]["thickness_mm"] == pytest.approx(0.035)
+    thermal = board_thermal_mesh(wrong, thickness_source="measured")
+    assert thermal.mesh.slab_thickness_m[2] == pytest.approx(35.0e-6)
+    assert board_thermal_mesh(wrong).mesh.slab_thickness_m[2] == pytest.approx(70.0e-6)
+
+    # Skin screening: 35 um copper is uniform at 1 MHz (delta = 65 um), filaments at 100 MHz.
+    low = skin_report(raster, 1.0e6)
+    assert [item.classification for item in low.layers] == ["uniform", "uniform"]
+    assert low.layers[0].skin_depth_mm == pytest.approx(0.0652, rel=2.0e-2)
+    high = skin_report(raster, 100.0e6)
+    assert high.needs_filaments == ("B1", "F1") and high.needs_3d == ()
+    dc = skin_report(raster, 0.0)
+    assert all(item.classification == "uniform" for item in dc.layers)
+    # A 2 mm busbar layer is a 3D body, and the mapping says so.
+    busbar = BoardSpec("PCB", (LayerSpec("B1", center_z_mm=-0.0175, thickness_mm=0.035), LayerSpec("F1", center_z_mm=2.6, thickness_mm=2.0)))
+    bus_raster = BoardRaster(busbar, raster.pitch_mm, raster.origin_mm, raster.outline, raster.fill)
+    assert skin_report(bus_raster, 1.0e6).needs_3d == ("F1",)
+    with pytest.warns(UserWarning, match="a 2.5D sheet cannot represent it"):
+        plane_opt_problem_mapping(
+            bus_raster,
+            terminals=[
+                {"name": "src", "pad": "P1", "current_a": 1.0, "cells": [{"layer": "F1", "x": 2, "y": 11}]},
+                {"name": "ret", "pad": "P2", "current_a": -1.0, "cells": [{"layer": "B1", "x": 30, "y": 11}]},
+            ],
+            frequency_hz=1.0e6,
+        )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        plane_opt_problem_mapping(
+            raster,
+            terminals=[
+                {"name": "src", "pad": "P1", "current_a": 1.0, "cells": [{"layer": "F1", "x": 2, "y": 11}]},
+                {"name": "ret", "pad": "P2", "current_a": -1.0, "cells": [{"layer": "B1", "x": 30, "y": 11}]},
+            ],
+            frequency_hz=100.0e6,
+        )

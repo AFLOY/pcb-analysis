@@ -12,6 +12,7 @@ not a rectangle becomes an active-element mask on the thermal mesh.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -81,6 +82,7 @@ class BoardRaster:
     fill: np.ndarray
     threshold: float = 0.5
     y_down: bool = False
+    measured_thickness_mm: tuple[float | None, ...] = ()
 
     def __post_init__(self) -> None:
         outline = np.asarray(self.outline, dtype=bool)
@@ -91,6 +93,12 @@ class BoardRaster:
             raise ValueError("threshold must lie in (0, 1]")
         object.__setattr__(self, "outline", outline)
         object.__setattr__(self, "fill", np.where(outline[None], fill, 0.0))
+        measured = tuple(self.measured_thickness_mm)
+        if not measured:
+            measured = (None,) * len(self.spec.layers)
+        if len(measured) != len(self.spec.layers):
+            raise ValueError("measured_thickness_mm needs one entry per layer")
+        object.__setattr__(self, "measured_thickness_mm", measured)
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -113,6 +121,34 @@ class BoardRaster:
     @property
     def origin_m(self) -> tuple[float, float]:
         return (self.origin_mm[0] * MM, self.origin_mm[1] * MM)
+
+    def layer_thickness_mm(self, index: int, *, source: str = "stackup") -> float:
+        """Thickness of one layer from the stackup or from the copper solids.
+
+        ``source="measured"`` falls back to the stackup for a layer without
+        copper solids.
+        """
+
+        if source not in ("stackup", "measured"):
+            raise ValueError("source must be 'stackup' or 'measured'")
+        measured = self.measured_thickness_mm[index]
+        if source == "measured" and measured is not None:
+            return float(measured)
+        return float(self.spec.layers[index].thickness_mm)
+
+    def thickness_mismatches(self, *, relative_tolerance: float = 0.05) -> tuple[tuple[str, float, float], ...]:
+        """Layers whose copper solids are thicker or thinner than the stackup says.
+
+        Each entry is ``(layer name, stackup mm, measured mm)``.
+        """
+
+        out = []
+        for layer, measured in zip(self.spec.layers, self.measured_thickness_mm):
+            if measured is None:
+                continue
+            if abs(measured - layer.thickness_mm) > relative_tolerance * layer.thickness_mm:
+                out.append((layer.name, float(layer.thickness_mm), float(measured)))
+        return tuple(out)
 
     def copper_area_m2(self, layer: int) -> float:
         return float(np.sum(self.fill[layer])) * self.pitch_m**2
@@ -148,6 +184,7 @@ def rasterize_board(
     method: ClassifyMethod = "auto",
     shape: tuple[int, int] | None = None,
     y_down: bool = False,
+    thickness_tolerance: float = 0.05,
 ) -> BoardRaster:
     """Sample the board outline and each layer's copper onto the grid.
 
@@ -191,8 +228,18 @@ def rasterize_board(
     for name in by_layer:
         by_layer[name].extend(via_solids)
     fill = np.zeros((len(spec.layers), rows, cols))
+    measured: list[float | None] = []
     for index, layer in enumerate(spec.layers):
         solids = by_layer[layer.name]
+        # The copper solids' own z extent, weighted by volume so a stray
+        # sliver does not outvote the plane; barrels span layers and are left out.
+        copper_only = [solid for copper_spec, group in resolved.copper if copper_spec.layer == layer.name for solid in group]
+        if copper_only:
+            heights = np.array([(solid.bounds_m[1][2] - solid.bounds_m[0][2]) / MM for solid in copper_only])
+            weights = np.array([solid.volume_m3 for solid in copper_only])
+            measured.append(float(np.sum(heights * weights) / np.sum(weights)))
+        else:
+            measured.append(None)
         if not solids:
             continue
         fill[index] = sample_plane_fill(
@@ -207,7 +254,16 @@ def rasterize_board(
     if y_down:
         outline = outline[::-1].copy()
         fill = fill[:, ::-1].copy()
-    return BoardRaster(spec, pitch_mm, (float(origin[0]), float(origin[1])), outline, fill, threshold, y_down)
+    raster = BoardRaster(
+        spec, pitch_mm, (float(origin[0]), float(origin[1])), outline, fill, threshold, y_down, tuple(measured)
+    )
+    for name, stackup_mm, measured_mm in raster.thickness_mismatches(relative_tolerance=thickness_tolerance):
+        warnings.warn(
+            f"layer {name}: the copper solids are {measured_mm:.4f} mm thick but the stackup says "
+            f"{stackup_mm:.4f} mm; pass source='measured' to use the solids' thickness",
+            stacklevel=2,
+        )
+    return raster
 
 
 __all__ = ["BoardRaster", "rasterize_board", "sample_plane_fill"]

@@ -51,6 +51,7 @@ from .reader import (
 from .mesh import TriangleMesh, default_method, default_plane_method, plane_section_coverage, section_segments_numpy, winding_numbers_numpy
 from .mesh import native_available as native_classify_available
 from .section import BoardRaster, rasterize_board, sample_plane_fill
+from .skin import LayerSkin, SkinReport, skin_report, warn_if_not_sheet
 from .voxelize import sample_volume_fill, voxel_grid, voxelize_bodies
 
 __all__ = [
@@ -102,5 +103,9 @@ __all__ = [
     "default_plane_method",
     "plane_section_coverage",
     "section_segments_numpy",
+    "LayerSkin",
+    "SkinReport",
+    "skin_report",
+    "warn_if_not_sheet",
     "write_step",
 ]
