@@ -100,6 +100,16 @@ guard it:
   solver's filaments already do the same job with a frequency-dependent
   count and grading.
 
+## Thick conductors: the 3D path
+
+A layer or body that `skin_report` classifies as `3d` leaves the stackup and
+goes to the voxel PEEC: `conductor_problem_from_solids` voxelises its solids,
+marks the terminal voxels from solids or boxes, and `electrical.dice_peec.solve_voxel_peec`
+solves it with PyPEEC (CPU or CUDA); `conductor_heat_w` returns the Joule
+loss on the same voxel grid for the thermal solve. The contract, the
+acceptance on a busbar and the pitch-versus-skin-depth caveat are in
+`VOXEL_PEEC.md`.
+
 ## Point classification
 
 Three paths answer "is this point inside this solid", selectable per call
@@ -316,6 +326,7 @@ requested.
 | `geometry/step_voxelize/section.py` | per-layer sampling of the board outline and copper onto the routing grid (`BoardRaster`) |
 | `geometry/step_voxelize/voxelize.py` | 3D sampling of bodies onto a voxel grid, fill fraction, material precedence (`VoxelSolidModel`) |
 | `geometry/step_voxelize/contact.py` | board/voxel contact placement (origins, contact spec) feeding `thermal.matrix_free_mpir_fem.planar_contact_map` |
+| `geometry/step_voxelize/conductors.py` | thick conductor solids to `VoxelConductorProblem`, terminal regions, Joule loss to the thermal grid |
 | `geometry/step_voxelize/adapters.py` | build `Stackup`, occupancy, `ViaSet`, the board's `LayeredThermalMesh`, body meshes and heat sources, plane-opt mapping |
 | `thermal/matrix_free_mpir_fem/voxel.py`, `conduction.py` | `VoxelThermalMesh`, active-element mask, exposed-face convection |
 | `thermal/matrix_free_mpir_fem/contact.py` | `ContactMap`, `planar_contact_map` |
@@ -367,6 +378,7 @@ for the current path and the candidate, with the numbers written to
 | `ContactMap`, `nodal_heat_w`, `BoardEnclosureThermalScenario` (acceptance 4) | `feature/board-enclosure-coupling` | done; `tests/test_board_enclosure_coupling.py`, numbers in `MULTIPHYSICS_SCENARIOS.md` and `BOARD_ENCLOSURE_ACCEPTANCE_RESULTS.json` |
 | `geometry.step_voxelize`, `cad` extra, packaging and CI (acceptance 1, 5 on a synthetic STEP) | `feature/geometry-step-voxelize` | done; `tests/test_geometry_step.py` |
 | acceptance 5 on KiCad exports with copper (`power_module`, `bldc_driver`, `drone`) | `feature/kicad-step-acceptance` | done; `tests/test_kicad_step.py`, `KICAD_STEP_RESULTS.json` |
+| thick conductors to the 3D voxel PEEC (PyPEEC) with Joule loss to the voxel thermal mesh | `feature/voxel-peec-3d` | done; `tests/test_voxel_peec.py`, `VOXEL_PEEC_RESULTS.json` |
 | electro-thermal `σ(T)` loop around the interface iteration | — | not started |
 | tessellation and C++ winding-number classification | `feature/geometry-native-classify` | done; `tests/test_native_geometry.py`, `GEOMETRY_CLASSIFY_RESULTS.json` |
 

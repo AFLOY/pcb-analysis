@@ -1,0 +1,120 @@
+{
+  "generated_at": "2026-09-19T12:18:09+00:00",
+  "environment": {
+    "platform": "Linux-6.12.0-211.54.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "pypeec": "5.8.0",
+    "cpu_count": 12,
+    "device": "NVIDIA GeForce GTX 1650"
+  },
+  "busbar": {
+    "length_mm": 20.0,
+    "width_mm": 4.0,
+    "thickness_mm": 2.0,
+    "resistivity_ohm_m": 1.68e-08,
+    "terminals": "two voxel slabs at the bar ends, 10 A into src, ref at 0 V"
+  },
+  "dc": [
+    {
+      "pitch_mm": 0.5,
+      "voxels": 1280,
+      "seconds": 0.2145544330123812,
+      "resistance_ohm": 3.911250000002942e-05,
+      "analytic_ohm": 3.990000000000001e-05,
+      "relative_error": 0.019736842104526055,
+      "loss_w": 0.0039112500000099285,
+      "loss_vs_i2r": 1.786282850620987e-12,
+      "converged": true,
+      "iterations": 1
+    },
+    {
+      "pitch_mm": 0.25,
+      "voxels": 10240,
+      "seconds": 0.4433538760058582,
+      "resistance_ohm": 4.0556250000033705e-05,
+      "analytic_ohm": 4.0950000000000006e-05,
+      "relative_error": 0.009615384614561684,
+      "loss_w": 0.004055625000004172,
+      "loss_vs_i2r": 1.976125124735691e-13,
+      "converged": true,
+      "iterations": 1
+    }
+  ],
+  "ac": [
+    {
+      "frequency_hz": 1000.0,
+      "skin_depth_mm": 2.0628838340968665,
+      "thickness_over_skin_depth": 0.9695165413304055,
+      "resistance_ohm": 4.0272304631873055e-05,
+      "reactance_ohm": 5.668928703672524e-05,
+      "resistance_over_dc": 1.0296530426805437,
+      "loss_w": 0.002013616127851988,
+      "loss_vs_half_i2r": 4.450991037646833e-07,
+      "seconds": 0.09725216205697507,
+      "converged": true,
+      "iterations": 1
+    },
+    {
+      "frequency_hz": 10000.0,
+      "skin_depth_mm": 0.6523411464087013,
+      "thickness_over_skin_depth": 3.065880499812855,
+      "resistance_ohm": 8.33778408318586e-05,
+      "reactance_ohm": 0.0005136678019875835,
+      "resistance_over_dc": 2.1317440928551203,
+      "loss_w": 0.004168913902807344,
+      "loss_vs_half_i2r": 5.243890749900104e-06,
+      "seconds": 0.12054997100494802,
+      "converged": true,
+      "iterations": 1
+    },
+    {
+      "frequency_hz": 100000.0,
+      "skin_depth_mm": 0.2062883834096866,
+      "thickness_over_skin_depth": 9.695165413304057,
+      "resistance_ohm": 0.00016145225416106505,
+      "reactance_ohm": 0.004697610574554587,
+      "resistance_over_dc": 4.127894002197344,
+      "loss_w": 0.008073800302222472,
+      "loss_vs_half_i2r": 0.00014711397810946686,
+      "seconds": 0.16440950892865658,
+      "converged": true,
+      "iterations": 1
+    },
+    {
+      "frequency_hz": 1000000.0,
+      "skin_depth_mm": 0.06523411464087014,
+      "thickness_over_skin_depth": 30.658804998128545,
+      "resistance_ohm": 0.00017776854971581353,
+      "reactance_ohm": 0.04665929836527846,
+      "resistance_over_dc": 4.545057199506036,
+      "loss_w": 0.008890466235685597,
+      "loss_vs_half_i2r": 0.00022937126934778471,
+      "seconds": 0.2188722100108862,
+      "converged": true,
+      "iterations": 3
+    }
+  ],
+  "cuda": {
+    "frequency_hz": 100000.0,
+    "device": "NVIDIA GeForce GTX 1650",
+    "cupy": "14.1.1",
+    "cpu_seconds": 0.16557887999806553,
+    "cuda_seconds": 0.5845260469941422,
+    "impedance_relative_difference": 2.0669391506737626e-08,
+    "loss_relative_difference": 2.6361006323721436e-09,
+    "converged": true
+  },
+  "decision": {
+    "adopted": true,
+    "criteria": "DC resistance within 2 % of rho L / A between the terminal midplanes at every pitch with loss = I^2 R to 1e-3; AC resistance non-decreasing with frequency with time-averaged loss = |I|^2 R / 2 within 2 %; CUDA impedance within 1e-4 of the CPU solve when a device is present",
+    "max_dc_relative_error": 0.019736842104526055,
+    "ac_resistance_over_dc": [
+      1.0296530426805437,
+      2.1317440928551203,
+      4.127894002197344,
+      4.545057199506036
+    ],
+    "cuda_checked": true
+  }
+}
