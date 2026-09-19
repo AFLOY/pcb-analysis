@@ -71,6 +71,7 @@ from .sheet_peec import (
     solve_sheet_case,
     via_resistance,
 )
+from .skin_screen import LayerSkin, classify_layer_thickness
 from .stackup import Stackup
 from .voxel_peec import (
     VoxelConductorProblem,
@@ -102,7 +103,9 @@ __all__ = [
     "SheetSolution",
     "SheetStackup",
     "SparseDeltaML",
+    "LayerSkin",
     "Stackup",
+    "classify_layer_thickness",
     "VoxelConductorProblem",
     "VoxelPeecSolution",
     "VoxelTerminal",
