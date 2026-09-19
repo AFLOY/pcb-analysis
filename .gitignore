@@ -33,3 +33,4 @@ experiments/*
 !experiments/thermal_transient_acceptance.py
 !experiments/tensor_grid_acceptance.py
 !experiments/kicad_refinement_acceptance.py
+!experiments/sheet_pfft_acceptance.py

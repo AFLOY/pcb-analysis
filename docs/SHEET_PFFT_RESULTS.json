@@ -1,0 +1,359 @@
+{
+  "generated_at": "2026-09-19T18:37:26+00:00",
+  "environment": {
+    "platform": "Linux-6.12.0-211.54.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "cpu": "Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz",
+    "cpu_count": 12,
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "operator_accuracy": {
+    "uniform_reference": "SheetInductanceOperator (closed form to 24 cells, centre limit beyond)",
+    "graded_reference": "closed form for every pair",
+    "cases": [
+      {
+        "order": 1,
+        "near_radius_cells": 2,
+        "uniform 0.2 mm": {
+          "build_ms": 51.711324020288885,
+          "cells": 80,
+          "errors": {
+            "x": {
+              "relative_frobenius": 0.002545532214082468,
+              "worst_entry_over_max": 0.0021242735148228283,
+              "diagonal_relative": 3.6309125610120917e-16
+            },
+            "y": {
+              "relative_frobenius": 0.002359655561551492,
+              "worst_entry_over_max": 0.0021242735148228283,
+              "diagonal_relative": 6.051520935020153e-16
+            }
+          }
+        },
+        "graded 0.1-0.5 mm": {
+          "build_ms": 379.53502603340894,
+          "cells": 216,
+          "errors": {
+            "x": {
+              "relative_frobenius": 0.0029765879356949305,
+              "worst_entry_over_max": 0.0038017794686883402,
+              "diagonal_relative": 4.668494146167632e-14
+            },
+            "y": {
+              "relative_frobenius": 0.003755327328897551,
+              "worst_entry_over_max": 0.0029288183754507344,
+              "diagonal_relative": 1.1479228853959898e-14
+            }
+          }
+        }
+      },
+      {
+        "order": 2,
+        "near_radius_cells": 3,
+        "uniform 0.2 mm": {
+          "build_ms": 66.3358150050044,
+          "cells": 80,
+          "errors": {
+            "x": {
+              "relative_frobenius": 0.00014318653287172473,
+              "worst_entry_over_max": 0.00030479904189597423,
+              "diagonal_relative": 7.261825122024183e-16
+            },
+            "y": {
+              "relative_frobenius": 0.0001995750479713406,
+              "worst_entry_over_max": 0.00035912968388293896,
+              "diagonal_relative": 6.051520935020153e-16
+            }
+          }
+        },
+        "graded 0.1-0.5 mm": {
+          "build_ms": 932.9105300130323,
+          "cells": 216,
+          "errors": {
+            "x": {
+              "relative_frobenius": 0.0003684406603705908,
+              "worst_entry_over_max": 0.0009127002642148879,
+              "diagonal_relative": 4.668494146167632e-14
+            },
+            "y": {
+              "relative_frobenius": 0.0005222845236220389,
+              "worst_entry_over_max": 0.0009766743356557082,
+              "diagonal_relative": 1.136668739460735e-14
+            }
+          }
+        }
+      },
+      {
+        "order": 3,
+        "near_radius_cells": 3,
+        "uniform 0.2 mm": {
+          "build_ms": 85.50679904874414,
+          "cells": 80,
+          "errors": {
+            "x": {
+              "relative_frobenius": 0.00011505814161071254,
+              "worst_entry_over_max": 0.00021777644996290844,
+              "diagonal_relative": 3.6309125610120917e-16
+            },
+            "y": {
+              "relative_frobenius": 0.00013921499581274075,
+              "worst_entry_over_max": 0.00019813555499541437,
+              "diagonal_relative": 7.261825122024183e-16
+            }
+          }
+        },
+        "graded 0.1-0.5 mm": {
+          "build_ms": 1490.7738119363785,
+          "cells": 216,
+          "errors": {
+            "x": {
+              "relative_frobenius": 0.00033198383172661786,
+              "worst_entry_over_max": 0.0008963685127439008,
+              "diagonal_relative": 4.668494146167632e-14
+            },
+            "y": {
+              "relative_frobenius": 0.00045112400389940035,
+              "worst_entry_over_max": 0.0009424066588611311,
+              "diagonal_relative": 1.1591770313312445e-14
+            }
+          }
+        }
+      },
+      {
+        "order": 3,
+        "near_radius_cells": 4,
+        "uniform 0.2 mm": {
+          "build_ms": 101.4442479936406,
+          "cells": 80,
+          "errors": {
+            "x": {
+              "relative_frobenius": 2.9906278608787046e-10,
+              "worst_entry_over_max": 4.974992880109864e-10,
+              "diagonal_relative": 3.6309125610120917e-16
+            },
+            "y": {
+              "relative_frobenius": 2.820984220288465e-10,
+              "worst_entry_over_max": 7.311731826065265e-10,
+              "diagonal_relative": 7.261825122024183e-16
+            }
+          }
+        },
+        "graded 0.1-0.5 mm": {
+          "build_ms": 2088.9313749503344,
+          "cells": 216,
+          "errors": {
+            "x": {
+              "relative_frobenius": 6.654121375140697e-05,
+              "worst_entry_over_max": 9.789738321347236e-05,
+              "diagonal_relative": 4.668494146167632e-14
+            },
+            "y": {
+              "relative_frobenius": 0.00012998052036902828,
+              "worst_entry_over_max": 0.000195846169115244,
+              "diagonal_relative": 1.1591770313312445e-14
+            }
+          }
+        }
+      },
+      {
+        "order": 3,
+        "near_radius_cells": 5,
+        "uniform 0.2 mm": {
+          "build_ms": 92.13745000306517,
+          "cells": 80,
+          "errors": {
+            "x": {
+              "relative_frobenius": 2.9906278608787046e-10,
+              "worst_entry_over_max": 4.974992880109864e-10,
+              "diagonal_relative": 3.6309125610120917e-16
+            },
+            "y": {
+              "relative_frobenius": 2.820984220288465e-10,
+              "worst_entry_over_max": 7.311731826065265e-10,
+              "diagonal_relative": 7.261825122024183e-16
+            }
+          }
+        },
+        "graded 0.1-0.5 mm": {
+          "build_ms": 2518.790762987919,
+          "cells": 216,
+          "errors": {
+            "x": {
+              "relative_frobenius": 2.6947447987579678e-05,
+              "worst_entry_over_max": 4.243299781578575e-05,
+              "diagonal_relative": 4.668494146167632e-14
+            },
+            "y": {
+              "relative_frobenius": 5.0351047252036986e-05,
+              "worst_entry_over_max": 4.4437484986890845e-05,
+              "diagonal_relative": 1.1591770313312445e-14
+            }
+          }
+        }
+      },
+      {
+        "order": 4,
+        "near_radius_cells": 5,
+        "uniform 0.2 mm": {
+          "build_ms": 133.05526203475893,
+          "cells": 80,
+          "errors": {
+            "x": {
+              "relative_frobenius": 2.99062787060347e-10,
+              "worst_entry_over_max": 4.974992993575882e-10,
+              "diagonal_relative": 6.051520935020153e-16
+            },
+            "y": {
+              "relative_frobenius": 2.8209842154585455e-10,
+              "worst_entry_over_max": 7.311731939531282e-10,
+              "diagonal_relative": 6.051520935020153e-16
+            }
+          }
+        },
+        "graded 0.1-0.5 mm": {
+          "build_ms": 4200.281202909537,
+          "cells": 216,
+          "errors": {
+            "x": {
+              "relative_frobenius": 5.700538653356119e-06,
+              "worst_entry_over_max": 5.68900177199864e-06,
+              "diagonal_relative": 4.668494146167632e-14
+            },
+            "y": {
+              "relative_frobenius": 1.2003201036828369e-05,
+              "worst_entry_over_max": 9.619959243399145e-06,
+              "diagonal_relative": 1.136668739460735e-14
+            }
+          }
+        }
+      }
+    ]
+  },
+  "strip_line": {
+    "frequency_hz": 1000000.0,
+    "runs": [
+      {
+        "grid": "uniform 0.1 mm",
+        "operator": "SheetInductanceOperator",
+        "cells": 1200,
+        "branches": 4550,
+        "kernel_bytes": 271040,
+        "build_ms": 75.87656693067402,
+        "apply_ms": 0.4724188009276986,
+        "solve_ms": 1223.8287249347195,
+        "gmres_iterations": 221,
+        "converged": true,
+        "joule_loss_w": 0.012862381651385871,
+        "loss_rel_diff_vs_uniform_fine": 0.0
+      },
+      {
+        "grid": "uniform 0.5 mm",
+        "operator": "SheetInductanceOperator",
+        "cells": 48,
+        "branches": 142,
+        "kernel_bytes": 11200,
+        "build_ms": 50.732623087242246,
+        "apply_ms": 0.19881201442331076,
+        "solve_ms": 63.57049196958542,
+        "gmres_iterations": 69,
+        "converged": true,
+        "joule_loss_w": 0.011379142857100524,
+        "loss_rel_diff_vs_uniform_fine": -0.1153160304589107
+      },
+      {
+        "grid": "uniform 0.1 mm, pFFT",
+        "operator": "PfftSheetInductanceOperator",
+        "cells": 1200,
+        "branches": 4550,
+        "kernel_bytes": 15003936,
+        "build_ms": 1646.4065810432658,
+        "apply_ms": 2.3351228097453713,
+        "solve_ms": 2127.040855004452,
+        "gmres_iterations": 227,
+        "converged": true,
+        "joule_loss_w": 0.012859676159860145,
+        "loss_rel_diff_vs_uniform_fine": -0.00021034141258247097
+      },
+      {
+        "grid": "graded 0.1 mm at the ends, 0.5 mm between",
+        "operator": "PfftSheetInductanceOperator",
+        "cells": 510,
+        "branches": 1928,
+        "kernel_bytes": 4174800,
+        "build_ms": 1580.7368620298803,
+        "apply_ms": 1.2447608169168234,
+        "solve_ms": 988.6997090652585,
+        "gmres_iterations": 216,
+        "converged": true,
+        "joule_loss_w": 0.012859118525538393,
+        "loss_rel_diff_vs_uniform_fine": -0.00025369530588659206
+      }
+    ]
+  },
+  "power_module": {
+    "board": "power_module",
+    "runs": [
+      {
+        "grid": "uniform 0.25 mm (v1)",
+        "frequency_hz": 0.0,
+        "schema": "plane-opt-current-field-problem/v1",
+        "cells": 19321,
+        "branches": 23230,
+        "operator": "SheetInductanceOperator",
+        "kernel_bytes": 4359040,
+        "wall_ms": 313.2433609571308,
+        "iterations": null,
+        "converged": true,
+        "max_current_density_a_per_mm2": 77.26962282159973,
+        "bulk_p99_current_density_a_per_mm2": 12.48156300039455
+      },
+      {
+        "grid": "uniform 0.25 mm (v1)",
+        "frequency_hz": 1000000.0,
+        "schema": "plane-opt-current-field-problem/v1",
+        "cells": 19321,
+        "branches": 23230,
+        "operator": "SheetInductanceOperator",
+        "kernel_bytes": 4359040,
+        "wall_ms": 81971.41899401322,
+        "iterations": null,
+        "converged": true,
+        "max_current_density_a_per_mm2": 75.70412836738166,
+        "bulk_p99_current_density_a_per_mm2": 15.17465785875666
+      },
+      {
+        "grid": "graded 0.1 mm under components (v2)",
+        "frequency_hz": 0.0,
+        "schema": "plane-opt-current-field-problem/v2",
+        "cells": 32200,
+        "branches": 51545,
+        "operator": "PfftSheetInductanceOperator",
+        "kernel_bytes": 659349888,
+        "wall_ms": 209432.45326296892,
+        "iterations": null,
+        "converged": true,
+        "max_current_density_a_per_mm2": 45.046903753616284,
+        "bulk_p99_current_density_a_per_mm2": 12.99167840928077
+      },
+      {
+        "grid": "graded 0.1 mm under components (v2)",
+        "frequency_hz": 1000000.0,
+        "schema": "plane-opt-current-field-problem/v2",
+        "cells": 32200,
+        "branches": 51545,
+        "operator": "PfftSheetInductanceOperator",
+        "kernel_bytes": 659349888,
+        "wall_ms": 629376.0015600128,
+        "iterations": null,
+        "converged": true,
+        "max_current_density_a_per_mm2": 44.246677757869385,
+        "bulk_p99_current_density_a_per_mm2": 19.57659897993089
+      }
+    ]
+  },
+  "decision": {
+    "pfft_sheet_inductance": "adopted",
+    "criteria": "order 3, near radius 4: relative Frobenius error < 1e-3 against both references with exact diagonals; graded strip-line loss closer to the uniform 0.1 mm result than the uniform 0.5 mm grid with under half its branches"
+  }
+}
