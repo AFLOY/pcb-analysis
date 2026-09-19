@@ -23,6 +23,7 @@ from .sheet_peec import (
     Terminal,
     _components,
     _components_with_terminals,
+    _inline_self_inductance,
     _self_inductance,
     _source_vector,
     _vertical_self_inductance,
@@ -198,6 +199,93 @@ class CudaSheetInductanceOperator:
             currents_z, s=self.padded, axes=(-2, -1)
         )
         return flux_x, flux_y, self._convolve_z(spectra_z)
+
+
+class CudaPfftSheetInductanceOperator:
+    """Device-resident projection, spectra and precorrection of the pFFT operator."""
+
+    def __init__(self, source: Any, cp: Any) -> None:
+        import cupyx.scipy.sparse as csp
+
+        self.cp = cp
+        self.source = source
+        self.shape = source.shape
+        self.layer_count = len(source.stackup)
+        self.vertical_levels = source.vertical_levels
+        self._projection = {axis: csp.csr_matrix(matrix) for axis, matrix in source._projection.items()}
+        self._projection_t = {axis: csp.csr_matrix(matrix.T.tocsr()) for axis, matrix in source._projection.items()}
+        self._correction = {axis: csp.csr_matrix(matrix) for axis, matrix in source._correction.items()}
+        self._length = {axis: cp.asarray(source._geometry[axis][2].reshape(-1)) for axis in ("x", "y")}
+        self._spectra = {key: cp.asarray(value) for key, value in source._spectra.items()}
+        self._spectra_z = {key: cp.asarray(value) for key, value in source._spectra_z.items()}
+        self._projection_z = csp.csr_matrix(source._projection_z) if source._projection_z is not None else None
+        self._projection_z_t = (
+            csp.csr_matrix(source._projection_z.T.tocsr()) if source._projection_z is not None else None
+        )
+        self._correction_z = csp.csr_matrix(source._correction_z) if source._correction_z is not None else None
+
+    @property
+    def kernel_bytes(self) -> int:
+        return int(self.source.kernel_bytes)
+
+    def _apply_axis(self, currents: Any, axis: str) -> Any:
+        cp = self.cp
+        grid = self.source.grid
+        grid_shape = (grid.nodes_y, grid.nodes_x)
+        length = self._length[axis]
+        projection, projection_t = self._projection[axis], self._projection_t[axis]
+        flat = currents.reshape(self.layer_count, -1)
+        spectra = [
+            cp.fft.rfft2((projection_t @ (flat[l] * length)).reshape(grid_shape), s=grid.padded)
+            for l in range(self.layer_count)
+        ]
+        out = cp.zeros_like(flat)
+        for target in range(self.layer_count):
+            accumulated = cp.zeros_like(spectra[0])
+            for source in range(self.layer_count):
+                accumulated += self._spectra[self.source._separation[(target, source)]] * spectra[source]
+            potential = cp.fft.irfft2(accumulated, s=grid.padded)[: grid_shape[0], : grid_shape[1]]
+            out[target] = length * (projection @ potential.reshape(-1))
+        return (out.reshape(-1) + self._correction[axis] @ flat.reshape(-1)).reshape(currents.shape)
+
+    def apply(self, currents_x: Any, currents_y: Any, currents_z: Any | None = None) -> Any:
+        cp = self.cp
+        rows, cols = self.shape
+        flux_x = cp.zeros_like(currents_x)
+        flux_y = cp.zeros_like(currents_y)
+        flux_x[:, :, :-1] = self._apply_axis(cp.ascontiguousarray(currents_x[:, :, :-1]), "x")
+        flux_y[:, :-1, :] = self._apply_axis(cp.ascontiguousarray(currents_y[:, :-1, :]), "y")
+        if currents_z is None:
+            return flux_x, flux_y
+        levels = len(self.vertical_levels)
+        if not levels:
+            return flux_x, flux_y, cp.zeros_like(currents_z)
+        grid = self.source.grid
+        grid_shape = (grid.nodes_y, grid.nodes_x)
+        spans = [span for span, _ in self.source._vertical_geometry]
+        flat = currents_z.reshape(levels, -1)
+        spectra = [
+            cp.fft.rfft2((self._projection_z_t @ (flat[l] * spans[l])).reshape(grid_shape), s=grid.padded)
+            for l in range(levels)
+        ]
+        out = cp.zeros_like(flat)
+        for target in range(levels):
+            accumulated = cp.zeros_like(spectra[0])
+            for source in range(levels):
+                sep = round(abs(self.source._vertical_geometry[source][1] - self.source._vertical_geometry[target][1]), 15)
+                accumulated += self._spectra_z[sep] * spectra[source]
+            potential = cp.fft.irfft2(accumulated, s=grid.padded)[: grid_shape[0], : grid_shape[1]]
+            out[target] = spans[target] * (self._projection_z @ potential.reshape(-1))
+        flux_z = out.reshape(-1) + self._correction_z @ flat.reshape(-1)
+        return flux_x, flux_y, flux_z.reshape(currents_z.shape)
+
+
+def cuda_inductance_operator(operator: Any, cp: Any) -> Any:
+    """Device counterpart of either sheet inductance operator."""
+
+    if hasattr(operator, "_kernels"):
+        return CudaSheetInductanceOperator(operator, cp)
+    return CudaPfftSheetInductanceOperator(operator, cp)
 
 
 @dataclass(frozen=True)
@@ -386,7 +474,7 @@ def solve_sheet_case_cuda(
                 injected_device = cp.asarray(injected)
                 resistance_device = cp.asarray(active_resistance)
                 active_branches_device = cp.asarray(active_branches)
-                cuda_operator = CudaSheetInductanceOperator(operator, cp)
+                cuda_operator = cuda_inductance_operator(operator, cp)
                 indices = _branch_indices(mesh, cp)
                 cp.cuda.get_current_stream().synchronize()
                 prepare_ms = (
@@ -526,10 +614,7 @@ def solve_sheet_case_cuda(
 
                     full_diagonal_cpu = resistance + 1j * omega * np.concatenate(
                         [
-                            np.full(
-                                inline_count,
-                                _self_inductance(operator),
-                            ),
+                            _inline_self_inductance(mesh, operator),
                             _vertical_self_inductance(mesh, operator),
                         ]
                     )

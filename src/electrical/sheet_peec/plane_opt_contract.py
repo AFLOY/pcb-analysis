@@ -14,12 +14,18 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from electrical.matrix_free_mpir_fem.grid import TensorGrid
+
+from .sheet_pfft import PfftSheetInductanceOperator
 from .sheet_operator import SheetInductanceOperator, SheetStackup
 from .sheet_peec import SheetMesh, Terminal, ViaBranch, solve_sheet_case
 from .sheet_results import cell_current_density_phasor, sheet_fields
 from .skin_filaments import filament_links, graded_filaments, skin_depth_m
 
 PLANE_OPT_PROBLEM_SCHEMA = "plane-opt-current-field-problem/v1"
+# v2 carries the grid lines (``x_edges_mm``, ``y_edges_mm``) instead of one pitch,
+# so a graded tensor grid can be solved; a uniform grid may use either form.
+PLANE_OPT_PROBLEM_SCHEMA_V2 = "plane-opt-current-field-problem/v2"
 PLANE_OPT_RESULT_SCHEMA = "plane-opt-current-field-result/v1"
 
 NamedNode = tuple[str, int, int]
@@ -96,7 +102,7 @@ class PlaneOptProblem:
     frequency_hz: float
     rows: int
     columns: int
-    pitch_mm: float
+    pitch_mm: float | None
     layers: tuple[PlaneOptLayer, ...]
     copper_by_layer: Mapping[str, frozenset[tuple[int, int]]]
     vertical_segments: tuple[
@@ -104,23 +110,35 @@ class PlaneOptProblem:
     ]
     terminals: tuple[PlaneOptTerminal, ...]
     source_board_sha256: str | None
+    grid: TensorGrid | None = None
+
+    @property
+    def is_uniform(self) -> bool:
+        return self.grid is None or self.grid.is_uniform
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "PlaneOptProblem":
         schema = str(value.get("schema") or "")
-        if schema != PLANE_OPT_PROBLEM_SCHEMA:
+        if schema not in (PLANE_OPT_PROBLEM_SCHEMA, PLANE_OPT_PROBLEM_SCHEMA_V2):
             raise ValueError(f"unsupported plane-opt problem schema: {schema}")
         grid = value.get("grid") or {}
         rows = int(grid["rows"])
         columns = int(grid["columns"])
-        pitch_mm = float(grid["pitch_mm"])
-        if (
-            rows < 1
-            or columns < 1
-            or not math.isfinite(pitch_mm)
-            or pitch_mm <= 0.0
-        ):
-            raise ValueError("grid shape and pitch must be positive")
+        if rows < 1 or columns < 1:
+            raise ValueError("grid shape must be positive")
+        tensor: TensorGrid | None = None
+        if "x_edges_mm" in grid or "y_edges_mm" in grid:
+            # Schema v2: the grid lines themselves, in millimetres; graded or not.
+            x_edges = np.asarray(grid["x_edges_mm"], dtype=np.float64) * 1e-3
+            y_edges = np.asarray(grid["y_edges_mm"], dtype=np.float64) * 1e-3
+            if x_edges.size != columns + 1 or y_edges.size != rows + 1:
+                raise ValueError("x_edges_mm and y_edges_mm must hold columns + 1 and rows + 1 lines")
+            tensor = TensorGrid(x_edges, y_edges)
+            pitch_mm = float(tensor.pitch_x_m[0]) * 1e3 if tensor.is_uniform else None
+        else:
+            pitch_mm = float(grid["pitch_mm"])
+            if not math.isfinite(pitch_mm) or pitch_mm <= 0.0:
+                raise ValueError("grid pitch must be positive")
         layers = tuple(
             sorted(
                 (
@@ -273,6 +291,7 @@ class PlaneOptProblem:
             rows=rows,
             columns=columns,
             pitch_mm=pitch_mm,
+            grid=tensor,
             layers=layers,
             copper_by_layer=copper,
             vertical_segments=tuple(vertical),
@@ -330,7 +349,8 @@ def build_plane_opt_sheet_inputs(
         value if isinstance(value, PlaneOptProblem) else PlaneOptProblem.from_mapping(value)
     )
     settings = dict(settings or {})
-    pitch_m = problem.pitch_mm * 1e-3
+    tensor = problem.grid if problem.grid is not None else TensorGrid.uniform(problem.pitch_mm * 1e-3, (problem.rows, problem.columns))
+    pitch_m = problem.pitch_mm * 1e-3 if problem.pitch_mm is not None else None
     sheet_layers = []
     filament_of: dict[str, tuple[int, ...]] = {}
     cuts = {}
@@ -376,6 +396,7 @@ def build_plane_opt_sheet_inputs(
                     first_layer=filament_of[layer.name][0],
                     resistivity_ohm_m=layer.resistivity_ohm_m,
                     occupancy=occupancy,
+                    cell_area_m2=tensor.cell_area_m2,
                 )
             )
     layer_by_name = {layer.name: layer for layer in problem.layers}
@@ -412,13 +433,29 @@ def build_plane_opt_sheet_inputs(
         stackup,
         occupancy,
         vias=tuple(vias),
+        grid=tensor,
     )
-    operator = SheetInductanceOperator(
-        mesh.shape,
-        pitch_m,
-        stackup,
-        vertical_levels=mesh.vertical_levels,
-    )
+    # The convolution operator needs a uniform grid; a graded one takes the
+    # precorrected FFT.  ``operator`` in the settings forces either.
+    choice = str(settings.get("operator", "auto"))
+    if choice not in {"auto", "fft", "pfft"}:
+        raise ValueError("operator must be 'auto', 'fft' or 'pfft'")
+    if choice == "fft" and not tensor.is_uniform:
+        raise ValueError("the convolution operator needs a uniform grid; use operator='pfft'")
+    if choice == "pfft" or (choice == "auto" and not tensor.is_uniform):
+        operator: Any = PfftSheetInductanceOperator(
+            mesh,
+            grid_pitch_m=settings.get("pfft_grid_pitch_m"),
+            order=int(settings.get("pfft_order", 3)),
+            near_radius_cells=int(settings.get("pfft_near_radius_cells", 4)),
+        )
+    else:
+        operator = SheetInductanceOperator(
+            mesh.shape,
+            pitch_m,
+            stackup,
+            vertical_levels=mesh.vertical_levels,
+        )
 
     terminals: list[Terminal] = []
     for terminal in problem.terminals:
@@ -554,7 +591,9 @@ def solve_plane_opt_problem(
             "max_current_density_a_per_mm2": (
                 float(density_values.max()) if density_values.size else 0.0
             ),
-            "problem_schema": PLANE_OPT_PROBLEM_SCHEMA,
+            "problem_schema": PLANE_OPT_PROBLEM_SCHEMA if context.problem.grid is None else PLANE_OPT_PROBLEM_SCHEMA_V2,
+            "inductance_operator": type(operator).__name__,
+            "grid_uniform": context.problem.is_uniform,
             "result_schema": PLANE_OPT_RESULT_SCHEMA,
             "problem_name": context.problem.name,
             "role": context.problem.role,

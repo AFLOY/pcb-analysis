@@ -9,7 +9,7 @@ import numpy as np
 
 from electrical.dice_peec import Stackup, ViaSet
 from electrical.dice_peec import ViaSpec as PeecViaSpec
-from electrical.sheet_peec.plane_opt_contract import PLANE_OPT_PROBLEM_SCHEMA
+from electrical.sheet_peec.plane_opt_contract import PLANE_OPT_PROBLEM_SCHEMA, PLANE_OPT_PROBLEM_SCHEMA_V2
 from thermal.matrix_free_mpir_fem import HeatSource, LayeredThermalMesh, VoxelSolidModel, VoxelThermalMesh
 
 from .bodymap import BodySpec, ResolvedBodies
@@ -157,6 +157,22 @@ def body_heat_sources(
     return tuple(sources)
 
 
+def _plane_opt_grid(raster: BoardRaster) -> dict[str, Any]:
+    """Schema v1 grid (one pitch) for a uniform raster, v2 grid lines in the array row order otherwise."""
+
+    rows, cols = raster.shape
+    if raster.is_uniform:
+        return {"rows": rows, "columns": cols, "pitch_mm": raster.pitch_mm}
+    grid = raster.grid
+    assert grid is not None
+    x_edges = grid.x_edges_m / MM
+    y_edges = grid.y_edges_m / MM
+    if raster.y_down:
+        # Rows are stored top-down: the y lines run downwards from the top edge.
+        y_edges = (grid.y_edges_m[-1] - grid.y_edges_m[::-1] + grid.y_edges_m[0]) / MM
+    return {"rows": rows, "columns": cols, "x_edges_mm": x_edges.tolist(), "y_edges_mm": y_edges.tolist()}
+
+
 def plane_opt_problem_mapping(
     raster: BoardRaster,
     *,
@@ -181,11 +197,6 @@ def plane_opt_problem_mapping(
     from .skin import skin_report, warn_if_not_sheet
 
     rows, cols = raster.shape
-    if not raster.is_uniform:
-        raise ValueError(
-            "the plane-opt-current-field-problem/v1 grid is uniform; the sheet PEEC on graded grids is not "
-            "implemented yet (see SHEET_PEEC.md)"
-        )
     occupancy = raster.occupancy
     if frequency_hz > 0.0:
         warn_if_not_sheet(skin_report(raster, frequency_hz, thickness_source=thickness_source))
@@ -223,11 +234,11 @@ def plane_opt_problem_mapping(
             {"name": f"via_{via.row}_{via.col}", "cell": {"x": via.col, "y": via.row}, "segments": segments}
         )
     return {
-        "schema": PLANE_OPT_PROBLEM_SCHEMA,
+        "schema": PLANE_OPT_PROBLEM_SCHEMA if raster.is_uniform else PLANE_OPT_PROBLEM_SCHEMA_V2,
         "name": name,
         "role": role,
         "frequency_hz": float(frequency_hz),
-        "grid": {"rows": rows, "columns": cols, "pitch_mm": raster.pitch_mm},
+        "grid": _plane_opt_grid(raster),
         "layers": layers,
         "copper_by_layer": copper_by_layer,
         "vertical_connections": connections,
