@@ -72,6 +72,14 @@ from .sheet_peec import (
     via_resistance,
 )
 from .stackup import Stackup
+from .voxel_peec import (
+    VoxelConductorProblem,
+    VoxelPeecSolution,
+    VoxelTerminal,
+    VoxelTerminalResult,
+    build_pypeec_inputs,
+    solve_voxel_peec,
+)
 
 __all__ = [
     "CandidateEdit",
@@ -95,6 +103,12 @@ __all__ = [
     "SheetStackup",
     "SparseDeltaML",
     "Stackup",
+    "VoxelConductorProblem",
+    "VoxelPeecSolution",
+    "VoxelTerminal",
+    "VoxelTerminalResult",
+    "build_pypeec_inputs",
+    "solve_voxel_peec",
     "Terminal",
     "ViaBranch",
     "ViaOp",
