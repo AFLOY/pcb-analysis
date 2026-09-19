@@ -258,7 +258,12 @@ def _flatten(shape_tool: Any, label: Any, prefix: str, out: list[tuple[str, Any]
 
     name = _label_name(label)
     if shape_tool.IsReference_s(label):
-        referred = shape_tool.GetReferredShape_s(label)
+        from OCP.TDF import TDF_Label
+
+        referred = TDF_Label()
+        if not shape_tool.GetReferredShape_s(label, referred):
+            out.append((f"{prefix}{name}", shape_tool.GetShape_s(label)))
+            return
         # A component label carries the placement; its name is the instance
         # name, else the referred prototype's name.
         name = name or _label_name(referred)

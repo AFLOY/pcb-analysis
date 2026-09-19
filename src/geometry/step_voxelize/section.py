@@ -64,6 +64,7 @@ class BoardRaster:
     outline: np.ndarray
     fill: np.ndarray
     threshold: float = 0.5
+    y_down: bool = False
 
     def __post_init__(self) -> None:
         outline = np.asarray(self.outline, dtype=bool)
@@ -101,12 +102,23 @@ class BoardRaster:
         return float(np.sum(self.fill[layer])) * self.pitch_m**2
 
     def cell_of(self, x_m: float, y_m: float) -> tuple[int, int]:
+        """Cell of a point in the STEP frame; row 0 is at the origin unless ``y_down``."""
+
         col = int(np.floor((x_m - self.origin_m[0]) / self.pitch_m))
         row = int(np.floor((y_m - self.origin_m[1]) / self.pitch_m))
         rows, cols = self.shape
         if not (0 <= row < rows and 0 <= col < cols):
             raise ValueError(f"point ({x_m}, {y_m}) lies outside the board grid")
+        if self.y_down:
+            row = rows - 1 - row
         return row, col
+
+    def row_y_m(self, row: int) -> float:
+        """Centre ``y`` (STEP frame) of a row."""
+
+        rows = self.shape[0]
+        index = rows - 1 - row if self.y_down else row
+        return self.origin_m[1] + (index + 0.5) * self.pitch_m
 
 
 def rasterize_board(
@@ -118,11 +130,18 @@ def rasterize_board(
     origin_mm: tuple[float, float] | None = None,
     threshold: float = 0.5,
     method: ClassifyMethod = "auto",
+    shape: tuple[int, int] | None = None,
+    y_down: bool = False,
 ) -> BoardRaster:
     """Sample the board outline and each layer's copper onto the grid.
 
-    The grid origin defaults to the board's minimum corner; the grid covers
-    the board's bounding box with whole cells.
+    The grid origin defaults to the board's minimum corner and the grid
+    covers the board's bounding box with whole cells; ``shape`` fixes the
+    ``(rows, cols)`` instead, for a grid another tool has already chosen.
+    With ``y_down`` row 0 is the row of largest STEP ``y``, which is KiCad's
+    and plane-opt's y-down convention (KiCad exports STEP with ``y`` negated,
+    so a KiCad grid whose rows count downwards maps onto STEP rows counted
+    from the top).
     """
 
     if pitch_mm <= 0.0 or not np.isfinite(pitch_mm):
@@ -130,8 +149,11 @@ def rasterize_board(
     board = resolved.board
     lo, hi = board.bounds_m
     origin = (lo[0] / MM, lo[1] / MM) if origin_mm is None else origin_mm
-    cols = int(np.ceil((hi[0] / MM - origin[0]) / pitch_mm - 1.0e-6))
-    rows = int(np.ceil((hi[1] / MM - origin[1]) / pitch_mm - 1.0e-6))
+    if shape is None:
+        cols = int(np.ceil((hi[0] / MM - origin[0]) / pitch_mm - 1.0e-6))
+        rows = int(np.ceil((hi[1] / MM - origin[1]) / pitch_mm - 1.0e-6))
+    else:
+        rows, cols = (int(axis) for axis in shape)
     if rows < 1 or cols < 1:
         raise ValueError("the grid origin lies beyond the board")
     pitch_m = pitch_mm * MM
@@ -146,6 +168,12 @@ def rasterize_board(
     by_layer: dict[str, list[StepSolid]] = {layer.name: [] for layer in spec.layers}
     for copper_spec, solids in resolved.copper:
         by_layer[copper_spec.layer].extend(solids)
+    # Via barrels are copper on every layer they pass through (their annular
+    # rings), so they join each layer's sampling; ``sample_plane_fill`` skips
+    # any solid whose z extent misses the layer plane.
+    via_solids = [solid for _, solids in resolved.vias for solid in solids]
+    for name in by_layer:
+        by_layer[name].extend(via_solids)
     fill = np.zeros((len(spec.layers), rows, cols))
     for index, layer in enumerate(spec.layers):
         solids = by_layer[layer.name]
@@ -160,7 +188,10 @@ def rasterize_board(
             supersample=supersample,
             method=method,
         )
-    return BoardRaster(spec, pitch_mm, (float(origin[0]), float(origin[1])), outline, fill, threshold)
+    if y_down:
+        outline = outline[::-1].copy()
+        fill = fill[:, ::-1].copy()
+    return BoardRaster(spec, pitch_mm, (float(origin[0]), float(origin[1])), outline, fill, threshold, y_down)
 
 
 __all__ = ["BoardRaster", "rasterize_board", "sample_plane_fill"]

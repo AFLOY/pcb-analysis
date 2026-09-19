@@ -24,8 +24,20 @@ from .bodymap import (
     ResolvedBodies,
     ViaSpec,
     resolve_bodies,
+    select_solids,
 )
 from .contact import board_body_contact
+from .kicad import (
+    KicadStackupEntry,
+    export_kicad_step,
+    layers_from_kicad_stackup,
+    read_kicad_stackup,
+    kicad_cli_available,
+    kicad_cli_version,
+    kicad_grid_origin_mm,
+    kicad_step_body_map,
+    kicad_step_layers,
+)
 from .reader import (
     StepModel,
     StepSolid,
@@ -77,5 +89,15 @@ __all__ = [
     "voxel_grid",
     "voxelize_bodies",
     "winding_numbers_numpy",
+    "export_kicad_step",
+    "kicad_cli_available",
+    "kicad_cli_version",
+    "kicad_step_body_map",
+    "kicad_step_layers",
+    "select_solids",
+    "KicadStackupEntry",
+    "layers_from_kicad_stackup",
+    "read_kicad_stackup",
+    "kicad_grid_origin_mm",
     "write_step",
 ]

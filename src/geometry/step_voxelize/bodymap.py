@@ -54,6 +54,8 @@ class BoardSpec:
 
     solid: str
     layers: tuple[LayerSpec, ...]
+    z_range_mm: tuple[float, float] | None = None
+    z_span_mm: tuple[float, float] | None = None
     copper_conductivity_w_per_m_k: float = 385.0
     laminate_conductivity_w_per_m_k: float = 0.8
     laminate_through_conductivity_w_per_m_k: float = 0.3
@@ -91,12 +93,60 @@ class BoardSpec:
         raise KeyError(f"unknown layer {name!r}")
 
 
+def _z_selected(
+    solid: StepSolid,
+    z_range_mm: tuple[float, float] | None,
+    min_height_mm: float,
+    tolerance_mm: float,
+    z_span_mm: tuple[float, float] | None = None,
+) -> bool:
+    """True when the solid's z extent lies within ``z_range_mm``, covers ``z_span_mm`` and is tall enough.
+
+    Mechanical exports (KiCad's among them) give copper and via solids no
+    usable names, so roles are told apart by where they sit in z: the board
+    body spans the laminate, each copper layer its own 35 µm, a via barrel
+    the whole stack.
+    """
+
+    lo_m, hi_m = solid.bounds_m[0][2], solid.bounds_m[1][2]
+    if (hi_m - lo_m) * 1.0e3 < min_height_mm - tolerance_mm:
+        return False
+    if z_span_mm is not None:
+        lo, hi = z_span_mm
+        if lo_m * 1.0e3 > lo + tolerance_mm or hi_m * 1.0e3 < hi - tolerance_mm:
+            return False
+    if z_range_mm is None:
+        return True
+    lo, hi = z_range_mm
+    return lo - tolerance_mm <= lo_m * 1.0e3 and hi_m * 1.0e3 <= hi + tolerance_mm
+
+
+def select_solids(
+    model: StepModel,
+    pattern: str,
+    *,
+    z_range_mm: tuple[float, float] | None = None,
+    min_height_mm: float = 0.0,
+    tolerance_mm: float = 1.0e-3,
+    z_span_mm: tuple[float, float] | None = None,
+) -> tuple[StepSolid, ...]:
+    """Solids whose name matches the pattern and whose z extent fits the selector."""
+
+    return tuple(
+        solid
+        for solid in model.matching(pattern)
+        if _z_selected(solid, z_range_mm, min_height_mm, tolerance_mm, z_span_mm)
+    )
+
+
 @dataclass(frozen=True)
 class CopperSpec:
-    """Copper solids (pattern) that belong to one layer."""
+    """Copper solids (pattern, optionally a z window) that belong to one layer."""
 
     solids: str
     layer: str
+    z_range_mm: tuple[float, float] | None = None
+    min_height_mm: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -106,6 +156,9 @@ class ViaSpec:
     solids: str
     resistance_ohm: float = 0.0
     inductance_h: float = 1.0e-9
+    z_range_mm: tuple[float, float] | None = None
+    min_height_mm: float = 0.0
+    z_span_mm: tuple[float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +189,8 @@ class BodySpec:
     material: VoxelMaterial
     power_w: float = 0.0
     contact: ContactSpec | None = None
+    z_range_mm: tuple[float, float] | None = None
+    min_height_mm: float = 0.0
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.power_w) or self.power_w < 0.0:
@@ -190,7 +245,9 @@ def resolve_bodies(model: StepModel, body_map: BodyMap) -> ResolvedBodies:
                 raise ValueError(f"solid {solid.name!r} is claimed by both {previous} and {owner}")
             claimed[solid.name] = owner
 
-    boards = model.matching(body_map.board.solid)
+    boards = select_solids(
+        model, body_map.board.solid, z_range_mm=body_map.board.z_range_mm, z_span_mm=body_map.board.z_span_mm
+    )
     if len(boards) != 1:
         raise ValueError(
             f"board pattern {body_map.board.solid!r} matches {len(boards)} solids, expected one"
@@ -198,17 +255,19 @@ def resolve_bodies(model: StepModel, body_map: BodyMap) -> ResolvedBodies:
     claim(boards, "board")
     copper = []
     for index, spec in enumerate(body_map.copper):
-        solids = model.matching(spec.solids)
+        solids = select_solids(model, spec.solids, z_range_mm=spec.z_range_mm, min_height_mm=spec.min_height_mm)
         claim(solids, f"copper[{index}]:{spec.layer}")
         copper.append((spec, solids))
     vias = []
     for index, spec in enumerate(body_map.vias):
-        solids = model.matching(spec.solids)
+        solids = select_solids(
+            model, spec.solids, z_range_mm=spec.z_range_mm, min_height_mm=spec.min_height_mm, z_span_mm=spec.z_span_mm
+        )
         claim(solids, f"vias[{index}]:{spec.solids}")
         vias.append((spec, solids))
     bodies = []
     for index, spec in enumerate(body_map.bodies):
-        solids = model.matching(spec.solids)
+        solids = select_solids(model, spec.solids, z_range_mm=spec.z_range_mm, min_height_mm=spec.min_height_mm)
         if not solids:
             raise ValueError(f"body pattern {spec.solids!r} matches no solid")
         claim(solids, f"bodies[{index}]:{spec.solids}")
@@ -240,4 +299,5 @@ __all__ = [
     "ResolvedBodies",
     "ViaSpec",
     "resolve_bodies",
+    "select_solids",
 ]
