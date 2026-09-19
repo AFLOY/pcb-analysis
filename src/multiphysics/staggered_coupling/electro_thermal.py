@@ -73,6 +73,11 @@ class ElectroThermalScenario:
         slabs, thermal_rows, thermal_cols = self.thermal_mesh.element_grid_shape
         if (rows, cols) != (thermal_rows, thermal_cols):
             raise ValueError("electrical and thermal meshes must share (rows, cols)")
+        if not (
+            np.allclose(self.electrical.mesh.pitch_x_m, self.thermal_mesh.pitch_x_m)
+            and np.allclose(self.electrical.mesh.pitch_y_m, self.thermal_mesh.pitch_y_m)
+        ):
+            raise ValueError("electrical and thermal meshes must share the same grid lines")
         mapping = tuple(int(index) for index in self.layer_slabs)
         if len(mapping) != layers or any(not 0 <= index < slabs for index in mapping):
             raise ValueError("layer_slabs must name one thermal slab per electrical layer")

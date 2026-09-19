@@ -19,10 +19,10 @@ from electrical.matrix_free_mpir_fem.runtime import (
 )
 from electrical.matrix_free_mpir_fem.solver import MPIRConfig
 
-from .mesh import Preconditioner, _corner_views, _flat_index, _local_hexahedron_matrices
+from .mesh import Preconditioner, _corner_views, _flat_index, unit_hexahedron_matrices
 from .native_hex import NativeThermalHexQ1, native_requested
 from .problem import ThermalConductionProblem
-from .two_level import AggregationCoarseCorrection
+from electrical.matrix_free_mpir_fem.two_level import AggregationCoarseCorrection
 
 
 class MatrixFreeThermalOperator:
@@ -69,17 +69,10 @@ class MatrixFreeThermalOperator:
         )
 
         mesh = self.mesh
-        self._local_in_plane_high, self._local_through_high = (
-            _local_hexahedron_matrices(
-                mesh.pitch_x_m, mesh.pitch_y_m, mesh.slab_thickness_m
-            )
-        )
-        self._in_plane_high = np.asarray(
-            mesh.conductivity_w_per_m_k, dtype=np.float64
-        )
-        self._through_high = np.asarray(
-            mesh.through_plane_conductivity_w_per_m_k, dtype=np.float64
-        )
+        # K_e = a_x U_x + a_y U_y + a_z U_z with per-element coefficients that
+        # carry both the conductivity and the (graded) element dimensions.
+        self._unit_high = np.stack(unit_hexahedron_matrices())  # (3, 8, 8)
+        self._coefficients_high = np.stack(mesh.element_coefficients())  # (3, slabs, rows, cols)
 
         # Nodes of void elements only are held at the reference temperature:
         # they are fixed rows with a zero rise, invisible to the active part.
@@ -126,10 +119,8 @@ class MatrixFreeThermalOperator:
 
         diagonal = self._build_diagonal(
             np,
-            self._in_plane_high,
-            self._through_high,
-            self._local_in_plane_high,
-            self._local_through_high,
+            self._coefficients_high,
+            self._unit_high,
             self._robin_total_high,
             self.free_nodes,
         )
@@ -138,10 +129,8 @@ class MatrixFreeThermalOperator:
         self._diagonal_high = diagonal
 
         runtime_ns = self.runtime.namespace
-        self._in_plane_low = self.runtime.from_host(self._in_plane_high)
-        self._through_low = self.runtime.from_host(self._through_high)
-        self._local_in_plane_low = self.runtime.from_host(self._local_in_plane_high)
-        self._local_through_low = self.runtime.from_host(self._local_through_high)
+        self._coefficients_low = self.runtime.from_host(self._coefficients_high)
+        self._unit_low = self.runtime.from_host(self._unit_high)
         self._robin_total_low = self.runtime.from_host(self._robin_total_high)
         self._free_low = runtime_ns.asarray(self.free_nodes, dtype=bool)
         self._diagonal_low = self.runtime.from_host(diagonal)
@@ -161,14 +150,8 @@ class MatrixFreeThermalOperator:
             self._free_low_u8 = runtime_ns.ascontiguousarray(
                 self._free_low.reshape(-1).astype(runtime_ns.uint8)
             )
-            self._in_plane_low = runtime_ns.ascontiguousarray(self._in_plane_low)
-            self._through_low = runtime_ns.ascontiguousarray(self._through_low)
-            self._local_in_plane_low = runtime_ns.ascontiguousarray(
-                self._local_in_plane_low
-            )
-            self._local_through_low = runtime_ns.ascontiguousarray(
-                self._local_through_low
-            )
+            self._coefficients_low = runtime_ns.ascontiguousarray(self._coefficients_low)
+            self._unit_low = runtime_ns.ascontiguousarray(self._unit_low)
             self._robin_total_low = runtime_ns.ascontiguousarray(self._robin_total_low)
 
         self.preconditioner = preconditioner
@@ -189,10 +172,8 @@ class MatrixFreeThermalOperator:
             coarse = self.coarse_correction
             self._native = NativeThermalHexQ1(
                 mesh.element_grid_shape,
-                self._in_plane_high,
-                self._through_high,
-                self._local_in_plane_high,
-                self._local_through_high,
+                self._coefficients_high,
+                self._unit_high,
                 self._robin_total_high,
                 self.free_nodes,
                 diagonal,
@@ -210,22 +191,25 @@ class MatrixFreeThermalOperator:
         self,
         grid: Any,
         xp: Any,
-        in_plane: Any,
-        through: Any,
-        local_in_plane: Any,
-        local_through: Any,
+        coefficients: Any,
+        unit: Any,
     ) -> Any:
-        """Unconstrained conduction action ``K T`` on a node grid."""
+        """Unconstrained conduction action ``K T`` on a node grid.
+
+        ``coefficients`` is ``(3, slabs, rows, cols)`` and ``unit`` the three
+        ``(8, 8)`` unit matrices; the element stiffness is their contraction.
+        """
 
         values = self._corner_views(grid)
         output = xp.zeros_like(grid)
         targets = self._corner_views(output)
         for row in range(8):
-            contribution = xp.zeros_like(in_plane)
+            contribution = xp.zeros_like(coefficients[0])
             for column in range(8):
                 weight = (
-                    in_plane * local_in_plane[:, row, column][:, None, None]
-                    + through * local_through[:, row, column][:, None, None]
+                    coefficients[0] * unit[0, row, column]
+                    + coefficients[1] * unit[1, row, column]
+                    + coefficients[2] * unit[2, row, column]
                 )
                 contribution = contribution + weight * values[column]
             targets[row][...] += contribution
@@ -235,10 +219,8 @@ class MatrixFreeThermalOperator:
         self,
         vector: Any,
         xp: Any,
-        in_plane: Any,
-        through: Any,
-        local_in_plane: Any,
-        local_through: Any,
+        coefficients: Any,
+        unit: Any,
         robin: Any,
         free: Any,
     ) -> Any:
@@ -246,12 +228,7 @@ class MatrixFreeThermalOperator:
         free_flat = free.reshape(-1)
         working = xp.where(free_flat, flat, xp.asarray(0.0, dtype=vector.dtype))
         conduction = self._stiffness_action(
-            working.reshape(self.mesh.node_shape),
-            xp,
-            in_plane,
-            through,
-            local_in_plane,
-            local_through,
+            working.reshape(self.mesh.node_shape), xp, coefficients, unit
         ).reshape(-1)
         physical = conduction + robin * working
         return xp.where(free_flat, physical, flat)
@@ -259,19 +236,18 @@ class MatrixFreeThermalOperator:
     @staticmethod
     def _build_diagonal(
         xp: Any,
-        in_plane: Any,
-        through: Any,
-        local_in_plane: Any,
-        local_through: Any,
+        coefficients: Any,
+        unit: Any,
         robin: Any,
         free: Any,
     ) -> Any:
-        diagonal = xp.zeros(free.shape, dtype=in_plane.dtype)
+        diagonal = xp.zeros(free.shape, dtype=coefficients.dtype)
         targets = MatrixFreeThermalOperator._corner_views(diagonal)
         for index in range(8):
             targets[index][...] += (
-                in_plane * local_in_plane[:, index, index][:, None, None]
-                + through * local_through[:, index, index][:, None, None]
+                coefficients[0] * unit[0, index, index]
+                + coefficients[1] * unit[1, index, index]
+                + coefficients[2] * unit[2, index, index]
             )
         flat = diagonal.reshape(-1) + robin
         return xp.where(free.reshape(-1), flat, xp.asarray(1.0, dtype=flat.dtype))
@@ -281,14 +257,7 @@ class MatrixFreeThermalOperator:
         if vector.size != self.size:
             raise ValueError(f"vector has size {vector.size}, expected {self.size}")
         return self._apply_impl(
-            vector,
-            np,
-            self._in_plane_high,
-            self._through_high,
-            self._local_in_plane_high,
-            self._local_through_high,
-            self._robin_total_high,
-            self.free_nodes,
+            vector, np, self._coefficients_high, self._unit_high, self._robin_total_high, self.free_nodes
         )
 
     def native_inner_pcg(
@@ -309,23 +278,10 @@ class MatrixFreeThermalOperator:
             return self._native.apply(vector)
         if self._cuda_apply is not None:
             return self._cuda_apply(
-                vector,
-                self._in_plane_low,
-                self._through_low,
-                self._local_in_plane_low,
-                self._local_through_low,
-                self._robin_total_low,
-                self._free_low_u8,
+                vector, self._coefficients_low, self._unit_low, self._robin_total_low, self._free_low_u8
             )
         return self._apply_impl(
-            vector,
-            self.runtime.namespace,
-            self._in_plane_low,
-            self._through_low,
-            self._local_in_plane_low,
-            self._local_through_low,
-            self._robin_total_low,
-            self._free_low,
+            vector, self.runtime.namespace, self._coefficients_low, self._unit_low, self._robin_total_low, self._free_low
         )
 
     def diagonal_low(self) -> Any:
@@ -393,12 +349,7 @@ class MatrixFreeThermalOperator:
             mask & active, self.fixed_temperature_k.reshape(-1) - reference, 0.0
         )
         boundary_action = self._stiffness_action(
-            shifted_fixed.reshape(self.mesh.node_shape),
-            np,
-            self._in_plane_high,
-            self._through_high,
-            self._local_in_plane_high,
-            self._local_through_high,
+            shifted_fixed.reshape(self.mesh.node_shape), np, self._coefficients_high, self._unit_high
         ).reshape(-1)
         robin_rhs = self._robin_rhs_high - self._robin_total_high * reference
         rhs = self.nodal_load() + robin_rhs + self._capacity_load(previous_temperature_k) - boundary_action
@@ -431,12 +382,7 @@ class MatrixFreeThermalOperator:
 
         flat = np.asarray(temperature_k, dtype=np.float64).reshape(-1)
         conduction = self._stiffness_action(
-            flat.reshape(self.mesh.node_shape),
-            np,
-            self._in_plane_high,
-            self._through_high,
-            self._local_in_plane_high,
-            self._local_through_high,
+            flat.reshape(self.mesh.node_shape), np, self._coefficients_high, self._unit_high
         ).reshape(-1)
         return (
             conduction
@@ -475,14 +421,12 @@ class MatrixFreeThermalOperator:
         z_plus = corners[4] + corners[5] + corners[6] + corners[7]
         z_minus = corners[0] + corners[1] + corners[2] + corners[3]
         thickness = np.asarray(self.mesh.slab_thickness_m)[:, None, None]
-        gradient_x = (x_plus - x_minus) / (4.0 * self.mesh.pitch_x_m)
-        gradient_y = (y_plus - y_minus) / (4.0 * self.mesh.pitch_y_m)
+        gradient_x = (x_plus - x_minus) / (4.0 * self.mesh.pitch_x_m[None, None, :])
+        gradient_y = (y_plus - y_minus) / (4.0 * self.mesh.pitch_y_m[None, :, None])
         gradient_z = (z_plus - z_minus) / (4.0 * thickness)
+        in_plane = np.asarray(self.mesh.conductivity_w_per_m_k, dtype=np.float64)
+        through = np.asarray(self.mesh.through_plane_conductivity_w_per_m_k, dtype=np.float64)
         return np.stack(
-            (
-                -self._in_plane_high * gradient_x,
-                -self._in_plane_high * gradient_y,
-                -self._through_high * gradient_z,
-            ),
+            (-in_plane * gradient_x, -in_plane * gradient_y, -through * gradient_z),
             axis=-1,
         )

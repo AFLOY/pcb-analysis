@@ -68,10 +68,8 @@ def test_cuda_low_action_matches_the_host_operator() -> None:
         gpu._apply_impl(
             runtime.from_host(vector),
             runtime.namespace,
-            gpu._in_plane_low,
-            gpu._through_low,
-            gpu._local_in_plane_low,
-            gpu._local_through_low,
+            gpu._coefficients_low,
+            gpu._unit_low,
             gpu._robin_total_low,
             gpu._free_low,
         )

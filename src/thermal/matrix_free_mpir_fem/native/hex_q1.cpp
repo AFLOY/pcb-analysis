@@ -51,10 +51,8 @@ const T* data_of(const py::array_t<T, F>& a, py::ssize_t expected, const char* n
 }
 
 struct HexOperator {
-    const float* in_plane;   // (slabs, rows, cols)
-    const float* through;    // (slabs, rows, cols)
-    const float* local_in;   // (slabs, 8, 8)
-    const float* local_thr;  // (slabs, 8, 8)
+    const float* coef;       // (3, slabs, rows, cols): a_x, a_y, a_z per element
+    const float* unit;       // (3, 8, 8): U_x, U_y, U_z
     const float* robin;      // (nodes,)
     const std::uint8_t* free_nodes;
     const float* free_mask;  // 1.0f free, 0.0f fixed
@@ -65,6 +63,7 @@ struct HexOperator {
     int node_rows() const { return rows + 1; }
     int node_cols() const { return cols + 1; }
     int lines() const { return node_layers() * node_rows(); }
+    py::ssize_t element_count() const { return static_cast<py::ssize_t>(slabs) * rows * cols; }
     py::ssize_t node_count() const { return static_cast<py::ssize_t>(lines()) * node_cols(); }
 
     // Generic gather for one node, same ordering as the CUDA kernel.
@@ -75,20 +74,22 @@ struct HexOperator {
         const int z0 = z > 0 ? z - 1 : 0, z1 = z < slabs ? z : slabs - 1;
         const int y0 = y > 0 ? y - 1 : 0, y1 = y < rows ? y : rows - 1;
         const int x0 = xi > 0 ? xi - 1 : 0, x1 = xi < cols ? xi : cols - 1;
+        const py::ssize_t ne = element_count();
+        const float* ux = unit;
+        const float* uy = unit + 64;
+        const float* uz = unit + 128;
         float acc = 0.0f;
         for (int ez = z0; ez <= z1; ++ez) {
-            const float* kin = local_in + ez * 64;
-            const float* kz = local_thr + ez * 64;
             for (int ey = y0; ey <= y1; ++ey) {
                 for (int ex = x0; ex <= x1; ++ex) {
                     const int lr = 4 * (z - ez) + 2 * (y - ey) + (xi - ex);
-                    const int e = (ez * rows + ey) * cols + ex;
-                    const float a = in_plane[e], b = through[e];
+                    const py::ssize_t e = static_cast<py::ssize_t>(ez * rows + ey) * cols + ex;
+                    const float a = coef[e], b = coef[ne + e], d = coef[2 * ne + e];
                     const int corner = (ez * nr + ey) * nc + ex;
                     for (int c = 0; c < 8; ++c) {
                         const int cn = corner + (c >> 2) * plane + ((c >> 1) & 1) * nc + (c & 1);
                         if (!free_nodes[cn]) continue;
-                        acc += (a * kin[8 * lr + c] + b * kz[8 * lr + c]) * x[cn];
+                        acc += (a * ux[8 * lr + c] + b * uy[8 * lr + c] + d * uz[8 * lr + c]) * x[cn];
                     }
                 }
             }
@@ -114,12 +115,17 @@ struct HexOperator {
             // acc over interior x; robin and the identity blend at the end.
             float* o = out + base;
             for (int xi = 1; xi < cols; ++xi) o[xi] = 0.0f;
+            const py::ssize_t ne = element_count();
+            const float* ux = unit;
+            const float* uy = unit + 64;
+            const float* uz = unit + 128;
             for (int ez = z0; ez <= z1; ++ez) {
-                const float* kin = local_in + ez * 64;
-                const float* kz = local_thr + ez * 64;
                 for (int ey = y0; ey <= y1; ++ey) {
                     const int lr_base = 4 * (z - ez) + 2 * (y - ey);
-                    const int e_row = (ez * rows + ey) * cols;      // element index of ex = 0
+                    const py::ssize_t e_row = static_cast<py::ssize_t>(ez * rows + ey) * cols;  // element index of ex = 0
+                    const float* ax = coef + e_row;
+                    const float* ay = coef + ne + e_row;
+                    const float* az = coef + 2 * ne + e_row;
                     const int corner_row = (ez * nr + ey) * nc;    // node index of corner ex = 0
 #pragma omp simd
                     for (int xi = 1; xi < cols; ++xi) {
@@ -128,12 +134,12 @@ struct HexOperator {
                         for (int dx = 0; dx < 2; ++dx) {
                             const int ex = xi - 1 + dx;           // element left (dx=0) or right (dx=1)
                             const int lr = lr_base + (1 - dx);     // local x index of the node in it
-                            const float a = in_plane[e_row + ex], b = through[e_row + ex];
+                            const float a = ax[ex], b = ay[ex], d = az[ex];
                             const int corner = corner_row + ex;
 #pragma GCC unroll 8
                             for (int c = 0; c < 8; ++c) {
                                 const int cn = corner + (c >> 2) * plane + ((c >> 1) & 1) * nc + (c & 1);
-                                const float w = a * kin[8 * lr + c] + b * kz[8 * lr + c];
+                                const float w = a * ux[8 * lr + c] + b * uy[8 * lr + c] + d * uz[8 * lr + c];
                                 acc += w * (x[cn] * free_mask[cn]);
                             }
                         }
@@ -162,8 +168,8 @@ struct HexOperator {
     }
 };
 
-HexOperator make_operator(const ArrF32& in_plane, const ArrF32& through, const ArrF32& local_in,
-                          const ArrF32& local_thr, const ArrF32& robin, const ArrU8& free_nodes,
+HexOperator make_operator(const ArrF32& coef, const ArrF32& unit,
+                          const ArrF32& robin, const ArrU8& free_nodes,
                           const ArrF32& free_mask, int slabs, int rows, int cols, int threads) {
     if (slabs < 1 || rows < 1 || cols < 1) throw std::invalid_argument("element grid must be positive");
     HexOperator op;
@@ -173,10 +179,8 @@ HexOperator make_operator(const ArrF32& in_plane, const ArrF32& through, const A
     op.threads = threads < 1 ? 1 : threads;
     const py::ssize_t elements = static_cast<py::ssize_t>(slabs) * rows * cols;
     const py::ssize_t nodes = op.node_count();
-    op.in_plane = data_of(in_plane, elements, "in_plane");
-    op.through = data_of(through, elements, "through");
-    op.local_in = data_of(local_in, static_cast<py::ssize_t>(slabs) * 64, "local_in_plane");
-    op.local_thr = data_of(local_thr, static_cast<py::ssize_t>(slabs) * 64, "local_through");
+    op.coef = data_of(coef, 3 * elements, "coefficients");
+    op.unit = data_of(unit, static_cast<py::ssize_t>(192), "unit");
     op.robin = data_of(robin, nodes, "robin");
     op.free_nodes = data_of(free_nodes, nodes, "free_nodes");
     op.free_mask = data_of(free_mask, nodes, "free_mask");
@@ -190,10 +194,10 @@ struct alignas(64) Partial {
 
 }  // namespace
 
-ArrF32 apply_hex_q1(ArrF32 vector, ArrF32 in_plane, ArrF32 through, ArrF32 local_in,
-                    ArrF32 local_thr, ArrF32 robin, ArrU8 free_nodes, ArrF32 free_mask, int slabs,
+ArrF32 apply_hex_q1(ArrF32 vector, ArrF32 coef, ArrF32 unit,
+                    ArrF32 robin, ArrU8 free_nodes, ArrF32 free_mask, int slabs,
                     int rows, int cols, int threads) {
-    const HexOperator op = make_operator(in_plane, through, local_in, local_thr, robin, free_nodes,
+    const HexOperator op = make_operator(coef, unit, robin, free_nodes,
                                          free_mask, slabs, rows, cols, threads);
     const py::ssize_t n = op.node_count();
     const float* x = data_of(vector, n, "vector");
@@ -222,12 +226,12 @@ ArrF32 apply_hex_q1(ArrF32 vector, ArrF32 in_plane, ArrF32 through, ArrF32 local
 // (correction float32, iterations, relative_residual, applications) with the
 // control flow of solver._inner_pcg.  Threads run SPMD over a static partition
 // of node lines; reductions are per-thread partials summed in thread order.
-py::tuple pcg_hex_q1(ArrF64 rhs_high, ArrF32 diagonal, ArrF32 in_plane, ArrF32 through,
-                     ArrF32 local_in, ArrF32 local_thr, ArrF32 robin, ArrU8 free_nodes,
+py::tuple pcg_hex_q1(ArrF64 rhs_high, ArrF32 diagonal, ArrF32 coef, ArrF32 unit,
+                     ArrF32 robin, ArrU8 free_nodes,
                      ArrF32 free_mask, int slabs, int rows, int cols, int block,
                      ArrF32 coarse_inverse, double inner_relative_tolerance,
                      int max_inner_iterations, int threads) {
-    const HexOperator op = make_operator(in_plane, through, local_in, local_thr, robin, free_nodes,
+    const HexOperator op = make_operator(coef, unit, robin, free_nodes,
                                          free_mask, slabs, rows, cols, threads);
     const py::ssize_t n = op.node_count();
     const double* rhs_in = data_of(rhs_high, n, "rhs");
@@ -391,12 +395,12 @@ py::tuple pcg_hex_q1(ArrF64 rhs_high, ArrF32 diagonal, ArrF32 in_plane, ArrF32 t
 
 PYBIND11_MODULE(_thermal_native, m) {
     m.doc() = "Fused C++ hexahedral Q1 conduction operator and two-level inner PCG";
-    m.def("apply_hex_q1", &apply_hex_q1, py::arg("vector"), py::arg("in_plane"), py::arg("through"),
-          py::arg("local_in_plane"), py::arg("local_through"), py::arg("robin"), py::arg("free_nodes"),
+    m.def("apply_hex_q1", &apply_hex_q1, py::arg("vector"), py::arg("coefficients"), py::arg("unit"),
+          py::arg("robin"), py::arg("free_nodes"),
           py::arg("free_mask"), py::arg("slabs"), py::arg("rows"), py::arg("cols"),
           py::arg("threads") = 1);
-    m.def("pcg_hex_q1", &pcg_hex_q1, py::arg("rhs_high"), py::arg("diagonal"), py::arg("in_plane"),
-          py::arg("through"), py::arg("local_in_plane"), py::arg("local_through"), py::arg("robin"),
+    m.def("pcg_hex_q1", &pcg_hex_q1, py::arg("rhs_high"), py::arg("diagonal"), py::arg("coefficients"),
+          py::arg("unit"), py::arg("robin"),
           py::arg("free_nodes"), py::arg("free_mask"), py::arg("slabs"), py::arg("rows"),
           py::arg("cols"), py::arg("block"), py::arg("coarse_inverse"),
           py::arg("inner_relative_tolerance"), py::arg("max_inner_iterations"),

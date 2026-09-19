@@ -49,10 +49,8 @@ class NativeThermalHexQ1:
     def __init__(
         self,
         element_grid_shape: tuple[int, int, int],
-        in_plane: np.ndarray,
-        through: np.ndarray,
-        local_in_plane: np.ndarray,
-        local_through: np.ndarray,
+        coefficients: np.ndarray,
+        unit: np.ndarray,
         robin: np.ndarray,
         free_nodes: np.ndarray,
         diagonal: np.ndarray,
@@ -70,10 +68,10 @@ class NativeThermalHexQ1:
         self.size = (self.slabs + 1) * (self.rows + 1) * (self.cols + 1)
         self.threads = threads if threads is not None else native_threads()
         f32 = lambda value: np.ascontiguousarray(value, dtype=np.float32).reshape(-1)
-        self._in_plane = f32(in_plane)
-        self._through = f32(through)
-        self._local_in_plane = f32(local_in_plane)
-        self._local_through = f32(local_through)
+        self._coefficients = f32(coefficients)
+        self._unit = f32(unit)
+        if self._coefficients.size != 3 * self.slabs * self.rows * self.cols or self._unit.size != 192:
+            raise ValueError("coefficients must be (3, slabs, rows, cols) and unit (3, 8, 8)")
         self._robin = f32(robin)
         self._free = np.ascontiguousarray(free_nodes, dtype=np.uint8).reshape(-1)
         self._free_mask = self._free.astype(np.float32)
@@ -98,10 +96,8 @@ class NativeThermalHexQ1:
             raise ValueError(f"vector has size {vector.size}, expected {self.size}")
         return _native.apply_hex_q1(
             vector,
-            self._in_plane,
-            self._through,
-            self._local_in_plane,
-            self._local_through,
+            self._coefficients,
+            self._unit,
             self._robin,
             self._free,
             self._free_mask,
@@ -124,10 +120,8 @@ class NativeThermalHexQ1:
         correction, iterations, relative_residual, applications = _native.pcg_hex_q1(
             rhs_high,
             self._diagonal,
-            self._in_plane,
-            self._through,
-            self._local_in_plane,
-            self._local_through,
+            self._coefficients,
+            self._unit,
             self._robin,
             self._free,
             self._free_mask,

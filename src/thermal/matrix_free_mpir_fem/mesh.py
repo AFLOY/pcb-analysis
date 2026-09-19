@@ -13,6 +13,8 @@ from typing import Any, Literal, Sequence
 
 import numpy as np
 
+from electrical.matrix_free_mpir_fem.grid import check_pitch_axis
+
 
 COPPER_THERMAL_CONDUCTIVITY_W_PER_M_K = 385.0
 FR4_IN_PLANE_THERMAL_CONDUCTIVITY_W_PER_M_K = 0.8
@@ -95,11 +97,13 @@ def _face_area_m2(mesh: "LayeredThermalMesh", direction: str) -> np.ndarray:
 
     shape = mesh.element_grid_shape
     thickness = np.asarray(mesh.slab_thickness_m, dtype=np.float64)[:, None, None]
+    hx = mesh.pitch_x_m[None, None, :]
+    hy = mesh.pitch_y_m[None, :, None]
     if direction[1] == "z":
-        return np.full(shape, mesh.pitch_x_m * mesh.pitch_y_m)
+        return np.broadcast_to(hx * hy, shape).copy()
     if direction[1] == "y":
-        return np.broadcast_to(mesh.pitch_x_m * thickness, shape).copy()
-    return np.broadcast_to(mesh.pitch_y_m * thickness, shape).copy()
+        return np.broadcast_to(hx * thickness, shape).copy()
+    return np.broadcast_to(hy * thickness, shape).copy()
 
 
 def _broadcast_element_field(
@@ -124,9 +128,12 @@ class LayeredThermalMesh:
     """Structured hexahedral Q1 mesh of a PCB stack.
 
     ``slab_thickness_m`` lists element slabs from the bottom of the board to
-    the top.  Conductivity is a scalar, one value per slab, or one value per
-    element with shape ``(slabs, rows, cols)``; ``element_shape`` gives the
-    in-plane element count when the conductivity does not.  Through-plane
+    the top.  ``pitch_x_m`` is one width for every column or one value per
+    column, ``pitch_y_m`` likewise per row (a graded tensor grid, see
+    ``electrical.matrix_free_mpir_fem.grid``).  Conductivity is a scalar, one
+    value per slab, or one value per element with shape ``(slabs, rows,
+    cols)``; ``element_shape`` gives the in-plane element count when neither
+    the conductivity nor the pitches do.  Through-plane
     conductivity defaults to the in-plane value; laminates are usually
     anisotropic, so both can be given.
 
@@ -138,8 +145,8 @@ class LayeredThermalMesh:
     """
 
     slab_thickness_m: Sequence[float]
-    pitch_x_m: float
-    pitch_y_m: float
+    pitch_x_m: float | Sequence[float] | np.ndarray
+    pitch_y_m: float | Sequence[float] | np.ndarray
     conductivity_w_per_m_k: float | Sequence[float] | np.ndarray
     element_shape: tuple[int, int] | None = None
     through_plane_conductivity_w_per_m_k: (
@@ -156,25 +163,26 @@ class LayeredThermalMesh:
             raise ValueError("slab_thickness_m must list at least one slab")
         if not np.all(np.isfinite(thickness)) or np.any(thickness <= 0.0):
             raise ValueError("slab thicknesses must be finite and positive")
-        for name in ("pitch_x_m", "pitch_y_m"):
-            value = float(getattr(self, name))
-            if not np.isfinite(value) or value <= 0.0:
-                raise ValueError(f"{name} must be finite and positive")
-            object.__setattr__(self, name, value)
 
         in_plane = np.asarray(self.conductivity_w_per_m_k, dtype=np.float64)
-        if self.element_shape is None:
-            if in_plane.ndim != 3:
-                raise ValueError(
-                    "element_shape is required unless conductivity has shape "
-                    "(slabs, rows, cols)"
-                )
-            rows, cols = int(in_plane.shape[1]), int(in_plane.shape[2])
-        else:
+        pitch_x = np.asarray(self.pitch_x_m, dtype=np.float64)
+        pitch_y = np.asarray(self.pitch_y_m, dtype=np.float64)
+        if self.element_shape is not None:
             rows, cols = (int(value) for value in self.element_shape)
+        elif in_plane.ndim == 3:
+            rows, cols = int(in_plane.shape[1]), int(in_plane.shape[2])
+        elif pitch_x.ndim == 1 and pitch_y.ndim == 1:
+            rows, cols = int(pitch_y.size), int(pitch_x.size)
+        else:
+            raise ValueError(
+                "element_shape is required unless conductivity has shape "
+                "(slabs, rows, cols) or both pitches are per-cell arrays"
+            )
         if rows < 1 or cols < 1:
             raise ValueError("element_shape must have positive axes")
         shape = (int(thickness.size), rows, cols)
+        object.__setattr__(self, "pitch_x_m", check_pitch_axis(pitch_x, cols, "pitch_x_m"))
+        object.__setattr__(self, "pitch_y_m", check_pitch_axis(pitch_y, rows, "pitch_y_m"))
 
         in_plane = _broadcast_element_field(in_plane, shape, "conductivity_w_per_m_k")
         through = (
@@ -239,12 +247,50 @@ class LayeredThermalMesh:
         return int(np.prod(self.node_shape))
 
     @property
+    def uniform_pitch(self) -> bool:
+        """True when every column and every row has the same width."""
+
+        return bool(
+            np.all(self.pitch_x_m == self.pitch_x_m[0]) and np.all(self.pitch_y_m == self.pitch_y_m[0])
+        )
+
+    @property
+    def cell_area_m2(self) -> np.ndarray:
+        """In-plane area of every cell, ``(rows, cols)``."""
+
+        return self.pitch_y_m[:, None] * self.pitch_x_m[None, :]
+
+    @property
+    def x_edges_m(self) -> np.ndarray:
+        return np.concatenate(([0.0], np.cumsum(self.pitch_x_m)))
+
+    @property
+    def y_edges_m(self) -> np.ndarray:
+        return np.concatenate(([0.0], np.cumsum(self.pitch_y_m)))
+
+    @property
     def element_volume_m3(self) -> np.ndarray:
         thickness = np.asarray(self.slab_thickness_m, dtype=np.float64)
-        return np.broadcast_to(
-            (thickness * self.pitch_x_m * self.pitch_y_m)[:, None, None],
-            self.element_grid_shape,
-        ).copy()
+        return thickness[:, None, None] * self.cell_area_m2[None, :, :]
+
+    def element_coefficients(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Per-element factors of the three unit stiffness matrices.
+
+        ``K_e = a_x U_x + a_y U_y + a_z U_z`` with ``a_x = k_in h_y h_z / h_x``,
+        ``a_y = k_in h_x h_z / h_y``, ``a_z = k_z h_x h_y / h_z``; zero on void
+        elements because their conductivity is zero.
+        """
+
+        hz = np.asarray(self.slab_thickness_m, dtype=np.float64)[:, None, None]
+        hx = self.pitch_x_m[None, None, :]
+        hy = self.pitch_y_m[None, :, None]
+        k_in = np.asarray(self.conductivity_w_per_m_k, dtype=np.float64)
+        k_z = np.asarray(self.through_plane_conductivity_w_per_m_k, dtype=np.float64)
+        return (
+            np.ascontiguousarray(k_in * hy * hz / hx),
+            np.ascontiguousarray(k_in * hx * hz / hy),
+            np.ascontiguousarray(k_z * hx * hy / hz),
+        )
 
     @property
     def has_heat_capacity(self) -> bool:
@@ -297,30 +343,39 @@ _STIFFNESS_1D = np.array([[1.0, -1.0], [-1.0, 1.0]])
 _MASS_1D = np.array([[2.0, 1.0], [1.0, 2.0]]) / 6.0
 
 
+def unit_hexahedron_matrices() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The three ``(8, 8)`` unit trilinear stiffness matrices ``U_x, U_y, U_z``.
+
+    Local node ordering is ``4 * dz + 2 * dy + dx``, matching the corner
+    views.  For an ``h_x × h_y × h_z`` element with conductivities ``k_in``
+    (in-plane) and ``k_z`` the stiffness is ``k_in h_y h_z / h_x U_x + k_in
+    h_x h_z / h_y U_y + k_z h_x h_y / h_z U_z``; see
+    ``LayeredThermalMesh.element_coefficients``.
+    """
+
+    unit_x = np.kron(_MASS_1D, np.kron(_MASS_1D, _STIFFNESS_1D))
+    unit_y = np.kron(_MASS_1D, np.kron(_STIFFNESS_1D, _MASS_1D))
+    unit_z = np.kron(_STIFFNESS_1D, np.kron(_MASS_1D, _MASS_1D))
+    return unit_x, unit_y, unit_z
+
+
 def _local_hexahedron_matrices(
     pitch_x_m: float,
     pitch_y_m: float,
     slab_thickness_m: Sequence[float],
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Unit-conductivity trilinear stiffness split into in-plane and z parts.
+    """Unit-conductivity stiffness of a uniform grid split into in-plane and z parts.
 
-    Local node ordering is ``4 * dz + 2 * dy + dx``, matching the corner
-    views below.  Returns arrays of shape ``(slabs, 8, 8)``.
+    Kept for the verification tests of the uniform case; the operator uses
+    ``unit_hexahedron_matrices`` with per-element coefficients.  Returns arrays
+    of shape ``(slabs, 8, 8)``.
     """
 
+    unit_x, unit_y, unit_z = unit_hexahedron_matrices()
     in_plane = []
     through = []
     for hz in slab_thickness_m:
-        hx, hy = pitch_x_m, pitch_y_m
-        x_part = (hy * hz / hx) * np.kron(
-            _MASS_1D, np.kron(_MASS_1D, _STIFFNESS_1D)
-        )
-        y_part = (hx * hz / hy) * np.kron(
-            _MASS_1D, np.kron(_STIFFNESS_1D, _MASS_1D)
-        )
-        z_part = (hx * hy / hz) * np.kron(
-            _STIFFNESS_1D, np.kron(_MASS_1D, _MASS_1D)
-        )
-        in_plane.append(x_part + y_part)
-        through.append(z_part)
+        hx, hy = float(pitch_x_m), float(pitch_y_m)
+        in_plane.append((hy * hz / hx) * unit_x + (hx * hz / hy) * unit_y)
+        through.append((hx * hy / hz) * unit_z)
     return np.asarray(in_plane), np.asarray(through)

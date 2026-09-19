@@ -151,7 +151,7 @@ class ContactMap:
             (self.board_cells[:, 0], self.board_cells[:, 1]),
             self.conductance_w_per_k * body_temperature,
         )
-        cell_area = board.pitch_x_m * board.pitch_y_m
+        cell_area = board.cell_area_m2
         touched = conductance > 0.0
         ambient = np.where(touched, weighted / np.where(touched, conductance, 1.0), 0.0)
         return conductance / cell_area, ambient
@@ -208,21 +208,18 @@ def planar_contact_map(
     board_active = board.active[board_slab]  # type: ignore[index]
     body_exposed = body.exposed_faces()[body_face][body_slab]
 
-    # Overlap of two 1D cell ranges along one axis, for every pair.
-    def overlaps(
-        pitch_a: float, origin_a: float, count_a: int, pitch_b: float, origin_b: float, count_b: int
-    ) -> np.ndarray:
-        a0 = origin_a + pitch_a * np.arange(count_a)[:, None]
-        a1 = a0 + pitch_a
-        b0 = origin_b + pitch_b * np.arange(count_b)[None, :]
-        b1 = b0 + pitch_b
+    # Overlap of two 1D cell ranges along one axis, for every pair; the cells
+    # of either grid may be graded.
+    def overlaps(edges_a: np.ndarray, origin_a: float, edges_b: np.ndarray, origin_b: float) -> np.ndarray:
+        a0 = (origin_a + edges_a[:-1])[:, None]
+        a1 = (origin_a + edges_a[1:])[:, None]
+        b0 = (origin_b + edges_b[:-1])[None, :]
+        b1 = (origin_b + edges_b[1:])[None, :]
         return np.clip(np.minimum(a1, b1) - np.maximum(a0, b0), 0.0, None)
 
-    _, board_rows, board_cols = board.element_grid_shape
-    _, body_rows, body_cols = body.element_grid_shape
-    overlap_y = overlaps(board.pitch_y_m, board_origin_m[1], board_rows, body.pitch_y_m, body_origin_m[1], body_rows)
-    overlap_x = overlaps(board.pitch_x_m, board_origin_m[0], board_cols, body.pitch_x_m, body_origin_m[0], body_cols)
-    smaller = min(board.pitch_x_m * board.pitch_y_m, body.pitch_x_m * body.pitch_y_m)
+    overlap_y = overlaps(board.y_edges_m, board_origin_m[1], body.y_edges_m, body_origin_m[1])
+    overlap_x = overlaps(board.x_edges_m, board_origin_m[0], body.x_edges_m, body_origin_m[0])
+    smaller = min(float(np.min(board.cell_area_m2)), float(np.min(body.cell_area_m2)))
 
     board_cells: list[tuple[int, int]] = []
     body_cells: list[tuple[int, int, int]] = []

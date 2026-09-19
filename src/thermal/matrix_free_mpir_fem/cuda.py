@@ -21,10 +21,8 @@ extern "C" __global__
 void thermal_hex_q1_apply(
     const float* vector,
     float* output,
-    const float* in_plane,        // (slabs, rows, cols) conductivity
-    const float* through,         // (slabs, rows, cols) conductivity
-    const float* local_in_plane,  // (slabs, 8, 8) unit stiffness
-    const float* local_through,   // (slabs, 8, 8) unit stiffness
+    const float* coefficients,    // (3, slabs, rows, cols) a_x, a_y, a_z per element
+    const float* unit,            // (3, 8, 8) unit stiffness U_x, U_y, U_z
     const float* robin,           // (nodes,) lumped convective conductance
     const unsigned char* free_nodes,
     const int slabs,
@@ -57,19 +55,22 @@ void thermal_hex_q1_apply(
     const int x_first = node_x > 0 ? node_x - 1 : 0;
     const int x_last = node_x < element_cols ? node_x : element_cols - 1;
 
+    const int element_count = slabs * element_rows * element_cols;
+    const float* unit_x = unit;
+    const float* unit_y = unit + 64;
+    const float* unit_z = unit + 128;
     float accumulated = 0.0f;
     for (int ez = z_first; ez <= z_last; ++ez) {
         const int local_z = node_z - ez;
-        const float* stiff_in = local_in_plane + ez * 64;
-        const float* stiff_z = local_through + ez * 64;
         for (int ey = y_first; ey <= y_last; ++ey) {
             const int local_y = node_y - ey;
             for (int ex = x_first; ex <= x_last; ++ex) {
                 const int local_x = node_x - ex;
                 const int local_row = 4 * local_z + 2 * local_y + local_x;
                 const int element = (ez * element_rows + ey) * element_cols + ex;
-                const float k_in = in_plane[element];
-                const float k_z = through[element];
+                const float a_x = coefficients[element];
+                const float a_y = coefficients[element_count + element];
+                const float a_z = coefficients[2 * element_count + element];
                 const int corner = (ez * node_rows + ey) * node_cols + ex;
                 for (int column = 0; column < 8; ++column) {
                     const int column_node = corner
@@ -80,8 +81,9 @@ void thermal_hex_q1_apply(
                         continue;
                     }
                     const int local_index = 8 * local_row + column;
-                    const float weight = k_in * stiff_in[local_index]
-                        + k_z * stiff_z[local_index];
+                    const float weight = a_x * unit_x[local_index]
+                        + a_y * unit_y[local_index]
+                        + a_z * unit_z[local_index];
                     accumulated += weight * vector[column_node];
                 }
             }
@@ -121,10 +123,8 @@ class CudaThermalHexQ1Apply:
     def __call__(
         self,
         vector: Any,
-        in_plane: Any,
-        through: Any,
-        local_in_plane: Any,
-        local_through: Any,
+        coefficients: Any,
+        unit: Any,
         robin: Any,
         free_nodes: Any,
     ) -> Any:
@@ -140,10 +140,8 @@ class CudaThermalHexQ1Apply:
             (
                 flat,
                 output,
-                in_plane,
-                through,
-                local_in_plane,
-                local_through,
+                coefficients,
+                unit,
                 robin,
                 free_nodes,
                 np.int32(self._slabs),
