@@ -493,7 +493,10 @@ pip install 'pcb-analysis[cad]'   # cadquery-ocp, a large wheel
 ```
 
 Without it the package imports and the array-side functions work; only
-`load_step`, the synthetic solids and `write_step` raise. The body map that
+`load_step`, the synthetic solids and `write_step` raise. The CMake build
+above also produces `_voxelize_native`, the C++ point classification that
+makes sampling a board about 80× faster than the per-point OpenCASCADE
+classifier on one thread (`docs/GEOMETRY_CLASSIFY_RESULTS.json`). The body map that
 names which solid is the board, copper, via or body is the caller's, see
 [docs/GEOMETRY_STEP_VOXELIZE.md](docs/GEOMETRY_STEP_VOXELIZE.md). `geometry`
 is a new top-level package; nothing in the existing packages moved.

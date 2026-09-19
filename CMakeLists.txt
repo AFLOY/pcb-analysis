@@ -66,3 +66,5 @@ pcb_native_module(_thermal_native thermal/matrix_free_mpir_fem
   src/thermal/matrix_free_mpir_fem/native/hex_q1.cpp)
 pcb_native_module(_dipole_native emc/tiled_dipole_superposition
   src/emc/tiled_dipole_superposition/native/dipole_fields.cpp)
+pcb_native_module(_voxelize_native geometry/step_voxelize
+  src/geometry/step_voxelize/native/point_in_mesh.cpp)
