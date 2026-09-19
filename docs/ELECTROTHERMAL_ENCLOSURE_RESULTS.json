@@ -1,0 +1,225 @@
+{
+  "generated_at": "2026-09-19T14:57:21+00:00",
+  "environment": {
+    "platform": "Linux-6.12.0-211.54.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "cupy": "14.1.1",
+    "cpu": "Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz",
+    "cpu_count": 12,
+    "compiler": "g++ (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)",
+    "native_extension_built": true,
+    "PCB_NATIVE_THREADS": null,
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "radiation_plate": {
+    "plate": {
+      "rows": 8,
+      "cols": 10,
+      "area_m2": 8e-05,
+      "emissivity": 0.9,
+      "ambient_k": 298.15
+    },
+    "cases": [
+      {
+        "boundary": "RadiationBoundary top",
+        "power_w": 0.05,
+        "exact_surface_k": 376.75844268938334,
+        "surface_rise_k": 78.60844268938337,
+        "solved_surface_k": 376.7584426893741,
+        "surface_error_k": -9.265477274311706e-12,
+        "surface_error_rel": -2.4592620163128194e-14,
+        "radiative_heat_w": 0.04999999999998905,
+        "heat_balance_error_w": 1.0949574580365606e-14,
+        "newton_iterations": 5,
+        "newton_converged": true,
+        "wall_ms": 177.16412106528878
+      },
+      {
+        "boundary": "ExposedFaceRadiation +z",
+        "power_w": 0.05,
+        "exact_surface_k": 376.75844268938334,
+        "surface_rise_k": 78.60844268938337,
+        "solved_surface_k": 376.758442691981,
+        "surface_error_k": 2.5976305551012047e-09,
+        "surface_error_rel": 6.894684393954798e-12,
+        "radiative_heat_w": 0.04999999999998633,
+        "heat_balance_error_w": 1.366962099069724e-14,
+        "newton_iterations": 5,
+        "newton_converged": true,
+        "wall_ms": 173.5721928998828
+      },
+      {
+        "boundary": "RadiationBoundary top",
+        "power_w": 0.6,
+        "exact_surface_k": 627.3185247138657,
+        "surface_rise_k": 329.16852471386574,
+        "solved_surface_k": 627.3185247138317,
+        "surface_error_k": -3.399236447876319e-11,
+        "surface_error_rel": -5.418676978217387e-14,
+        "radiative_heat_w": 0.5999999999998638,
+        "heat_balance_error_w": 1.3633538742396922e-13,
+        "newton_iterations": 9,
+        "newton_converged": true,
+        "wall_ms": 305.98432710394263
+      },
+      {
+        "boundary": "ExposedFaceRadiation +z",
+        "power_w": 0.6,
+        "exact_surface_k": 627.3185247138657,
+        "surface_rise_k": 329.16852471386574,
+        "solved_surface_k": 627.3185249240659,
+        "surface_error_k": 2.1020014173700474e-07,
+        "surface_error_rel": 3.350772111071992e-10,
+        "radiative_heat_w": 0.5999999999998613,
+        "heat_balance_error_w": 1.3877787807814457e-13,
+        "newton_iterations": 9,
+        "newton_converged": true,
+        "wall_ms": 308.27474198304117
+      },
+      {
+        "boundary": "RadiationBoundary top",
+        "power_w": 3.0,
+        "exact_surface_k": 928.3368754105562,
+        "surface_rise_k": 630.1868754105562,
+        "solved_surface_k": 928.3368754241644,
+        "surface_error_k": 1.3608200788439717e-08,
+        "surface_error_rel": 1.4658688186248662e-11,
+        "radiative_heat_w": 3.000000000177794,
+        "heat_balance_error_w": -1.7779466787715137e-10,
+        "newton_iterations": 13,
+        "newton_converged": true,
+        "wall_ms": 444.22111997846514
+      },
+      {
+        "boundary": "ExposedFaceRadiation +z",
+        "power_w": 3.0,
+        "exact_surface_k": 928.3368754105562,
+        "surface_rise_k": 630.1868754105562,
+        "solved_surface_k": 928.3368789611977,
+        "surface_error_k": 3.550641508809349e-06,
+        "surface_error_rel": 3.824733890096826e-09,
+        "radiative_heat_w": 3.0000000000000266,
+        "heat_balance_error_w": -2.7533531010703882e-14,
+        "newton_iterations": 13,
+        "newton_converged": true,
+        "wall_ms": 447.86868698429316
+      }
+    ]
+  },
+  "sigma_t_enclosure": [
+    {
+      "radiating": false,
+      "current_a": 6.0,
+      "reference_monolithic": {
+        "nodes": 1400,
+        "converged": true,
+        "outer_iterations": 6,
+        "wall_ms": 1603.9221609244123,
+        "max_temperature_k": 497.12093409086145,
+        "rise_k": 198.97093409086148,
+        "cold_joule_loss_w": 0.21625002615153432,
+        "joule_loss_w": 0.3861829441917089,
+        "loss_increase_ratio": 1.7858168670051229,
+        "radiative_heat_w": 0.0
+      },
+      "partitioned": {
+        "board_nodes": 700,
+        "body_nodes": 260,
+        "converged": true,
+        "outer_iterations": 6,
+        "interface_iterations_per_outer": [
+          6,
+          6,
+          4,
+          4,
+          2,
+          2
+        ],
+        "relaxation_per_outer": [
+          1.0,
+          1.0,
+          1.75181082203152,
+          1.7518110669280968,
+          1.0293563201276663,
+          1.0291670705159655
+        ],
+        "wall_ms": 4370.243220007978,
+        "max_temperature_k": 497.1488703013871,
+        "cold_joule_loss_w": 0.21625002615153432,
+        "joule_loss_w": 0.3862069870788588,
+        "loss_increase_ratio": 1.7859280479727175,
+        "interface_heat_w": 0.1362408624783864,
+        "board_radiative_heat_w": 0.0,
+        "body_radiative_heat_w": 0.0
+      },
+      "board_max_diff_k": 0.040554732409020744,
+      "sink_max_diff_k": 0.03588814451768485,
+      "board_diff_over_rise": 0.0002038223954384269,
+      "sink_diff_over_rise": 0.00018036877939818223,
+      "loss_ratio_rel_diff": 6.225776542312198e-05
+    },
+    {
+      "radiating": true,
+      "current_a": 6.0,
+      "reference_monolithic": {
+        "nodes": 1400,
+        "converged": true,
+        "outer_iterations": 7,
+        "wall_ms": 3916.8714319821447,
+        "max_temperature_k": 402.8431951484729,
+        "rise_k": 104.69319514847291,
+        "cold_joule_loss_w": 0.21625002615153432,
+        "joule_loss_w": 0.3057438469749531,
+        "loss_increase_ratio": 1.4138442080959897,
+        "radiative_heat_w": 0.10919642757021852
+      },
+      "partitioned": {
+        "board_nodes": 700,
+        "body_nodes": 260,
+        "converged": true,
+        "outer_iterations": 7,
+        "interface_iterations_per_outer": [
+          9,
+          8,
+          6,
+          5,
+          4,
+          3,
+          2
+        ],
+        "relaxation_per_outer": [
+          1.0,
+          1.0,
+          1.324786797679373,
+          1.3206575278316823,
+          1.3105308698745057,
+          1.0266623265201982,
+          1.0321844581578563
+        ],
+        "wall_ms": 13464.645288069732,
+        "max_temperature_k": 402.8519676903237,
+        "cold_joule_loss_w": 0.21625002615153432,
+        "joule_loss_w": 0.3057513938196524,
+        "loss_increase_ratio": 1.413879106795581,
+        "interface_heat_w": 0.11654697351588472,
+        "board_radiative_heat_w": 0.060655070196183436,
+        "body_radiative_heat_w": 0.04854620306563273
+      },
+      "board_max_diff_k": 0.019011956174608713,
+      "sink_max_diff_k": 0.015169417469110158,
+      "board_diff_over_rise": 0.0001815968664214183,
+      "sink_diff_over_rise": 0.00014489401577244177,
+      "loss_ratio_rel_diff": 2.4683553811262536e-05
+    }
+  ],
+  "decision": {
+    "radiation_newton_robin": "adopted",
+    "sigma_t_enclosure_loop": "adopted",
+    "criteria": {
+      "radiation_surface_error_rel": "< 1e-6 against the analytic plate for every power",
+      "board_and_sink_diff_over_rise": "< 3e-3 against the monolithic \u03c3(T) mesh",
+      "loss_ratio_rel_diff": "< 2e-3 against the monolithic \u03c3(T) mesh"
+    }
+  }
+}
