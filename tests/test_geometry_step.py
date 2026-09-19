@@ -7,6 +7,7 @@ import pytest
 
 from electrical.dice_peec.plane_opt_contract import PlaneOptProblem
 from geometry.step_voxelize import (
+    BoardRaster,
     BoardSpec,
     BodyMap,
     BodySpec,
