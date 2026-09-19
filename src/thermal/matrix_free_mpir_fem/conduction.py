@@ -9,8 +9,11 @@ contributions are evaluated directly; no global sparse matrix is assembled.
 
 Heat enters as per-element power (typically the Joule loss of an electrical
 solve) or as power spread over nodes (a component).  It leaves through
-convective faces on the top and bottom of the stack and through fixed-
-temperature nodes.  The same split-precision contract as the electrical
+convective faces on the top and bottom of the stack, through every element
+face exposed to a void when the mesh carries an ``active`` mask (heat sinks
+and enclosures voxelised onto the same kind of grid), and through fixed-
+temperature nodes.  Nodes touched by no active element are held at the
+reference temperature and reported as ``nan``.  The same split-precision contract as the electrical
 front ends drives the MPIR solver, so the low-precision path runs on NumPy or
 CuPy without changes.
 """
@@ -46,6 +49,85 @@ Side = Literal["top", "bottom"]
 Preconditioner = Literal["two-level", "jacobi"]
 
 
+def _corner_views(grid: Any) -> tuple[Any, ...]:
+    """Eight corner views of a node grid, ordered ``4 dz + 2 dy + dx``."""
+
+    slabs, rows, cols = (axis - 1 for axis in grid.shape)
+    return tuple(
+        grid[dz : dz + slabs, dy : dy + rows, dx : dx + cols]
+        for dz in (0, 1)
+        for dy in (0, 1)
+        for dx in (0, 1)
+    )
+
+
+FaceDirection = Literal["-x", "+x", "-y", "+y", "-z", "+z"]
+FACE_DIRECTIONS: tuple[FaceDirection, ...] = ("-x", "+x", "-y", "+y", "-z", "+z")
+# Local corner indices (``4 dz + 2 dy + dx``) of each element face.
+_FACE_CORNERS: dict[str, tuple[int, int, int, int]] = {
+    "-z": (0, 1, 2, 3),
+    "+z": (4, 5, 6, 7),
+    "-y": (0, 1, 4, 5),
+    "+y": (2, 3, 6, 7),
+    "-x": (0, 2, 4, 6),
+    "+x": (1, 3, 5, 7),
+}
+
+
+def exposed_element_faces(active: np.ndarray) -> dict[FaceDirection, np.ndarray]:
+    """Faces of active elements that border a void element or the grid edge.
+
+    Returns one boolean element-grid array per direction.  A fully active
+    grid exposes only its six outer surfaces.
+    """
+
+    mask = np.asarray(active, dtype=bool)
+    if mask.ndim != 3:
+        raise ValueError("active must have shape (slabs, rows, cols)")
+    faces: dict[FaceDirection, np.ndarray] = {}
+    for direction in FACE_DIRECTIONS:
+        axis = {"x": 2, "y": 1, "z": 0}[direction[1]]
+        neighbour = np.zeros_like(mask)
+        source = [slice(None)] * 3
+        target = [slice(None)] * 3
+        if direction[0] == "+":
+            target[axis] = slice(None, -1)
+            source[axis] = slice(1, None)
+        else:
+            target[axis] = slice(1, None)
+            source[axis] = slice(None, -1)
+        neighbour[tuple(target)] = mask[tuple(source)]
+        faces[direction] = mask & ~neighbour
+    return faces
+
+
+def _lump_faces_onto_nodes(
+    face_weight: np.ndarray,
+    direction: str,
+    node_shape: tuple[int, int, int],
+) -> np.ndarray:
+    """Spread one weight per element face equally onto its four nodes."""
+
+    weights = np.zeros(node_shape, dtype=np.float64)
+    targets = _corner_views(weights)
+    share = face_weight / 4.0
+    for corner in _FACE_CORNERS[direction]:
+        targets[corner][...] += share
+    return weights
+
+
+def _face_area_m2(mesh: "LayeredThermalMesh", direction: str) -> np.ndarray:
+    """Area of every element face pointing in ``direction``, element grid shape."""
+
+    shape = mesh.element_grid_shape
+    thickness = np.asarray(mesh.slab_thickness_m, dtype=np.float64)[:, None, None]
+    if direction[1] == "z":
+        return np.full(shape, mesh.pitch_x_m * mesh.pitch_y_m)
+    if direction[1] == "y":
+        return np.broadcast_to(mesh.pitch_x_m * thickness, shape).copy()
+    return np.broadcast_to(mesh.pitch_y_m * thickness, shape).copy()
+
+
 def _broadcast_element_field(
     value: Any,
     shape: tuple[int, int, int],
@@ -73,6 +155,12 @@ class LayeredThermalMesh:
     in-plane element count when the conductivity does not.  Through-plane
     conductivity defaults to the in-plane value; laminates are usually
     anisotropic, so both can be given.
+
+    ``active`` marks the elements that exist.  Inactive elements are void:
+    their conductivity is zeroed, they carry no heat, and their faces towards
+    active elements are exposed surfaces.  A plain board leaves it ``None``;
+    a voxelised heat sink or enclosure uses it to carve the body out of its
+    bounding box.
     """
 
     slab_thickness_m: Sequence[float]
@@ -83,6 +171,7 @@ class LayeredThermalMesh:
     through_plane_conductivity_w_per_m_k: (
         float | Sequence[float] | np.ndarray | None
     ) = None
+    active: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         thickness = np.asarray(self.slab_thickness_m, dtype=np.float64)
@@ -120,17 +209,31 @@ class LayeredThermalMesh:
                 "through_plane_conductivity_w_per_m_k",
             )
         )
+        if self.active is None:
+            active = np.ones(shape, dtype=bool)
+        else:
+            active = np.asarray(self.active, dtype=bool)
+            if active.shape != shape:
+                raise ValueError("active must match (slabs, rows, cols)")
+            if not np.any(active):
+                raise ValueError("at least one element must be active")
+            active = active.copy()
         for name, array in (
             ("conductivity_w_per_m_k", in_plane),
             ("through_plane_conductivity_w_per_m_k", through),
         ):
-            if not np.all(np.isfinite(array)) or np.any(array <= 0.0):
-                raise ValueError(f"{name} must be finite and positive")
+            if not np.all(np.isfinite(array)) or np.any(array[active] <= 0.0):
+                raise ValueError(
+                    f"{name} must be finite and positive on active elements"
+                )
+        in_plane = np.where(active, in_plane, 0.0)
+        through = np.where(active, through, 0.0)
 
         object.__setattr__(self, "slab_thickness_m", tuple(thickness.tolist()))
         object.__setattr__(self, "element_shape", (rows, cols))
         object.__setattr__(self, "conductivity_w_per_m_k", in_plane)
         object.__setattr__(self, "through_plane_conductivity_w_per_m_k", through)
+        object.__setattr__(self, "active", active)
 
     @property
     def element_grid_shape(self) -> tuple[int, int, int]:
@@ -154,6 +257,26 @@ class LayeredThermalMesh:
             self.element_grid_shape,
         ).copy()
 
+    @property
+    def is_full(self) -> bool:
+        """True when every element is active (a plain layered board)."""
+
+        return bool(np.all(self.active))
+
+    @property
+    def active_nodes(self) -> np.ndarray:
+        """Nodes that belong to at least one active element."""
+
+        nodes = np.zeros(self.node_shape, dtype=bool)
+        for view in _corner_views(nodes):
+            view[...] |= self.active  # type: ignore[operator]
+        return nodes
+
+    def exposed_faces(self) -> dict[FaceDirection, np.ndarray]:
+        """Active element faces bordering a void or the grid boundary."""
+
+        return exposed_element_faces(self.active)  # type: ignore[arg-type]
+
 
 @dataclass(frozen=True)
 class ConvectionBoundary:
@@ -161,12 +284,15 @@ class ConvectionBoundary:
 
     The film coefficient is a scalar or one value per element face with shape
     ``(rows, cols)``.  Zero switches a face off, so a board clamped on one
-    side and cooled on the other is expressed with one boundary.
+    side and cooled on the other is expressed with one boundary.  The ambient
+    temperature is likewise a scalar or one value per element face; the
+    per-face form is how a separately meshed heat sink presents its contact
+    temperature to the board.  Faces of inactive elements carry no cooling.
     """
 
     side: Side
     coefficient_w_per_m2_k: float | np.ndarray
-    ambient_temperature_k: float
+    ambient_temperature_k: float | np.ndarray
 
     def __post_init__(self) -> None:
         if self.side not in ("top", "bottom"):
@@ -176,11 +302,127 @@ class ConvectionBoundary:
             raise ValueError("coefficient must be a scalar or a (rows, cols) array")
         if not np.all(np.isfinite(coefficient)) or np.any(coefficient < 0.0):
             raise ValueError("film coefficients must be finite and non-negative")
+        ambient = np.asarray(self.ambient_temperature_k, dtype=np.float64)
+        if ambient.ndim not in (0, 2):
+            raise ValueError("ambient must be a scalar or a (rows, cols) array")
+        if not np.all(np.isfinite(ambient)):
+            raise ValueError("ambient temperature must be finite")
+        if ambient.ndim == 0:
+            ambient = float(ambient)
+        else:
+            ambient = ambient.copy()
+        object.__setattr__(self, "coefficient_w_per_m2_k", coefficient.copy())
+        object.__setattr__(self, "ambient_temperature_k", ambient)
+
+    def check_shape(self, mesh: "LayeredThermalMesh") -> None:
+        shape = mesh.element_grid_shape[1:]
+        coefficient = self.coefficient_w_per_m2_k
+        if coefficient.ndim == 2 and coefficient.shape != shape:
+            raise ValueError(
+                "convection coefficient array must match (rows, cols) of the mesh"
+            )
+        ambient = np.asarray(self.ambient_temperature_k)
+        if ambient.ndim == 2 and ambient.shape != shape:
+            raise ValueError(
+                "convection ambient array must match (rows, cols) of the mesh"
+            )
+
+    @property
+    def cools(self) -> bool:
+        return bool(np.any(self.coefficient_w_per_m2_k > 0.0))
+
+    def mean_ambient_k(self) -> float:
+        return float(np.mean(self.ambient_temperature_k))
+
+    def lumped_nodal_weights(
+        self, mesh: "LayeredThermalMesh"
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Nodal conductance ``R`` and load ``R T_amb`` of this face, flat."""
+
+        slab = -1 if self.side == "top" else 0
+        direction = "+z" if self.side == "top" else "-z"
+        coefficient = np.broadcast_to(
+            self.coefficient_w_per_m2_k, mesh.element_grid_shape[1:]
+        )
+        ambient = np.broadcast_to(
+            self.ambient_temperature_k, mesh.element_grid_shape[1:]
+        )
+        face = np.zeros(mesh.element_grid_shape, dtype=np.float64)
+        face[slab] = coefficient * mesh.active[slab]  # type: ignore[index]
+        face *= _face_area_m2(mesh, direction)
+        load = face.copy()
+        load[slab] *= ambient
+        weights = _lump_faces_onto_nodes(face, direction, mesh.node_shape)
+        rhs = _lump_faces_onto_nodes(load, direction, mesh.node_shape)
+        return weights.reshape(-1), rhs.reshape(-1)
+
+
+@dataclass(frozen=True)
+class ExposedFaceConvection:
+    """Newton cooling on every exposed face of the active elements.
+
+    A face is exposed when it borders a void element or the grid boundary.
+    ``directions`` restricts the cooled faces (a fin whose edges are
+    adiabatic, a body standing on an insulating floor).  With a full mesh and
+    all directions this cools the six outer surfaces of the block.
+    """
+
+    coefficient_w_per_m2_k: float
+    ambient_temperature_k: float
+    directions: tuple[FaceDirection, ...] = FACE_DIRECTIONS
+
+    def __post_init__(self) -> None:
+        coefficient = float(self.coefficient_w_per_m2_k)
+        if not np.isfinite(coefficient) or coefficient < 0.0:
+            raise ValueError("film coefficient must be finite and non-negative")
         ambient = float(self.ambient_temperature_k)
         if not np.isfinite(ambient):
             raise ValueError("ambient temperature must be finite")
-        object.__setattr__(self, "coefficient_w_per_m2_k", coefficient.copy())
+        directions = tuple(self.directions)
+        if not directions or any(d not in FACE_DIRECTIONS for d in directions):
+            raise ValueError(f"directions must be drawn from {FACE_DIRECTIONS}")
+        if len(set(directions)) != len(directions):
+            raise ValueError("directions must be unique")
+        object.__setattr__(self, "coefficient_w_per_m2_k", coefficient)
         object.__setattr__(self, "ambient_temperature_k", ambient)
+        object.__setattr__(self, "directions", directions)
+
+    def check_shape(self, mesh: "LayeredThermalMesh") -> None:
+        return None
+
+    @property
+    def cools(self) -> bool:
+        return self.coefficient_w_per_m2_k > 0.0
+
+    def mean_ambient_k(self) -> float:
+        return self.ambient_temperature_k
+
+    def exposed_area_m2(self, mesh: "LayeredThermalMesh") -> float:
+        faces = mesh.exposed_faces()
+        return float(
+            sum(
+                np.sum(_face_area_m2(mesh, direction) * faces[direction])
+                for direction in self.directions
+            )
+        )
+
+    def lumped_nodal_weights(
+        self, mesh: "LayeredThermalMesh"
+    ) -> tuple[np.ndarray, np.ndarray]:
+        faces = mesh.exposed_faces()
+        weights = np.zeros(mesh.node_shape, dtype=np.float64)
+        for direction in self.directions:
+            face = (
+                self.coefficient_w_per_m2_k
+                * _face_area_m2(mesh, direction)
+                * faces[direction]
+            )
+            weights += _lump_faces_onto_nodes(face, direction, mesh.node_shape)
+        flat = weights.reshape(-1)
+        return flat, flat * self.ambient_temperature_k
+
+
+Convection = ConvectionBoundary | ExposedFaceConvection
 
 
 @dataclass(frozen=True)
@@ -215,7 +457,7 @@ class ThermalConductionProblem:
     """
 
     mesh: LayeredThermalMesh
-    convection: tuple[ConvectionBoundary, ...] = ()
+    convection: tuple[Convection, ...] = ()
     fixed_temperature_mask: np.ndarray | None = None
     fixed_temperature_k: float | np.ndarray | None = None
     heat_sources: tuple[HeatSource, ...] = ()
@@ -227,14 +469,13 @@ class ThermalConductionProblem:
 
         convection = tuple(self.convection)
         for boundary in convection:
-            coefficient = boundary.coefficient_w_per_m2_k
-            if coefficient.ndim == 2 and coefficient.shape != element_shape[1:]:
-                raise ValueError(
-                    "convection coefficient array must match (rows, cols) of the mesh"
+            if not isinstance(boundary, (ConvectionBoundary, ExposedFaceConvection)):
+                raise TypeError(
+                    "convection entries must be ConvectionBoundary or "
+                    "ExposedFaceConvection"
                 )
-        has_convection = any(
-            np.any(boundary.coefficient_w_per_m2_k > 0.0) for boundary in convection
-        )
+            boundary.check_shape(self.mesh)
+        has_convection = any(boundary.cools for boundary in convection)
 
         if self.fixed_temperature_mask is None:
             mask = np.zeros(node_shape, dtype=bool)
@@ -259,7 +500,8 @@ class ThermalConductionProblem:
             if not np.all(np.isfinite(values[mask])):
                 raise ValueError("fixed temperatures must be finite")
             values = np.where(mask, values, 0.0)
-        if not has_convection and not np.any(mask):
+        active_nodes = self.mesh.active_nodes
+        if not has_convection and not np.any(mask & active_nodes):
             raise ValueError(
                 "the problem needs a positive film coefficient or a fixed node"
             )
@@ -272,11 +514,16 @@ class ThermalConductionProblem:
                 raise ValueError("element_heat_w must match (slabs, rows, cols)")
             if not np.all(np.isfinite(element_heat)):
                 raise ValueError("element heat must be finite")
+            if np.any(element_heat[~self.mesh.active] != 0.0):  # type: ignore[index]
+                raise ValueError("element heat must be zero on inactive elements")
 
         sources = tuple(self.heat_sources)
         for source in sources:
             for node in source.nodes:
-                _flat_index(node, node_shape)
+                if not active_nodes.flat[_flat_index(node, node_shape)]:
+                    raise ValueError(
+                        f"heat source {source.name!r} touches inactive node {node!r}"
+                    )
 
         object.__setattr__(self, "convection", convection)
         object.__setattr__(self, "fixed_temperature_mask", mask.copy())
@@ -379,40 +626,36 @@ class MatrixFreeThermalOperator:
             mesh.through_plane_conductivity_w_per_m_k, dtype=np.float64
         )
 
-        self.fixed_nodes = problem.fixed_temperature_mask
+        # Nodes of void elements only are held at the reference temperature:
+        # they are fixed rows with a zero rise, invisible to the active part.
+        self.active_nodes = mesh.active_nodes
+        self.fixed_nodes = problem.fixed_temperature_mask | ~self.active_nodes
         self.free_nodes = ~self.fixed_nodes
+        self.fixed_temperature_k = np.where(
+            problem.fixed_temperature_mask & self.active_nodes,
+            problem.fixed_temperature_k,
+            0.0,
+        )
 
-        # Lumped convective conductances, kept per boundary so the solution can
-        # report how much heat each face removes.
+        # Lumped convective conductances ``R`` and loads ``R T_amb``, kept per
+        # boundary so the solution can report how much heat each face removes.
         self._robin_weights_high: list[np.ndarray] = []
+        self._robin_rhs_weights_high: list[np.ndarray] = []
         self._robin_ambient_k: list[float] = []
-        face_area = mesh.pitch_x_m * mesh.pitch_y_m
         for boundary in problem.convection:
-            coefficient = boundary.coefficient_w_per_m2_k
-            if coefficient.ndim == 0:
-                coefficient = np.full(mesh.element_grid_shape[1:], float(coefficient))
-            face_weight = coefficient * face_area / 4.0
-            weights = np.zeros(mesh.node_shape, dtype=np.float64)
-            face = weights[-1] if boundary.side == "top" else weights[0]
-            face[:-1, :-1] += face_weight
-            face[:-1, 1:] += face_weight
-            face[1:, :-1] += face_weight
-            face[1:, 1:] += face_weight
-            self._robin_weights_high.append(weights.reshape(-1))
-            self._robin_ambient_k.append(boundary.ambient_temperature_k)
+            weights, rhs_weights = boundary.lumped_nodal_weights(mesh)
+            self._robin_weights_high.append(weights)
+            self._robin_rhs_weights_high.append(rhs_weights)
+            self._robin_ambient_k.append(boundary.mean_ambient_k())
         self._robin_total_high = (
             np.sum(self._robin_weights_high, axis=0)
             if self._robin_weights_high
             else np.zeros(self.size, dtype=np.float64)
         )
-        self._robin_rhs_high = sum(
-            (
-                weights * ambient
-                for weights, ambient in zip(
-                    self._robin_weights_high, self._robin_ambient_k
-                )
-            ),
-            np.zeros(self.size, dtype=np.float64),
+        self._robin_rhs_high = (
+            np.sum(self._robin_rhs_weights_high, axis=0)
+            if self._robin_rhs_weights_high
+            else np.zeros(self.size, dtype=np.float64)
         )
 
         diagonal = self._build_diagonal(
@@ -494,17 +737,7 @@ class MatrixFreeThermalOperator:
             self.low_operator_backend = self._native.kernel_name
 
     # ------------------------------------------------------------------ views
-    @staticmethod
-    def _corner_views(grid: Any) -> tuple[Any, ...]:
-        """Eight corner views of a node grid, ordered ``4 dz + 2 dy + dx``."""
-
-        slabs, rows, cols = (axis - 1 for axis in grid.shape)
-        return tuple(
-            grid[dz : dz + slabs, dy : dy + rows, dx : dx + cols]
-            for dz in (0, 1)
-            for dy in (0, 1)
-            for dx in (0, 1)
-        )
+    _corner_views = staticmethod(_corner_views)
 
     # ---------------------------------------------------------------- actions
     def _stiffness_action(
@@ -658,7 +891,7 @@ class MatrixFreeThermalOperator:
 
         if self._robin_ambient_k:
             return float(self._robin_ambient_k[0])
-        mask = self.fixed_nodes
+        mask = self.problem.fixed_temperature_mask & self.active_nodes
         return float(np.mean(self.problem.fixed_temperature_k[mask]))
 
     def build_rhs(self, reference_temperature_k: float = 0.0) -> np.ndarray:
@@ -674,8 +907,9 @@ class MatrixFreeThermalOperator:
 
         reference = float(reference_temperature_k)
         mask = self.fixed_nodes.reshape(-1)
+        active = self.active_nodes.reshape(-1)
         shifted_fixed = np.where(
-            mask, self.problem.fixed_temperature_k.reshape(-1) - reference, 0.0
+            mask & active, self.fixed_temperature_k.reshape(-1) - reference, 0.0
         )
         boundary_action = self._stiffness_action(
             shifted_fixed.reshape(self.mesh.node_shape),
@@ -685,15 +919,7 @@ class MatrixFreeThermalOperator:
             self._local_in_plane_high,
             self._local_through_high,
         ).reshape(-1)
-        robin_rhs = sum(
-            (
-                weights * (ambient - reference)
-                for weights, ambient in zip(
-                    self._robin_weights_high, self._robin_ambient_k
-                )
-            ),
-            np.zeros(self.size, dtype=np.float64),
-        )
+        robin_rhs = self._robin_rhs_high - self._robin_total_high * reference
         rhs = self.nodal_load() + robin_rhs - boundary_action
         rhs[mask] = shifted_fixed[mask]
         return rhs
@@ -730,9 +956,9 @@ class MatrixFreeThermalOperator:
         flat = np.asarray(temperature_k, dtype=np.float64).reshape(-1)
         return np.asarray(
             [
-                float(np.sum(weights * (flat - ambient)))
-                for weights, ambient in zip(
-                    self._robin_weights_high, self._robin_ambient_k
+                float(np.sum(weights * flat) - np.sum(rhs_weights))
+                for weights, rhs_weights in zip(
+                    self._robin_weights_high, self._robin_rhs_weights_high
                 )
             ],
             dtype=np.float64,
@@ -835,7 +1061,7 @@ def solve_thermal_conduction(
             raise ValueError("initial_temperature_k must hold one value per node")
         initial = np.where(
             operator.fixed_nodes.reshape(-1),
-            problem.fixed_temperature_k.reshape(-1),
+            operator.fixed_temperature_k.reshape(-1) + reference * ~operator.active_nodes.reshape(-1),
             initial,
         ) - reference
     if config is None:
@@ -878,11 +1104,16 @@ def solve_thermal_conduction(
     convective = operator.convective_heat(temperature)
     fixed_heat = -float(np.sum(residual[fixed]))
     total_input = float(np.sum(load))
+    heat_flux = operator.element_heat_flux(temperature)
+    active_nodes = operator.active_nodes
+    if not problem.mesh.is_full:
+        heat_flux = np.where(problem.mesh.active[..., None], heat_flux, 0.0)  # type: ignore[index]
+        temperature = np.where(active_nodes, temperature, np.nan)
     return ThermalConductionSolution(
         temperature_k=temperature,
-        heat_flux_w_per_m2=operator.element_heat_flux(temperature),
-        max_temperature_k=float(np.max(temperature)),
-        min_temperature_k=float(np.min(temperature)),
+        heat_flux_w_per_m2=heat_flux,
+        max_temperature_k=float(np.nanmax(temperature)),
+        min_temperature_k=float(np.nanmin(temperature)),
         total_heat_input_w=total_input,
         convective_heat_w=convective,
         fixed_temperature_heat_w=fixed_heat,

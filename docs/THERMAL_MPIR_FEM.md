@@ -16,10 +16,17 @@ The front end is:
   copper, anisotropic laminate, and plated vias are all just element
   materials;
 - heat input per element (Joule loss) or per node (component power);
-- Newton cooling on the top and bottom faces and fixed-temperature nodes.
+- Newton cooling on the top and bottom faces and fixed-temperature nodes;
+- an optional active-element mask, so a heat sink or enclosure voxelised
+  onto the same kind of grid (`VoxelThermalMesh`, from a `VoxelSolidModel`)
+  is the same mesh with void elements carved out;
+- Newton cooling on every exposed face of the active elements
+  (`ExposedFaceConvection`, restrictable by direction), and a per-face
+  ambient temperature on the top and bottom boundaries, which is how a
+  separately meshed body presents its contact temperature to the board.
 
-Transient conduction, radiation, temperature-dependent conductivity, and side
-faces are not implemented. The nonlinear coupling back into the electrical
+Transient conduction, radiation, and temperature-dependent conductivity are
+not implemented. The nonlinear coupling back into the electrical
 solve (copper resistivity rising with temperature) is left to the caller.
 
 ## Discretisation
@@ -37,6 +44,18 @@ with the 1D stiffness `S = [[1, -1], [-1, 1]]` and mass `M = [[2, 1], [1, 2]] / 
 Local node ordering is `4 dz + 2 dy + dx`. Only the two `(slabs, 8, 8)` unit
 tensors and the two `(slabs, rows, cols)` conductivity arrays are resident on
 the low-precision path; no global matrix is assembled.
+
+Void elements carry zero conductivity, so they drop out of the action without
+any change to the kernels. A node touched by no active element has no
+equation; it is treated as a fixed node with zero rise and reported as `nan`.
+An exposed face is an active element face whose neighbour is void or lies
+outside the grid; its film conductance `h A` is lumped equally onto its four
+nodes, exactly as the top and bottom boundaries lump theirs. The array, CUDA
+and C++ paths therefore run a masked mesh unchanged; `tests/test_thermal_voxel.py`
+checks a block carved out of a void grid against the same block as a plain
+layered mesh (agreement to `1e-7` relative), a fin against the 1D fin solution
+(`2e-3` relative along the fin, base heat within 2 %), and the native and CUDA
+paths against the array path on a masked mesh with an internal void.
 
 Convection is a lumped Robin term. Every face element contributes
 `h · hx · hy / 4` to each of its four corner nodes, so a zero-order face
@@ -259,6 +278,7 @@ board with a via field.
 | `cuda.py` | fused node-owned gather kernel for the float32 action |
 | `native_hex.py`, `native/` | opt-in C++ action and two-level inner PCG (built in place) |
 | `coupling.py` | Joule loss of a `PCBConductionSolution` as thermal load |
+| `voxel.py` | `VoxelSolidModel` (material ids, fill, pitch, origin) and `VoxelThermalMesh` |
 
 The MPIR solver gained optional hooks: a system may define
 `precondition_low(vector)`, which replaces Jacobi scaling in the inner PCG and
@@ -268,15 +288,15 @@ before.
 
 ## Limitations and next increments
 
-- Structured rectangular mesh; pads and barrels are element columns.
-- Convection only on the top and bottom faces, with a constant film
-  coefficient per face element. Side faces are adiabatic.
+- Structured rectangular mesh; pads and barrels are element columns, curved
+  bodies are voxel staircases whose partially filled voxels carry a
+  fill-scaled conductivity.
+- Convection is a film coefficient per face; no buoyancy or radiation.
 - Linear steady state only. Radiation and `k(T)` require a Newton loop around
   this solver; the thermal-electrical feedback through `ρ(T)` likewise.
 - The coarse space is capped at 2,048 unknowns by a dense inverse. Boards
   beyond a few hundred thousand nodes will want a sparse coarse solve or a
   third level.
-- Heat sinks and enclosures are not part of the layered mesh. The planned
-  `VoxelThermalMesh` (same Q1 hexahedra with an active-element mask and
-  convection on any exposed face) and its interface coupling to the board are
-  specified in `GEOMETRY_STEP_VOXELIZE.md`.
+- A heat sink or enclosure is solved as its own `VoxelThermalMesh`; its
+  interface coupling to the board is specified in
+  `GEOMETRY_STEP_VOXELIZE.md`.
