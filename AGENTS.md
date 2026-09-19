@@ -32,7 +32,7 @@
 - `src/multiphysics/staggered_coupling/`: 上記を連結するscenarioだけを置く。物理の離散化
   や新しいsolverをここへ書かない。
 - `src/geometry/cad_import/`: STEP(OpenCASCADE、`OCP`)の読込、2.5D板の断面
-  ラスタライズ、3D物体のvoxel化、板とvoxelの接触map。solverを持たず、`OCP`は
+  ラスタライズ(等間隔・tensor格子)、部品からの格子細分化、3D物体のvoxel化、板とvoxelの接触map。solverを持たず、`OCP`は
   `reader.py`だけがimportし、公開結果は配列とdataclassに限る。
 
 importは`electrical` ← `thermal` ← `multiphysics`、`electrical` ← `emc` ←

@@ -210,6 +210,58 @@ footprint origin and stand on the board (`tests/test_kicad_step.py`, skipped
 without the library models; `tests/test_geometry_step.py` covers the nested
 placement with a synthetic assembly).
 
+### Graded grids from the components
+
+`rasterize_board(..., grid=)` takes a `TensorGrid`
+(`electrical.matrix_free_mpir_fem.grid`) instead of a pitch: the section
+rasteriser has a graded-grid entry (`plane_section_coverage_graded`) that
+splits every section segment at the grid lines it crosses and maps each piece
+onto cell index space, where the map is affine, so the per-cell area fractions
+stay exact (a box and a cylinder come out to `1e-15`, uniform lines reproduce
+the uniform path bitwise). `BoardRaster.grid` holds the lines; `pitch_x_m` /
+`pitch_y_m` / `cell_area_m2` follow the array row order (reversed with
+`y_down`), `pitch_mm` is `None` on a graded grid, and `board_thermal_mesh`
+hands the per-cell pitches to the thermal mesh.
+
+`geometry.cad_import.refinement` makes the grid from the parts:
+`component_boxes(kicad_component_solids(model), min_size_m=)` is the in-plane
+box of every component's solids, `board_refined_grid(board, coarse_pitch_mm=,
+fine_pitch_mm=, boxes=, margin_mm=, growth=)` is the graded grid over the
+board's bounding box, fine over the boxes widened by the margin and growing
+geometrically to the coarse pitch, and `refinement_summary` reports the cell
+counts against the uniform alternatives. Refining a box refines its whole row
+and column strips (tensor grid).
+
+KiCad writes pads, tracks and barrels as separate, overlapping solids; the
+rasteriser sums overlapping coverages per cell and clamps at one, so the
+union area then depends slightly (about `1e-3`) on the cell size. Export with
+`export_kicad_step(..., fuse_shapes=True)` (`--fuse-shapes`) to get united
+copper per layer, whose exact coverage is the same on every grid.
+
+Measured on `power_module` with fused copper and the eleven 0603 parts that
+have library models (`KICAD_REFINEMENT_RESULTS.json`,
+`experiments/kicad_refinement_acceptance.py`, Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz, KiCad
+10.0.5): 1 W in C1's pads (its box overlap weighted by copper
+fill), `h = 10 W/m²K` both faces, rise 104.5 K on the uniform 0.1 mm grid;
+the steep grading has 32200 cells against 121104 uniform fine and
+4761 uniform coarse.
+
+| Grid | Cells | Thermal nodes | Raster (ms) | Solve (ms, C++) | Inner iterations | Peak error vs 0.1 mm (K) | Copper area rel. diff |
+|---|---|---|---|---|---|---|---|
+| uniform 0.5 mm | 4900 | 20164 | 205 | 946 | 975 | -9.04 | 5.5e-14 |
+| uniform 0.1 mm | 120409 | 484416 | 7 | 9835 | 1200 | +0.00 | 0.0e+00 |
+| graded 0.1 mm under components, margin 1.0 mm, growth 1.4 | 32200 | 130248 | 7 | 4233 | 2400 | -2.80 | 5.7e-14 |
+| graded 0.1 mm under components, margin 2.0 mm, growth 1.20 | 43621 | 176176 | 7 | 4448 | 1600 | -2.89 | 5.7e-14 |
+
+Decision: adopted. The graded grids cut the peak error to a third of the
+coarse grid's with a quarter of the fine grid's cells and 2.3× less solve
+time; the copper areas are exact on every grid. The remaining 2.8 K is not
+the grading (the gentler one does not remove it) but the blended-fill
+homogenisation of 0.25 mm traces in 0.5 mm cells away from the part, which
+the uniform coarse grid shares; a smaller coarse pitch or refinement boxes
+along the hot traces are the knobs. The two-level preconditioner needs 1.3 to
+2× more inner iterations on the graded grids than on the fine uniform one.
+
 ### Acceptance 5 against plane_opt
 
 `experiments/kicad_step_acceptance.py` exports the three boards of the
@@ -349,10 +401,11 @@ requested.
 | `geometry/cad_import/reader.py` | STEP load through `STEPCAFControl`, assembly flattening into named solids, point-in-solid tests, synthetic boxes and cylinders, `write_step` (the only module importing `OCP`) |
 | `geometry/cad_import/bodymap.py` | `BodyMap` (board stackup, copper, vias, bodies, ignore) and its exhaustive resolution against the model |
 | `geometry/cad_import/kicad.py` | `kicad-cli` STEP export, stackup and footprint reading, refdes to solid binding, z-window body map, y-down grid origin |
-| `geometry/cad_import/mesh.py` | `TriangleMesh`, NumPy winding number, path selection |
+| `geometry/cad_import/mesh.py` | `TriangleMesh`, NumPy winding number, path selection, uniform and graded plane-section coverage wrappers |
 | `geometry/cad_import/skin.py` | thickness over skin depth per layer, `uniform` / `filaments` / `3d` |
-| `geometry/cad_import/native/point_in_mesh.cpp` | C++ winding number over points (OpenMP) and the exact plane-section coverage rasteriser, module `_voxelize_native` |
-| `geometry/cad_import/section.py` | per-layer sampling of the board outline and copper onto the routing grid (`BoardRaster`) |
+| `geometry/cad_import/native/point_in_mesh.cpp` | C++ winding number over points (OpenMP) and the exact plane-section coverage rasteriser on uniform and graded grids, module `_voxelize_native` |
+| `geometry/cad_import/section.py` | per-layer sampling of the board outline and copper onto the routing grid, uniform or graded (`BoardRaster` with its `TensorGrid`) |
+| `geometry/cad_import/refinement.py` | refinement boxes from component solids, graded board grid, cell-count summary |
 | `geometry/cad_import/voxelize.py` | 3D sampling of bodies onto a voxel grid, fill fraction, material precedence (`VoxelSolidModel`) |
 | `geometry/cad_import/contact.py` | board/voxel contact placement (origins, contact spec) feeding `thermal.matrix_free_mpir_fem.planar_contact_map` |
 | `geometry/cad_import/conductors.py` | thick conductor solids to `VoxelConductorProblem`, terminal regions, Joule loss to the thermal grid |
@@ -408,7 +461,9 @@ for the current path and the candidate, with the numbers written to
 | `geometry.cad_import`, `cad` extra, packaging and CI (acceptance 1, 5 on a synthetic STEP) | `feature/geometry-step-voxelize` | done; `tests/test_geometry_step.py` |
 | acceptance 5 on KiCad exports with copper (`power_module`, `bldc_driver`, `drone`) | `feature/kicad-step-acceptance` | done; `tests/test_kicad_step.py`, `KICAD_STEP_RESULTS.json` |
 | thick conductors to the 3D voxel PEEC (PyPEEC) with Joule loss to the voxel thermal mesh | `feature/voxel-peec-3d` | done; `tests/test_voxel_peec.py`, `VOXEL_PEEC_RESULTS.json` |
-| electro-thermal `σ(T)` loop around the interface iteration | — | not started |
+| electro-thermal `σ(T)` loop around the interface iteration | `feature/enclosure-electrothermal-radiation` | done; `tests/test_electro_thermal_enclosure.py`, `ELECTROTHERMAL_ENCLOSURE_RESULTS.json` |
+| graded tensor grids in the rasteriser, component-driven refinement | `feature/tensor-grid-geometry` | done; `tests/test_geometry_step.py`, `tests/test_kicad_step.py`, `KICAD_REFINEMENT_RESULTS.json` |
+| sheet PEEC on graded grids (pFFT) and the plane-opt grid contract | — | not started; `plane_opt_problem_mapping` refuses graded rasters |
 | tessellation and C++ winding-number classification | `feature/geometry-native-classify` | done; `tests/test_native_geometry.py`, `GEOMETRY_CLASSIFY_RESULTS.json` |
 
 Measured on the synthetic fixture of `tests/test_geometry_step.py` (a 20 × 12 ×
