@@ -30,16 +30,20 @@ classifiers = [
 dependencies = [
   "numpy>=1.26,<2.4",
   "scipy>=1.11,<1.18",
+  # STEP input (OpenCASCADE) and the 3D voxel PEEC are part of the package,
+  # pinned here so every install resolves the same versions.
+  "cadquery-ocp>=8.0,<9",
+  "pypeec==5.8.0",
 ]
 
 [project.optional-dependencies]
-cuda = [
-  "cupy-cuda13x>=14,<15",
-  "pypeec==5.8.0",
-]
+# CuPy is the only optional runtime: it needs an NVIDIA driver and has no
+# macOS wheel.  Every CUDA path falls back to the CPU without it.
+cuda = ["cupy-cuda13x>=14,<15"]
 test = ["pytest>=8,<9"]
 native = ["pybind11>=2.12,<4"]
-cad = ["cadquery-ocp>=7.7,<9"]
+# Kept for installs written against 0.7.0; the CAD reader is now included.
+cad = []
 
 [project.urls]
 Homepage = "https://github.com/AFLOY/pcb-analysis"

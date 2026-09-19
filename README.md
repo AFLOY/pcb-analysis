@@ -60,9 +60,14 @@ of a cold or thermally converged current distribution.
 
 ```bash
 pip install pcb-analysis
-# with CuPy and PyPEEC
+# with CuPy for the CUDA paths (NVIDIA driver required, no macOS wheel)
 pip install 'pcb-analysis[cuda]'
 ```
+
+The base install includes OpenCASCADE (`cadquery-ocp`) for STEP input and
+PyPEEC for the 3D voxel PEEC, pinned so every install resolves the same
+versions; both are large wheels. CuPy stays optional: every CUDA path falls
+back to the CPU without it.
 
 Each release is uploaded to [PyPI](https://pypi.org/project/pcb-analysis/)
 by the `Release` workflow with Trusted Publishing, and the same wheel, source
@@ -81,6 +86,10 @@ Version 0.7.0 adds the `geometry` top-level package (STEP input through
 OpenCASCADE, optional `cad` extra) and the `native` extra with the CMake build
 of the C++ kernels; nothing in `electrical`, `thermal`, `emc` or
 `multiphysics` moved, so no import path changes for existing users.
+
+After 0.7.0 `cadquery-ocp` and `pypeec` became base dependencies and the
+`cuda` extra carries CuPy only. `pip install 'pcb-analysis[cuda]'` still
+installs everything it did; `[cad]` is an empty alias.
 
 ### From a checkout, CPU only
 
@@ -491,14 +500,8 @@ distribution fails the build rather than a user's install.
 it into the solvers' arrays: the board becomes the 2.5D occupancy, stackup and
 layered thermal mesh on the routing grid; heat sinks, enclosures and packages
 become separately meshed voxel bodies joined to the board through contact
-maps. It needs the `cad` extra:
-
-```bash
-pip install 'pcb-analysis[cad]'   # cadquery-ocp, a large wheel
-```
-
-Without it the package imports and the array-side functions work; only
-`load_step`, the synthetic solids and `write_step` raise. The CMake build
+maps. OpenCASCADE (`cadquery-ocp`) is a base dependency since 0.8; the
+`cad` extra from 0.7.0 remains as an empty alias. The CMake build
 above also produces `_voxelize_native`, the C++ point classification that
 makes sampling a board about 80× faster than the per-point OpenCASCADE
 classifier on one thread (`docs/GEOMETRY_CLASSIFY_RESULTS.json`). The body map that
