@@ -12,6 +12,7 @@ from electrical.dice_peec import ViaSpec as PeecViaSpec
 from electrical.sheet_peec.plane_opt_contract import PLANE_OPT_PROBLEM_SCHEMA, PLANE_OPT_PROBLEM_SCHEMA_V2
 from thermal.matrix_free_mpir_fem import HeatSource, LayeredThermalMesh, VoxelSolidModel, VoxelThermalMesh
 
+from .barrel import Barrel, barrel_of
 from .bodymap import BodySpec, ResolvedBodies
 from .reader import MM
 from .section import BoardRaster
@@ -67,6 +68,29 @@ def board_vias(resolved: ResolvedBodies, raster: BoardRaster) -> ViaSet:
                 )
             )
     return ViaSet(tuple(vias))
+
+
+def board_barrels(
+    resolved: ResolvedBodies, raster: BoardRaster
+) -> dict[tuple[int, int], Barrel]:
+    """The plated holes among the via solids, by the cell their axis falls in.
+
+    ``board_vias`` reduces a barrel to a cell, two layers and a resistance.
+    That throws away what the solid said: the drill it stands in, its outer
+    diameter, how thick the plating is and what cross-section carries the
+    current.  This keeps it, so a problem record can carry the barrel rather
+    than a number derived from it.  A via solid that is not a recognisable
+    barrel is left out rather than guessed at.
+    """
+
+    found: dict[tuple[int, int], Barrel] = {}
+    for _, solids in resolved.vias:
+        for solid in solids:
+            barrel = barrel_of(solid)
+            if barrel is None:
+                continue
+            found[raster.cell_of(*barrel.centre_xy_m)] = barrel
+    return found
 
 
 @dataclass(frozen=True)
@@ -181,6 +205,7 @@ def plane_opt_problem_mapping(
     name: str = "board",
     role: str = "step-geometry",
     vias: ViaSet | None = None,
+    barrels: Mapping[tuple[int, int], Barrel] | None = None,
     thickness_source: str = "stackup",
 ) -> dict[str, Any]:
     """The ``plane-opt-current-field-problem/v1`` mapping for this board.
@@ -188,6 +213,10 @@ def plane_opt_problem_mapping(
     ``terminals`` are passed through as the schema expects them
     (``name``, ``pad``, ``current_a``, ``cells`` of ``layer``/``x``/``y``);
     the front end contributes grid, layers, conductor masks and vias.
+    ``barrels`` (from :func:`board_barrels`, keyed by cell) writes each plated
+    hole's own geometry -- drill and outer diameter, plating thickness, wall
+    cross-section and z span -- onto the connection that attaches there, so a
+    consumer is not left to infer the barrel from one resistance.
     ``thickness_source="measured"`` writes the copper solids' own thickness
     per layer instead of the stackup value.  Layers too thick for a sheet at
     ``frequency_hz`` raise a warning (see :mod:`.skin`); the sheet PEEC's
@@ -230,9 +259,15 @@ def plane_opt_problem_mapping(
         # plane-opt orders "upper" as the front (lower order index) layer.
         for segment in segments:
             segment["upper_layer"], segment["lower_layer"] = segment["lower_layer"], segment["upper_layer"]
-        connections.append(
-            {"name": f"via_{via.row}_{via.col}", "cell": {"x": via.col, "y": via.row}, "segments": segments}
-        )
+        record = {
+            "name": f"via_{via.row}_{via.col}",
+            "cell": {"x": via.col, "y": via.row},
+            "segments": segments,
+        }
+        barrel = (barrels or {}).get((via.row, via.col))
+        if barrel is not None:
+            record["barrel"] = barrel.as_dict()
+        connections.append(record)
     return {
         "schema": PLANE_OPT_PROBLEM_SCHEMA if raster.is_uniform else PLANE_OPT_PROBLEM_SCHEMA_V2,
         "name": name,
@@ -248,6 +283,7 @@ def plane_opt_problem_mapping(
 
 __all__ = [
     "BoardThermalModel",
+    "board_barrels",
     "board_occupancy",
     "board_stackup",
     "board_thermal_mesh",

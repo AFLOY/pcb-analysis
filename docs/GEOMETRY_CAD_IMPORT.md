@@ -342,6 +342,37 @@ faces, and rasterises them onto the routing grid:
   is also kept as a float array for the thermal conductivity blend.
 - Vias are solids whose section is a disc on two or more consecutive layer
   planes with the same centre; they become `ViaSpec` entries of a `ViaSet`.
+- A plated hole is conductor on every layer its barrel spans, at the cell the
+  `ViaSpec` names, and the problem record carries the barrel rather than a
+  number derived from it. A mechanical export writes the plating itself: a
+  tube of the order of 25 um standing in the drill and spanning the stack. At
+  a plane optimizer's pitch that wall is a quarter of a cell and the bore
+  falls between the samples, so sampling its material finds a broken ring
+  around an empty axis cell -- and the outline, which comes from the drilled
+  laminate, would mask off whatever it did find. So:
+  - `geometry.cad_import.barrel` recognises a barrel from the solid: a
+    vertical prism of circular section, whose footprint is square within
+    tolerance, whose section area (volume over height) does not exceed the
+    disc that footprint circumscribes, and whose material really surrounds the
+    axis at the radius that area implies (a ring of 24 points at three
+    heights). It yields the axis, outer radius, drill radius, plating
+    thickness, wall cross-section and z span. A through-hole pad's barrel is
+    recognised exactly as a via's; anything that is not a barrel -- a fused
+    net, a rectangular pin, a heat sink -- is rejected and left to the
+    sampler, because inventing a disc for it would invent copper.
+  - `rasterize_board` fills each barrel's footprint on every layer it spans.
+  - `BoardRaster` widens the outline to every cell the copper occupies before
+    masking with it, so the drill no longer deletes the plating and its
+    annulus. A cell outside both the laminate and the copper stays masked, so
+    a routed cutout is still a cutout and a non-rectangular board is still an
+    active-element mask on the thermal mesh.
+  - `board_barrels` keys the barrels by cell and `plane_opt_problem_mapping`
+    writes them onto the matching `vertical_connections[*].barrel`, so nothing
+    the CAD said about the hole is lost on the way to the electrical problem.
+  - Painting the whole footprint overstates in-plane copper by the bore's
+    area: negligible for a 0.3 mm via on a 0.1 mm grid, about 0.8 mm2 for a
+    1.0 mm through-hole pad. The recorded geometry is there so a consumer that
+    wants the annulus instead can have it.
 - Terminals are named cells: either from the plane-opt mapping or from
   component pins the body map names.
 

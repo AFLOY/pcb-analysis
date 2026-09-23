@@ -7,7 +7,12 @@ oriented loops and rasterised to the exact fraction of every cell they cover
 points per cell are classified against the solids and the inside fraction is
 the fill (``"numpy"``, ``"native"`` or the per-point OpenCASCADE ``"occ"``).
 The board solid treated the same way gives the outline, so a board that is
-not a rectangle becomes an active-element mask on the thermal mesh.
+not a rectangle becomes an active-element mask on the thermal mesh.  The
+laminate has every drilled hole cut out of it, so the outline alone would
+delete a plated barrel and its annulus from the grid; conductor is board, and
+the outline is widened to hold every cell the copper occupies.  A plated
+hole is read from its own geometry rather than sampled, because a barrel is a
+tube whose wall is thinner than a cell (:mod:`geometry.cad_import.barrel`).
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import numpy as np
 from .bodymap import BoardSpec, CopperSpec, LayerSpec, ResolvedBodies
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
 
+from .barrel import barrels_of
 from .mesh import ClassifyMethod, default_plane_method, plane_section_coverage
 from .reader import MM, StepSolid
 
@@ -121,6 +127,15 @@ class BoardRaster:
             pitch = float(grid.pitch_x_m[0]) / MM if grid.is_uniform else None
             object.__setattr__(self, "pitch_mm", pitch)
         object.__setattr__(self, "grid", grid)
+        # Conductor is board.  The outline comes from the laminate, which has
+        # every plated hole drilled out of it, so masking the copper with it
+        # would delete a barrel and its annulus from every layer the barrel
+        # joins -- and with them the vertical connection that attaches there.
+        # A cell the copper occupies is part of the board whatever the
+        # laminate does at it; a cell outside both stays masked, so a routed
+        # cutout is still a cutout and a non-rectangular board is still an
+        # active-element mask.
+        outline = outline | (fill >= self.threshold).any(axis=0)
         object.__setattr__(self, "outline", outline)
         object.__setattr__(self, "fill", np.where(outline[None], fill, 0.0))
         measured = tuple(self.measured_thickness_mm)
@@ -285,12 +300,19 @@ def rasterize_board(
     by_layer: dict[str, list[StepSolid]] = {layer.name: [] for layer in spec.layers}
     for copper_spec, solids in resolved.copper:
         by_layer[copper_spec.layer].extend(solids)
-    # Via barrels are copper on every layer they pass through (their annular
-    # rings), so they join each layer's sampling; ``sample_plane_fill`` skips
-    # any solid whose z extent misses the layer plane.
+    # Via barrels are copper on every layer they pass through, so they join
+    # each layer's sampling; ``sample_plane_fill`` skips any solid whose z
+    # extent misses the layer plane.  Sampling is not enough for the ones that
+    # are plated holes: a barrel is a tube whose wall is thinner than a cell,
+    # so its material rasterises as a broken ring around an empty axis cell.
+    # Those are recognised as barrels and their footprint is taken from their
+    # own geometry instead (:mod:`geometry.cad_import.barrel`).  A via solid
+    # that is not a barrel keeps the sampled answer, because inventing a disc
+    # for it would invent copper.
     via_solids = [solid for _, solids in resolved.vias for solid in solids]
     for name in by_layer:
         by_layer[name].extend(via_solids)
+    found = barrels_of(via_solids)
     fill = np.zeros((len(spec.layers), rows, cols))
     measured: list[float | None] = []
     for index, layer in enumerate(spec.layers):
@@ -304,11 +326,16 @@ def rasterize_board(
             measured.append(float(np.sum(heights * weights) / np.sum(weights)))
         else:
             measured.append(None)
-        if not solids:
-            continue
-        fill[index] = sample_plane_fill(
-            solids, z_m=layer.center_z_mm * MM, grid=grid, supersample=supersample, method=method
-        )
+        z_m = layer.center_z_mm * MM
+        if solids:
+            fill[index] = sample_plane_fill(
+                solids, z_m=z_m, grid=grid, supersample=supersample, method=method
+            )
+        for barrel in found:
+            if barrel.crosses(z_m):
+                fill[index] = np.maximum(
+                    fill[index], barrel.footprint_fill(grid, supersample=supersample)
+                )
     if y_down:
         outline = outline[::-1].copy()
         fill = fill[:, ::-1].copy()
