@@ -426,6 +426,24 @@ def cylinder_solid(
     return _solid_from_shape(name, index, shape)
 
 
+def drilled_solid(name: str, solid: StepSolid, holes: Sequence[StepSolid], *, index: int = 0) -> StepSolid:
+    """``solid`` with ``holes`` cut out of it (a laminate slab and its drills)."""
+
+    _ocp()
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+
+    if not holes:
+        raise ValueError("drilling needs at least one hole")
+    shape = solid._shape
+    for hole in holes:
+        cut = BRepAlgoAPI_Cut(shape, hole._shape)
+        cut.Build()
+        if not cut.IsDone():
+            raise ValueError(f"OpenCASCADE could not drill {name}")
+        shape = cut.Shape()
+    return _solid_from_shape(name, index, shape)
+
+
 def synthetic_model(solids: Sequence[StepSolid], source: str = "synthetic") -> StepModel:
     """A model from synthetic solids, re-indexed in order."""
 
@@ -443,6 +461,7 @@ __all__ = [
     "StepSolid",
     "box_solid",
     "cylinder_solid",
+    "drilled_solid",
     "load_step",
     "ocp_available",
     "synthetic_model",
