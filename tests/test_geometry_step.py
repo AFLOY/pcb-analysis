@@ -20,11 +20,13 @@ from geometry.cad_import import (
     board_occupancy,
     board_stackup,
     board_thermal_mesh,
+    board_barrels,
     board_vias,
     body_heat_sources,
     body_thermal_mesh,
     box_solid,
     cylinder_solid,
+    drilled_solid,
     load_step,
     ocp_available,
     plane_opt_problem_mapping,
@@ -465,3 +467,166 @@ def test_graded_raster_conserves_copper_area_and_builds_a_graded_thermal_mesh(mo
     np.testing.assert_array_equal(flipped.pitch_y_m, grid.pitch_y_m[::-1])
     np.testing.assert_array_equal(flipped.fill, graded.fill[:, ::-1])
     assert flipped.row_y_m(0) == pytest.approx(float(grid.y_centres_m[-1]))
+
+
+# --------------------------------------------------- plated holes are conductor
+#
+# Two boards, both 10 x 10 mm and two layers, both joined only through one
+# plated hole, and both drilled: the laminate really has the hole cut out of
+# it, and the plating really is a tube, which is what a mechanical export
+# gives.  One is a 0.3 mm via with a 25 um wall; the other is a through-hole
+# pad, a 1.0 mm drill with a pad annulus on each face.  At 0.1 mm the wall of
+# either is a quarter of a cell and the bore falls between the samples, so
+# neither can be found by sampling its material.
+CENTRE = (5.0 * MM, 5.0 * MM)
+PLATING = 0.025 * MM
+BOARD_MM = 10.0
+
+
+def _plated_board(drill_radius_m: float, *, pad_radius_m: float | None = None):
+    """A drilled two-layer board whose only vertical path is the barrel."""
+
+    outer = drill_radius_m
+    slab = box_solid("slab", (0.0, 0.0, 0.0), (BOARD_MM * MM, BOARD_MM * MM, 1.6 * MM))
+    drill = cylinder_solid("drill", CENTRE, -CU, 1.6 * MM + 2 * CU, outer)
+    bore = cylinder_solid("bore", CENTRE, -CU, 1.6 * MM + 2 * CU, outer - PLATING)
+    barrel = drilled_solid(
+        "VIA1", cylinder_solid("outer", CENTRE, -CU, 1.6 * MM + 2 * CU, outer), [bore]
+    )
+    solids = [
+        drilled_solid("PCB", slab, [drill]),
+        # A run on each layer, reaching the hole from opposite sides.
+        box_solid("Cu_B1_run", (0.5 * MM, 4.5 * MM, -CU), (4.5 * MM, 1.0 * MM, CU)),
+        box_solid("Cu_F1_run", (5.0 * MM, 4.5 * MM, 1.6 * MM), (4.5 * MM, 1.0 * MM, CU)),
+        barrel,
+    ]
+    if pad_radius_m is not None:
+        # A through-hole pad: an annulus on each face, drilled like the board.
+        for name, z in (("Cu_B1_pad", -CU), ("Cu_F1_pad", 1.6 * MM)):
+            solids.append(
+                drilled_solid(
+                    name,
+                    cylinder_solid(f"{name}_disc", CENTRE, z, CU, pad_radius_m),
+                    [cylinder_solid(f"{name}_hole", CENTRE, z - CU, 3 * CU, outer)],
+                )
+            )
+    return solids
+
+
+def _plated_body_map() -> BodyMap:
+    return BodyMap(
+        board=BoardSpec(
+            "PCB",
+            (
+                LayerSpec("B1", center_z_mm=-0.0175, thickness_mm=0.035),
+                LayerSpec("F1", center_z_mm=1.6175, thickness_mm=0.035),
+            ),
+        ),
+        copper=(CopperSpec(r"Cu_B1_.*", "B1"), CopperSpec(r"Cu_F1_.*", "F1")),
+        vias=(ViaSpec(r"VIA\d+"),),
+    )
+
+
+def _solve_through(raster, vias, barrels, row):
+    """One vertical connection, its geometry recorded, and a closing solve."""
+
+    from electrical.sheet_peec.plane_opt_contract import solve_plane_opt_problem
+
+    mapping = plane_opt_problem_mapping(
+        raster,
+        terminals=[
+            {"name": "src", "pad": "P1", "current_a": 1.0, "cells": [{"layer": "F1", "x": 92, "y": row}]},
+            {"name": "ret", "pad": "P2", "current_a": -1.0, "cells": [{"layer": "B1", "x": 7, "y": row}]},
+        ],
+        vias=vias,
+        barrels=barrels,
+    )
+    problem = PlaneOptProblem.from_mapping(mapping)
+    assert len(problem.vertical_segments) == 1
+    result = solve_plane_opt_problem(problem)
+    assert result.metrics["converged"]
+    assert result.metrics["undriven_node_count"] == 0
+    assert result.metrics["current_closure_error_a"] < 1.0e-9
+    assert result.metrics["voltage_span_v"] > 0.0
+    return mapping["vertical_connections"][0]
+
+
+@pytest.mark.parametrize(
+    "drill_mm,pad_mm,name",
+    [(0.3, None, "via"), (1.0, 1.6, "through-hole pad")],
+)
+def test_a_plated_barrel_is_a_vertical_conductor_with_its_geometry(drill_mm, pad_mm, name) -> None:
+    """A tube 25 um thick joins the layers, and the problem carries the tube.
+
+    Sampling the plating alone finds nothing at the barrel's own cell -- the
+    cell the connection attaches to -- and the drilled laminate would mask off
+    whatever it did find.  The barrel is read from its own geometry instead,
+    which covers a through-hole pad's barrel exactly as it covers a via's.
+    """
+
+    body_map = _plated_body_map()
+    drill_radius = drill_mm / 2.0 * MM
+    solids = _plated_board(drill_radius, pad_radius_m=None if pad_mm is None else pad_mm / 2.0 * MM)
+    resolved = resolve_bodies(synthetic_model(solids), body_map)
+    raster = rasterize_board(resolved, body_map.board, pitch_mm=0.1, supersample=3)
+
+    vias = board_vias(resolved, raster)
+    assert len(vias.vias) == 1
+    via = vias.vias[0]
+    assert (via.layer_from, via.layer_to) == (0, 1)
+
+    # The plating, sampled as material, is not there at the barrel's cell.
+    sampled = sample_plane_fill(
+        [solid for solid in solids if solid.name == "VIA1"],
+        z_m=-0.0175 * MM,
+        origin_m=raster.origin_m,
+        pitch_m=0.1 * MM,
+        shape=raster.shape,
+    )
+    assert sampled[via.row, via.col] < 0.5, f"{name}: the wall should be sub-cell"
+
+    # The barrel is, on both layers, and the outline did not mask it away.
+    assert raster.outline[via.row, via.col]
+    occupancy = raster.occupancy
+    assert occupancy[0, via.row, via.col] == 1.0
+    assert occupancy[1, via.row, via.col] == 1.0
+    # And only the barrel: a cell away from copper and hole is still outside.
+    assert occupancy[0, 5, 5] == 0.0 and occupancy[1, 5, 5] == 0.0
+
+    barrels = board_barrels(resolved, raster)
+    assert set(barrels) == {(via.row, via.col)}
+    connection = _solve_through(raster, vias, barrels, via.row)
+
+    recorded = connection["barrel"]
+    assert recorded["outer_diameter_mm"] == pytest.approx(drill_mm, rel=1.0e-3)
+    assert recorded["drill_diameter_mm"] == pytest.approx(drill_mm - 2 * 0.025, rel=1.0e-2)
+    assert recorded["plating_thickness_mm"] == pytest.approx(0.025, rel=1.0e-2)
+    assert recorded["z_range_mm"] == pytest.approx([-0.035, 1.635], abs=1.0e-6)
+    ring = np.pi * ((drill_mm / 2.0) ** 2 - (drill_mm / 2.0 - 0.025) ** 2)
+    assert recorded["wall_area_mm2"] == pytest.approx(ring, rel=1.0e-2)
+    assert not recorded["solid_pin"]
+
+
+def test_a_solid_that_is_not_a_barrel_is_left_to_the_sampler() -> None:
+    """Recognition is narrow: only a tube or a pin around its own axis."""
+
+    from geometry.cad_import import barrel_of
+
+    slab = box_solid("PCB", (0.0, 0.0, 0.0), (BOARD_MM * MM, BOARD_MM * MM, 1.6 * MM))
+    assert barrel_of(slab) is None
+    # A square prism whose footprint is square but whose section is not a disc.
+    prism = box_solid("pin", (4.5 * MM, 4.5 * MM, 0.0), (1.0 * MM, 1.0 * MM, 1.6 * MM))
+    assert barrel_of(prism) is None
+    # Two copper sheets joined off-axis: a square bounding box, a small area,
+    # and nothing around the axis -- a fused net, not a barrel.
+    fused = drilled_solid(
+        "fused",
+        box_solid("outer", (0.0, 0.0, 0.0), (4.0 * MM, 4.0 * MM, 1.6 * MM)),
+        [box_solid("cut", (0.0, 0.0, 0.1 * MM), (4.0 * MM, 3.0 * MM, 1.4 * MM))],
+    )
+    assert barrel_of(fused) is None
+    # A solid pin is a barrel, and says so.
+    pin = cylinder_solid("PIN", CENTRE, 0.0, 1.6 * MM, 0.3 * MM)
+    found = barrel_of(pin)
+    assert found is not None and found.solid_pin
+    assert found.drill_radius_m == pytest.approx(0.0, abs=1.0e-9)
