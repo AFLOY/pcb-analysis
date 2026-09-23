@@ -110,13 +110,15 @@ def barrel_of(
     *,
     roundness_tolerance: float = 5.0e-3,
     area_tolerance: float = 5.0e-3,
+    bore_tolerance: float = 1.0e-4,
     method: str = "auto",
 ) -> Barrel | None:
     """The barrel this solid is, or None when it is not one.
 
-    ``roundness_tolerance`` is how far the footprint may be from square, and
+    ``roundness_tolerance`` is how far the footprint may be from square,
     ``area_tolerance`` how far the section may exceed the circumscribed disc,
-    both relative.  The wall probe is the test that matters: it is what tells
+    and ``bore_tolerance`` how small a bore is rounding rather than a hole,
+    all relative to the outer radius.  The wall probe is the test that matters: it is what tells
     a tube from a solid that merely happens to sit in a square box.
     """
 
@@ -136,6 +138,10 @@ def barrel_of(
         return None
     inner_squared = outer**2 - area / math.pi
     inner = math.sqrt(inner_squared) if inner_squared > 0.0 else 0.0
+    # A solid pin's area is the whole disc, to within the arithmetic: a bore
+    # far below the outer radius is rounding, not a hole.
+    if inner < bore_tolerance * outer:
+        inner = 0.0
     centre = ((lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0)
     probe = (outer + inner) / 2.0
     angles = np.arange(WALL_SAMPLES) * (2.0 * math.pi / WALL_SAMPLES)
