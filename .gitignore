@@ -9,6 +9,9 @@ dist/
 .venv/
 benchmark-results/
 
+# Agents' working notes, dispatches and handoffs (AGENTS.md: not under Git).
+.agents/
+
 # Local probes and scratch work, kept out of the released repository.  The FP32
 # accuracy audit is a repeatable acceptance tool and is intentionally versioned.
 experiments/*
