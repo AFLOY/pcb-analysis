@@ -1,90 +1,123 @@
-# EMC Analysis (`emc.tiled_dipole_superposition`)
+# EMC analysis (`emc.tiled_dipole_superposition`)
 
-Radiated-emission evaluation front end using exact Hertzian-dipole superposition of solved board currents.
+`emc.tiled_dipole_superposition` turns a solved current distribution into
+what an EMC engineer reads: the near field on a scan plane, the far-field
+pattern and radiated power, and the margin to the CISPR 32 or FCC Part 15
+limit lines. Every current element of the solve is a Hertzian dipole, and
+their exact fields are summed on NumPy, CuPy or an OpenMP C++ kernel. There
+is no separate field solve.
 
-Evaluates near-field probe scans, far-field radiation patterns, total radiated power, net electric/magnetic dipole moments, and compliance margins against regulatory emission limits (CISPR 32, FCC Part 15). Runs on NumPy, CuPy (CUDA), or OpenMP C++ kernels (`_native_dipole`).
+## Walkthrough: from a KiCad board to an emission margin
 
-## Key Features
+### 1. Export the board from KiCad
 
-- **No separate EM field solve needed**: Reads current distributions directly from DC conduction (`electrical.matrix_free_mpir_fem`) or full-wave sheet PEEC (`electrical.sheet_peec`).
-- **Exact near-field scans**: Evaluates exact electric and magnetic fields (including near-zone $1/r^3$ and induction $1/r^2$ terms) across arbitrary scan grids and planes.
-- **Far-field radiation patterns**: Computes radiation spherical patterns, maximum field strengths, and integrated total radiated power.
-- **Regulatory limits**: Built-in limit lines for CISPR 32 Class A/B and FCC Part 15 Class A/B (at 3 m or 10 m test distances) with margin reporting.
-- **Ground plane PEC images**: Analytical image theory support for conductors above an infinite ground plane.
+```bash
+kicad-cli pcb export step --include-tracks --include-pads --include-zones \
+  --include-inner-copper --no-extra-pad-thickness --no-components --force \
+  --output power_module.step power_module.kicad_pcb
+```
 
-## Quick Start
-
-### Evaluating near-field scans and far-field emission margins
+### 2. Put the copper on a grid
 
 ```python
 import numpy as np
-from emc.tiled_dipole_superposition import (
-    CISPR32_CLASS_B,
-    CurrentDipoles,
-    emission_margin,
-    evaluate_fields,
-    far_field_pattern,
-    scan_plane,
+from geometry.cad_import import (
+    board_barrels, board_vias, kicad_step_body_map, layers_from_kicad_stackup,
+    load_step, plane_opt_problem_mapping, rasterize_board, read_kicad_stackup, resolve_bodies,
 )
 
-# Define a 20 mm current loop at 100 MHz carrying 10 mA (represented as 4 dipoles)
-frequency_hz = 100e6
-positions_m = np.array([
-    [0.00, 0.00, 0.001],
-    [0.02, 0.00, 0.001],
-    [0.02, 0.02, 0.001],
-    [0.00, 0.02, 0.001],
-], dtype=np.float64)
-# Current moments (I * dl) in Amperes * meters
-moments_a_m = np.array([
-    [0.02 * 0.01, 0.0, 0.0],
-    [0.0, 0.02 * 0.01, 0.0],
-    [-0.02 * 0.01, 0.0, 0.0],
-    [0.0, -0.02 * 0.01, 0.0],
-], dtype=np.complex128)
-
-dipoles = CurrentDipoles(position_m=positions_m, moment_a_m=moments_a_m)
-
-# 1. Near-field magnetic scan 5 mm above the board
-probe = scan_plane(
-    x_m=np.linspace(-0.01, 0.03, 40),
-    y_m=np.linspace(-0.01, 0.03, 40),
-    z_m=0.006,
-)
-near = evaluate_fields(dipoles, probe, frequency_hz, backend="auto")
-print(f"Peak near-field H: {near.magnetic_magnitude_a_per_m.max():.3e} A/m")
-
-# 2. Far-field pattern at a 10-meter measurement distance
-pattern = far_field_pattern(dipoles, frequency_hz, distance_m=10.0)
-print(f"Total radiated power: {pattern.radiated_power_w:.3e} W")
-print(f"Peak E-field at 10 m: {pattern.max_polarised_field_v_per_m:.3e} V/m")
-
-# 3. Regulatory margin check against CISPR 32 Class B
-margin = emission_margin(
-    field_v_per_m=pattern.max_polarised_field_v_per_m,
-    frequency_hz=frequency_hz,
-    limit=CISPR32_CLASS_B,
-    distance_m=10.0,
-)
-print(f"Predicted: {margin.predicted_dbuv_per_m:.1f} dBµV/m")
-print(f"CISPR 32 Class B margin: {margin.margin_db:+.1f} dB ({'PASS' if margin.compliant else 'FAIL'})")
+board = "power_module.kicad_pcb"
+layers, board_top_mm = layers_from_kicad_stackup(read_kicad_stackup(board))
+body_map = kicad_step_body_map(layers, board_top_z_mm=board_top_mm)
+resolved = resolve_bodies(load_step("power_module.step"), body_map)
+raster = rasterize_board(resolved, body_map.board, pitch_mm=0.25, y_down=True)
 ```
 
-### Loading solved currents from electrical solvers
+### 3. Define the input faces: the current at one frequency
+
+The emission comes from the current the board carries at the frequency of
+interest. Drive the pads with that harmonic's amplitude, here 0.1 A from
+J1 pad 3 to Q1 pad 3. As in the [electrical README](../electrical/README.md),
+each pad's centre is read from the KiCad board and the copper cells under it
+become the terminal. Solve it with the sheet PEEC. A DC solve
+(`solve_frequency_hz = 0.0`) gives the current's path in a second, and the
+fields are then evaluated at 30 MHz, the lower edge of the CISPR 32 radiated
+limits (a quasi-static estimate). Set `solve_frequency_hz = frequency_hz` to
+include the copper's inductance; that solve is iterative, and at tens of MHz
+it can take many minutes on a CPU.
 
 ```python
-from emc.tiled_dipole_superposition import dipoles_from_pcb_dc, dipoles_from_sheet_peec
+from electrical.sheet_peec import build_plane_opt_sheet_inputs, solve_sheet_case
 
-# From DC conduction: converts branch currents to dipoles with terminal closure
-dipoles = dipoles_from_pcb_dc(
-    problem=pcb_problem,
-    solution=electrical_dc_solution,
-    layer_height_m=(0.0, 1.6e-3),
-    close_terminals=True,
-)
+def pad_cells(layer, x_mm, y_mm, half_width_mm=0.5):
+    row, col = raster.cell_of(x_mm * 1e-3, -y_mm * 1e-3)   # the STEP export negates KiCad's y
+    k = [spec.name for spec in raster.layers].index(layer)
+    r = int(np.ceil(half_width_mm / raster.pitch_mm))
+    return [{"layer": layer, "x": x, "y": y} for y in range(row - r, row + r + 1)
+            for x in range(col - r, col + r + 1) if raster.occupancy[k, y, x] > 0]
+
+frequency_hz, amplitude_a = 30e6, 0.1
+solve_frequency_hz = 0.0
+terminals = [
+    {"name": "VIN", "pad": "J1.3", "current_a": amplitude_a, "cells": pad_cells("F.Cu", 129.0, 97.58)},
+    {"name": "SRC", "pad": "Q1.3", "current_a": -amplitude_a, "cells": pad_cells("F.Cu", 149.26, 95.675)},
+]
+problem = plane_opt_problem_mapping(raster, terminals=terminals, frequency_hz=solve_frequency_hz,
+                                    vias=board_vias(resolved, raster), barrels=board_barrels(resolved, raster))
+sheet_mesh, operator, sheet_terminals, _ = build_plane_opt_sheet_inputs(problem)
+current = solve_sheet_case(sheet_mesh, operator, sheet_terminals, frequency_hz=solve_frequency_hz)
 ```
 
-## Documentation
+### 4. Current to dipoles
 
-- [EMC Dipole Superposition Contract & Methods](../../docs/EMC_DIPOLE_SUPERPOSITION.md)
-- [Coupled Multiphysics Scenarios](../../docs/MULTIPHYSICS_SCENARIOS.md)
+```python
+from emc.tiled_dipole_superposition import dipoles_from_sheet_peec
+
+dipoles = dipoles_from_sheet_peec(sheet_mesh, current)
+print(dipoles.position_m.shape[0], "current elements")
+```
+
+### 5. Evaluate: near-field scan and far field
+
+```python
+from emc.tiled_dipole_superposition import evaluate_fields, far_field_pattern, scan_plane
+
+lo, hi = dipoles.position_m.min(axis=0), dipoles.position_m.max(axis=0)
+probe = scan_plane(np.linspace(lo[0], hi[0], 30), np.linspace(lo[1], hi[1], 30), hi[2] + 5e-3)  # 5 mm above
+near = evaluate_fields(dipoles, probe, frequency_hz, electric=False)   # H only; drop electric= for E too
+pattern = far_field_pattern(dipoles, frequency_hz, distance_m=10.0)
+```
+
+`backend="cuda"` or `"auto"` runs both on the GPU.
+
+### 6. Read the result against the limits
+
+```python
+from emc.tiled_dipole_superposition import CISPR32_CLASS_B, emission_margin
+
+margin = emission_margin(pattern.max_polarised_field_v_per_m, frequency_hz, CISPR32_CLASS_B, distance_m=10.0)
+print(f"peak H 5 mm above: {near.magnetic_magnitude_a_per_m.max():.3e} A/m; "
+      f"radiated power {pattern.radiated_power_w:.3e} W")
+print(f"{margin.predicted_dbuv_per_m:.1f} dBuV/m at 10 m, limit {margin.limit_dbuv_per_m:.1f}, "
+      f"margin {margin.margin_db:+.1f} dB, compliant {margin.compliant}")
+```
+
+The other limit lines are `CISPR32_CLASS_A`, `FCC_PART15_CLASS_A` and
+`FCC_PART15_CLASS_B`. `dipoles_from_pcb_dc` builds dipoles from a matrix-free
+DC solution instead. The [multiphysics README](../multiphysics/README.md)
+runs that for a heated board.
+
+## Further
+
+[docs/EMC_DIPOLE_SUPERPOSITION.md](../../docs/EMC_DIPOLE_SUPERPOSITION.md)
+covers:
+
+- the method and closing the current at the terminals;
+- PEC ground-plane images (`ground_plane_z_m`) and dipole-moment proxies;
+- accuracy limits (a current-only description, no dielectric or cable
+  radiation);
+- cost, tiling, CUDA and the native kernel.
+
+Other packages: [electrical](../electrical/README.md) ·
+[thermal](../thermal/README.md) · [multiphysics](../multiphysics/README.md) ·
+[geometry](../geometry/README.md) · [top-level README](../../README.md)

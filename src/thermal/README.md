@@ -1,86 +1,134 @@
-# Thermal Analysis (`thermal.matrix_free_mpir_fem`)
+# Thermal analysis (`thermal.matrix_free_mpir_fem`)
 
-Accelerated matrix-free Q1 finite-element solver for steady and transient heat conduction in PCB layer stacks and 3D voxel bodies (enclosures, heat sinks).
+`thermal.matrix_free_mpir_fem` solves steady and transient heat conduction
+through the board's copper and laminate slabs. The result is a temperature
+field with a closed heat budget. It uses the same matrix-free,
+mixed-precision solver as the electrical FEM, on the CPU or with CUDA.
 
-Driven by Mixed-Precision Iterative Refinement (MPIR) with an FP32 inner PCG and FP64 outer reliable updates. The MPIR solver runtime is imported directly from `electrical.matrix_free_mpir_fem` without duplication.
+## Walkthrough: from a KiCad board to a temperature rise
 
-## Key Features
+### 1. Export the board from KiCad
 
-- **Matrix-free Q1 hexahedral FEM**: No assembled global stiffness matrix, enabling large multi-layer meshes with minimal memory overhead.
-- **Two-level preconditioner**: Patch-constant coarse correction combined with Jacobi scaling, resolving ill-conditioned thin copper/FR-4 anisotropic stacks in tens of iterations rather than hundreds.
-- **Boundary conditions**: Convective heat transfer, Stefan-Boltzmann surface-to-ambient radiation (Newton linearisation), fixed-temperature Dirichlet nodes, and volumetric/nodal heat sources.
-- **Transient conduction**: Backward-Euler time stepping on uniform or geometric time schedules, optionally until steady state.
-- **Hardware acceleration**: CPU (NumPy / OpenMP C++ kernel) and CUDA (CuPy FP32 gather kernel) backends.
-- **Electrothermal integration**: Maps per-element and per-via Joule heat from `electrical` solves directly onto the thermal stack.
+```bash
+kicad-cli pcb export step --include-tracks --include-pads --include-zones \
+  --include-inner-copper --no-extra-pad-thickness --no-components --force \
+  --output power_module.step power_module.kicad_pcb
+```
 
-## Quick Start
+### 2. Build the board's thermal mesh
 
-### 1. Steady-state thermal conduction
+Copper cells get the copper conductivity, blended by how much of each cell is
+covered. The laminate slabs sit between them, and the board outline masks the
+mesh.
 
 ```python
 import numpy as np
-from thermal.matrix_free_mpir_fem import (
-    ConvectionBoundary,
-    HeatSource,
-    LayeredThermalMesh,
-    ThermalConductionProblem,
-    solve_thermal_conduction,
+from geometry.cad_import import (
+    board_thermal_mesh, kicad_step_body_map, layers_from_kicad_stackup, load_step,
+    rasterize_board, read_kicad_stackup, resolve_bodies,
 )
 
-# 35 µm copper / 1.5 mm FR-4 / 35 µm copper stack, 50 mm x 50 mm on a 0.5 mm grid
-mesh = LayeredThermalMesh(
-    slab_thickness_m=(35e-6, 1.5e-3, 35e-6),
-    pitch_x_m=0.5e-3,
-    pitch_y_m=0.5e-3,
-    conductivity_w_per_m_k=(385.0, 0.8, 385.0),
-    through_plane_conductivity_w_per_m_k=(385.0, 0.3, 385.0),
-    volumetric_heat_capacity_j_per_m3_k=(3.45e6, 2.0e6, 3.45e6),  # needed by the transient solve
-    element_shape=(100, 100),
-)
-ambient_k = 298.15  # 25 °C
-
-# Top and bottom natural convection (h = 10 W/m²·K) plus a 0.5 W point regulator heat source
-problem = ThermalConductionProblem(
-    mesh=mesh,
-    convection=(
-        ConvectionBoundary("top", coefficient_w_per_m2_k=10.0, ambient_temperature_k=ambient_k),
-        ConvectionBoundary("bottom", coefficient_w_per_m2_k=10.0, ambient_temperature_k=ambient_k),
-    ),
-    heat_sources=(
-        HeatSource(nodes=((2, 50, 50), (2, 50, 51)), power_w=0.5, name="regulator"),
-    ),
-)
-
-# Solve using the two-level preconditioner (backend="cuda" for GPU)
-solution = solve_thermal_conduction(problem, initial_temperature_k=ambient_k, backend="auto")
-
-assert solution.solve.converged
-print(f"Max temperature: {solution.max_temperature_k:.2f} K ({solution.max_temperature_k - 273.15:.2f} °C)")
-print(f"Residual heat balance error: {solution.heat_balance_error_w:.2e} W")
+board = "power_module.kicad_pcb"
+layers, board_top_mm = layers_from_kicad_stackup(read_kicad_stackup(board))
+body_map = kicad_step_body_map(layers, board_top_z_mm=board_top_mm)
+resolved = resolve_bodies(load_step("power_module.step"), body_map)
+raster = rasterize_board(resolved, body_map.board, pitch_mm=0.25, y_down=True)
+thermal = board_thermal_mesh(raster)
+mesh = thermal.mesh
+print(thermal.slab_names, mesh.node_shape)     # nodes are (z, row, col); z = 0 is the bottom face
 ```
 
-### 2. Transient heat conduction (backward Euler)
+### 3. Define the input faces: heat sources
+
+A fixed power goes on the top-face nodes under a part. The positions are the
+centres KiCad shows, in mm: here the MOSFET tab (Q1 pad 2) and the diode (D1).
 
 ```python
-from thermal.matrix_free_mpir_fem import (
-    TimeSchedule,
-    solve_thermal_transient,
-)
+from thermal.matrix_free_mpir_fem import HeatSource
 
-# Run a 10-second heating transient with 0.1-second time steps
-schedule = TimeSchedule.uniform(step_s=0.1, end_s=10.0)
-transient_solution = solve_thermal_transient(
-    problem=problem,
-    schedule=schedule,
-    initial_temperature_k=ambient_k,
-    backend="auto",
-)
+def top_nodes(x_mm, y_mm, half_width_mm):
+    row, col = raster.cell_of(x_mm * 1e-3, -y_mm * 1e-3)   # the STEP export negates KiCad's y
+    r = int(np.ceil(half_width_mm / raster.pitch_mm))
+    z = mesh.node_shape[0] - 1
+    return tuple((z, y, x) for y in range(row - r, row + r + 2) for x in range(col - r, col + r + 2))
 
-print(f"Final peak temperature: {transient_solution.history[-1].max_temperature_k:.2f} K")
+sources = (
+    HeatSource(top_nodes(151.8, 107.105, 2.0), power_w=1.5, name="Q1"),
+    HeatSource(top_nodes(139.9, 103.6, 1.5), power_w=0.5, name="D1"),
+)
 ```
 
-## Documentation
+Heat can also come from an electrical solve. `element_joule_heat_w` and
+`via_joule_heat_sources` place a matrix-free DC solution's copper loss on the
+slabs. The [multiphysics README](../multiphysics/README.md) does this inside
+the coupled loop.
 
-For full details on the mathematical formulation, heat budgets, two-level preconditioner, CUDA/native kernels, and electrothermal mappings:
-- [Thermal MPIR-FEM Contract & Architecture](../../docs/THERMAL_MPIR_FEM.md)
-- [Coupled Multiphysics Scenarios](../../docs/MULTIPHYSICS_SCENARIOS.md)
+### 4. Define the boundaries
+
+Natural convection on both faces to a 25 °C ambient. `RadiationBoundary`
+adds surface-to-ambient radiation, and `fixed_temperature_mask` holds nodes
+at a temperature, such as a clamped edge.
+
+```python
+from thermal.matrix_free_mpir_fem import ConvectionBoundary, RadiationBoundary, ThermalConductionProblem
+
+ambient_k = 298.15
+problem = ThermalConductionProblem(
+    mesh,
+    convection=(ConvectionBoundary("top", 10.0, ambient_k), ConvectionBoundary("bottom", 10.0, ambient_k)),
+    radiation=(RadiationBoundary("top", 0.9, ambient_k),),
+    heat_sources=sources,
+)
+```
+
+### 5. Run
+
+```python
+from thermal.matrix_free_mpir_fem import solve_thermal_conduction
+
+solution = solve_thermal_conduction(problem)       # backend="cuda" runs the inner solve on the GPU
+```
+
+### 6. Read the result
+
+```python
+print(f"peak rise {solution.max_temperature_k - ambient_k:.1f} K, "
+      f"heat in {solution.total_heat_input_w:.2f} W, balance error {solution.heat_balance_error_w:.1e} W")
+top_face_k = solution.temperature_k[-1]            # (rows + 1, cols + 1) node temperatures of the top face
+```
+
+### 7. Transient heating (optional)
+
+A transient solve needs a heat capacity per slab. It marches the problem by
+backward Euler, one linear solve per step (and a Newton loop per step when
+radiation is on), so the step count sets the cost. This example drops the
+radiation and takes four steps over the first 15 s.
+
+```python
+import dataclasses
+from thermal.matrix_free_mpir_fem import TimeSchedule, solve_thermal_transient
+
+capacity = [3.45e6 if name in ("B.Cu", "F.Cu") else 2.0e6 for name in thermal.slab_names]   # J/(m3 K)
+timed = dataclasses.replace(problem, radiation=(),
+                            mesh=dataclasses.replace(mesh, volumetric_heat_capacity_j_per_m3_k=capacity))
+transient = solve_thermal_transient(timed, TimeSchedule.geometric(1.0, 15.0, growth=2.0), initial_temperature_k=ambient_k)
+print([f"{step.time_s:.1f} s: {step.max_temperature_k - ambient_k:.1f} K" for step in transient.history])
+```
+
+## Further
+
+[docs/THERMAL_MPIR_FEM.md](../../docs/THERMAL_MPIR_FEM.md) covers:
+
+- the discretisation, the heat budget, and why temperature rise is solved
+  rather than absolute temperature;
+- radiation (Newton linearisation), transient conduction and time schedules;
+- the two-level preconditioner, CUDA and the fused C++ host path;
+- graded grids, and the Joule-loss mapping from the electrical solves.
+
+Heat sinks and enclosures meshed as voxel bodies:
+[docs/GEOMETRY_CAD_IMPORT.md](../../docs/GEOMETRY_CAD_IMPORT.md) and
+[docs/MULTIPHYSICS_SCENARIOS.md](../../docs/MULTIPHYSICS_SCENARIOS.md).
+
+Other packages: [electrical](../electrical/README.md) ·
+[emc](../emc/README.md) · [multiphysics](../multiphysics/README.md) ·
+[geometry](../geometry/README.md) · [top-level README](../../README.md)
