@@ -4,6 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
+> **Status: beta.** pcb-analysis is under active development. The public API,
+> the JSON schemas and the defaults can change between minor releases (0.9.0
+> renamed the current-field contract), and the numerical results have been
+> validated on a small set of boards so far. Please report problems and
+> mismatches as GitHub issues.
+
 Accelerated PEEC and matrix-free FEM solvers for electrical and thermal PCB
 analysis, radiated-emission evaluation for EMC, and PDN optimization.
 
