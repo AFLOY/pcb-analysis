@@ -181,7 +181,7 @@ def body_heat_sources(
     return tuple(sources)
 
 
-def _plane_opt_grid(raster: BoardRaster) -> dict[str, Any]:
+def _current_field_grid(raster: BoardRaster) -> dict[str, Any]:
     """Schema v1 grid (one pitch) for a uniform raster, v2 grid lines in the array row order otherwise."""
 
     rows, cols = raster.shape
@@ -197,7 +197,7 @@ def _plane_opt_grid(raster: BoardRaster) -> dict[str, Any]:
     return {"rows": rows, "columns": cols, "x_edges_mm": x_edges.tolist(), "y_edges_mm": y_edges.tolist()}
 
 
-def plane_opt_problem_mapping(
+def current_field_problem_mapping(
     raster: BoardRaster,
     *,
     terminals: Sequence[Mapping[str, Any]],
@@ -208,7 +208,7 @@ def plane_opt_problem_mapping(
     barrels: Mapping[tuple[int, int], Barrel] | None = None,
     thickness_source: str = "stackup",
 ) -> dict[str, Any]:
-    """The ``plane-opt-current-field-problem/v1`` mapping for this board.
+    """The ``current-field-problem/v1`` (``/v2`` on a graded grid) mapping for this board.
 
     ``terminals`` are passed through as the schema expects them
     (``name``, ``pad``, ``current_a``, ``cells`` of ``layer``/``x``/``y``);
@@ -256,7 +256,7 @@ def plane_opt_problem_mapping(
             }
             for upper in range(via.layer_from + 1, via.layer_to + 1)
         ]
-        # plane-opt orders "upper" as the front (lower order index) layer.
+        # The contract orders "upper" as the front (lower order index) layer.
         for segment in segments:
             segment["upper_layer"], segment["lower_layer"] = segment["lower_layer"], segment["upper_layer"]
         record = {
@@ -273,7 +273,7 @@ def plane_opt_problem_mapping(
         "name": name,
         "role": role,
         "frequency_hz": float(frequency_hz),
-        "grid": _plane_opt_grid(raster),
+        "grid": _current_field_grid(raster),
         "layers": layers,
         "copper_by_layer": copper_by_layer,
         "vertical_connections": connections,
@@ -290,5 +290,5 @@ __all__ = [
     "board_vias",
     "body_heat_sources",
     "body_thermal_mesh",
-    "plane_opt_problem_mapping",
+    "current_field_problem_mapping",
 ]

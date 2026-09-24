@@ -269,7 +269,7 @@ def rasterize_board(
     already chosen.  Or it is a ``TensorGrid`` in the STEP frame (metres),
     typically from :func:`geometry.cad_import.refinement.board_refined_grid`.
     With ``y_down`` row 0 is the row of largest STEP ``y``, which is KiCad's
-    and plane-opt's y-down convention (KiCad exports STEP with ``y`` negated,
+    y-down convention (KiCad exports STEP with ``y`` negated,
     so a KiCad grid whose rows count downwards maps onto STEP rows counted
     from the top).
     """

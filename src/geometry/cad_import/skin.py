@@ -2,7 +2,7 @@
 
 The classification itself is :func:`electrical.sheet_peec.skin_screen.classify_layer_thickness`;
 this module only feeds it the layers' thicknesses (stackup or measured) and
-collects the report the plane-opt mapping warns from.
+collects the report the current-field mapping warns from.
 """
 
 from __future__ import annotations

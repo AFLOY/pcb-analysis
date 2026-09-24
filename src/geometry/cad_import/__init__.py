@@ -13,7 +13,7 @@ from .adapters import (
     board_vias,
     body_heat_sources,
     body_thermal_mesh,
-    plane_opt_problem_mapping,
+    current_field_problem_mapping,
 )
 from .bodymap import (
     BoardSpec,
@@ -90,13 +90,13 @@ __all__ = [
     "body_heat_sources",
     "body_thermal_mesh",
     "box_solid",
+    "current_field_problem_mapping",
     "cylinder_solid",
     "drilled_solid",
     "default_method",
     "load_step",
     "native_classify_available",
     "ocp_available",
-    "plane_opt_problem_mapping",
     "rasterize_board",
     "RefinementBox",
     "board_refined_grid",
