@@ -7,23 +7,10 @@
 Accelerated PEEC and matrix-free FEM solvers for electrical and thermal PCB
 analysis, radiated-emission evaluation for EMC, and PDN optimization.
 
-The repository holds two solver families under the `electrical` package, one
-under the `thermal` package, one evaluation front end under `emc`, and the
-coupled scenarios that chain them under `multiphysics`. `electrical.sheet_peec` solves the 2.5D sheet PEEC, `electrical.voxel_peec` the 3D voxel PEEC through PyPEEC, and `electrical.dice_peec` provides exact incremental
-delta-scoring for local PCB reroutes, a 2.5D multilayer interaction operator, a
-thin-sheet PEEC field solver, and an adaptive runtime controller for
-topology-optimization loops. `electrical.matrix_free_mpir_fem` provides a
-matrix-free Q1 finite-element solver for DC conduction and 2D frequency-domain
-Maxwell fields, driven by mixed-precision iterative refinement (MPIR) on NumPy
-or CuPy. `thermal.matrix_free_mpir_fem` solves steady heat conduction through
-the whole board stack with the same MPIR solver and runtimes, and takes the
-Joule loss of an electrical solve as its heat load.
-`emc.tiled_dipole_superposition` reads the current distribution of either
-electrical solve as Hertzian dipoles and evaluates near-field scans, far-field
-patterns, radiated power, and margins to CISPR 32 and FCC Part 15 limits.
-`multiphysics.staggered_coupling` runs the scenarios that couple them: the
-electro-thermal fixed point with temperature-dependent copper, and the emission
-of a cold or thermally converged current distribution.
+The repository has three solver families: `electrical`, `thermal` and `emc`.
+
+These solvers are designed to analyse PCBs faster, so that they can be embedded
+in an automated, LLM-driven PCB design workflow.
 
 ## Features
 
@@ -115,18 +102,6 @@ default of the sheet solves (`preconditioner="diagonal"` restores the old
 one); and a CUDA sheet solve that stops on the requested tolerance.
 `LayeredThermalMesh.pitch_x_m` / `pitch_y_m` and `LayeredPCBMesh.pitch_x_m` /
 `pitch_y_m` are now per-cell arrays (scalars are still accepted on input).
-
-### From a checkout, CPU only
-
-```bash
-pip install -e .
-```
-
-### With CUDA support
-
-```bash
-pip install -e '.[cuda]'
-```
 
 > **Note**: Requires an NVIDIA driver and CUDA 13.x. Verify with `nvidia-smi`.
 > The package is installed as `electrical`; the former top-level
