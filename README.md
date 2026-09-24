@@ -46,7 +46,7 @@ Each release is also attached to its GitHub release (wheel, sdist and
 SHA-256 checksums). To install one without PyPI:
 
 ```console
-pip install 'git+https://github.com/AFLOY/pcb-analysis.git@v0.8.2'
+pip install 'git+https://github.com/AFLOY/pcb-analysis.git@v0.9.0'
 ```
 
 ## How to use: start from KiCad
