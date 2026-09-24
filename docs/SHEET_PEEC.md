@@ -300,8 +300,8 @@ Vertical branches (barrels and filament links) get the same treatment on
 their level pairs.  `SheetMesh` takes the grid (`grid=`, `pitch_m=None`),
 gives every branch its bar (`branch_geometry`), scales resistances by
 `length / width` and current densities by the cell's transverse extent; the
-plane-opt contract gained schema `v2` whose `grid` carries `x_edges_mm` and
-`y_edges_mm` instead of `pitch_mm` (`build_plane_opt_sheet_inputs` picks the
+current-field contract gained schema `v2` whose `grid` carries `x_edges_mm` and
+`y_edges_mm` instead of `pitch_mm` (`build_current_field_sheet_inputs` picks the
 pFFT operator for a graded grid, `operator="pfft"` forces it), and the CUDA
 solve has the same operator on the device (`CudaPfftSheetInductanceOperator`).
 
@@ -354,7 +354,7 @@ one for these sizes.
 
 `power_module` from KiCad (fused copper, y-down raster, terminals at the two
 ends of the largest B.Cu copper piece, barrels off the copper dropped),
-through `solve_plane_opt_problem`, one filament per layer:
+through `solve_current_field_problem`, one filament per layer:
 
 | Grid | f (Hz) | Schema | Operator | Cells | Branches | Kernel (MB) | Wall, diagonal (s) | Wall, near (s) | J max (A/mm²) | J p99 (A/mm²) |
 |---|---|---|---|---|---|---|---|---|---|---|

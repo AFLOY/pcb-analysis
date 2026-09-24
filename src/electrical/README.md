@@ -27,7 +27,7 @@ kicad-cli pcb export step --include-tracks --include-pads --include-zones \
 import numpy as np
 from geometry.cad_import import (
     board_barrels, board_vias, kicad_step_body_map, layers_from_kicad_stackup,
-    load_step, plane_opt_problem_mapping, rasterize_board, read_kicad_stackup, resolve_bodies,
+    load_step, current_field_problem_mapping, rasterize_board, read_kicad_stackup, resolve_bodies,
 )
 
 board = "power_module.kicad_pcb"
@@ -63,7 +63,7 @@ terminals = [
 
 ### 4. Define the current cases
 
-One case is one current-field problem (`plane_opt_problem_mapping`): the
+One case is one current-field problem (`current_field_problem_mapping`): the
 grid, copper, barrels, terminals and a frequency. The DC case gives the
 resistive drop. At 100 kHz the copper's inductance starts to redistribute the
 current. AC solves are iterative, so they cost more than the direct DC solve
@@ -73,7 +73,7 @@ seconds on a desktop CPU.
 ```python
 vias, barrels = board_vias(resolved, raster), board_barrels(resolved, raster)
 cases = {
-    name: plane_opt_problem_mapping(raster, terminals=terminals, frequency_hz=f, vias=vias, barrels=barrels)
+    name: current_field_problem_mapping(raster, terminals=terminals, frequency_hz=f, vias=vias, barrels=barrels)
     for name, f in (("dc", 0.0), ("100kHz", 1.0e5))
 }
 ```
@@ -81,9 +81,9 @@ cases = {
 ### 5. Run
 
 ```python
-from electrical.sheet_peec import solve_plane_opt_problem
+from electrical.sheet_peec import solve_current_field_problem
 
-results = {name: solve_plane_opt_problem(problem) for name, problem in cases.items()}
+results = {name: solve_current_field_problem(problem) for name, problem in cases.items()}
 ```
 
 Pass `{"execution_backend": "cuda"}` as the second argument to solve on the

@@ -104,7 +104,7 @@ has no pad or terminal entry: each pad's centre is read from the KiCad board
 terminal's cells. This example takes one cell per pad.
 
 ```python
-from geometry.cad_import import plane_opt_problem_mapping
+from geometry.cad_import import current_field_problem_mapping
 
 def cells_at(layer, x_mm, y_mm):
     row, col = raster.cell_of(x_mm * 1e-3, -y_mm * 1e-3)
@@ -114,12 +114,12 @@ terminals = [
     {"name": "VIN", "pad": "J1.3", "current_a": 1.0, "cells": cells_at("F.Cu", 129.0, 97.58)},
     {"name": "SRC", "pad": "Q1.3", "current_a": -1.0, "cells": cells_at("F.Cu", 149.26, 95.675)},
 ]
-problem = plane_opt_problem_mapping(raster, terminals=terminals, vias=vias, barrels=barrels)
+problem = current_field_problem_mapping(raster, terminals=terminals, vias=vias, barrels=barrels)
 print(problem["schema"], len(problem["vertical_connections"]), "connections")
 print(problem["vertical_connections"][0]["barrel"])
 ```
 
-`problem` is what `electrical.sheet_peec.solve_plane_opt_problem` solves. The
+`problem` is what `electrical.sheet_peec.solve_current_field_problem` solves. The
 [electrical README](../electrical/README.md) picks up from here with
 terminals that cover whole pads.
 

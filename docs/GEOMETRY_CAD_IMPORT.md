@@ -50,7 +50,7 @@ map, because EDA exporters do not agree on colours.
 Copper is the weak point of mechanical STEP. Most exporters emit the board
 outline and component bodies only; KiCad 8 and later include tracks, pads,
 vias and zones as solids when asked (see "KiCad exports"). The front end therefore accepts copper from three
-places, in this precedence: the `plane-opt-current-field-problem/v1` mapping,
+places, in this precedence: the `current-field-problem/v1` mapping,
 an occupancy array given directly, or copper solids in the STEP. Mixing is
 allowed per layer. Without any copper, only the thermal path runs, with the
 board as bare laminate.
@@ -85,13 +85,13 @@ guard it:
   solids (volume-weighted mean of their z extents, barrels excluded) and
   warns when it differs from the stackup by more than `thickness_tolerance`
   (5 %); `BoardRaster.thickness_mismatches` lists the layers, and
-  `thickness_source="measured"` on `plane_opt_problem_mapping` and
+  `thickness_source="measured"` on `current_field_problem_mapping` and
   `board_thermal_mesh` uses the solids' value instead of the stackup's.
 - `skin_report(raster, frequency_hz)` classifies each layer by thickness over
   skin depth at the analysis frequency: `uniform` below one skin depth,
   `filaments` where the solver's graded filaments resolve the profile, and
   `3d` above twenty skin depths or above 1 mm, where a sheet cannot represent
-  the conductor at all. `plane_opt_problem_mapping` runs the report when a
+  the conductor at all. `current_field_problem_mapping` runs the report when a
   frequency is given and warns on `3d` layers; such conductors (busbars,
   terminal blocks) belong on the voxel path with a 3D PEEC solve. Splitting
   a thick layer into two stackup sheets was considered and not adopted: the
@@ -223,7 +223,7 @@ the uniform path bitwise). `BoardRaster.grid` holds the lines; `pitch_x_m` /
 `y_down`), `pitch_mm` is `None` on a graded grid, and `board_thermal_mesh`
 hands the per-cell pitches to the thermal mesh.
 
-`plane_opt_problem_mapping` writes schema `v2` (grid lines in `x_edges_mm` /
+`current_field_problem_mapping` writes schema `v2` (grid lines in `x_edges_mm` /
 `y_edges_mm`, top-down with `y_down`) for a graded raster and `v1` for a
 uniform one; the sheet PEEC solves the former with its pFFT operator
 (`SHEET_PEEC.md`).
@@ -366,14 +366,14 @@ faces, and rasterises them onto the routing grid:
     annulus. A cell outside both the laminate and the copper stays masked, so
     a routed cutout is still a cutout and a non-rectangular board is still an
     active-element mask on the thermal mesh.
-  - `board_barrels` keys the barrels by cell and `plane_opt_problem_mapping`
+  - `board_barrels` keys the barrels by cell and `current_field_problem_mapping`
     writes them onto the matching `vertical_connections[*].barrel`, so nothing
     the CAD said about the hole is lost on the way to the electrical problem.
   - Painting the whole footprint overstates in-plane copper by the bore's
     area: negligible for a 0.3 mm via on a 0.1 mm grid, about 0.8 mm2 for a
     1.0 mm through-hole pad. The recorded geometry is there so a consumer that
     wants the annulus instead can have it.
-- Terminals are named cells: either from the plane-opt mapping or from
+- Terminals are named cells: either from the current-field mapping or from
   component pins the body map names.
 
 Outputs are exactly the objects `electrical.dice_peec`, `electrical.sheet_peec` and
@@ -468,7 +468,7 @@ requested.
 | `geometry/cad_import/voxelize.py` | 3D sampling of bodies onto a voxel grid, fill fraction, material precedence (`VoxelSolidModel`) |
 | `geometry/cad_import/contact.py` | board/voxel contact placement (origins, contact spec) feeding `thermal.matrix_free_mpir_fem.planar_contact_map` |
 | `geometry/cad_import/conductors.py` | thick conductor solids to `VoxelConductorProblem`, terminal regions, Joule loss to the thermal grid |
-| `geometry/cad_import/adapters.py` | build `Stackup`, occupancy, `ViaSet`, the board's `LayeredThermalMesh`, body meshes and heat sources, plane-opt mapping |
+| `geometry/cad_import/adapters.py` | build `Stackup`, occupancy, `ViaSet`, the board's `LayeredThermalMesh`, body meshes and heat sources, current-field mapping |
 | `thermal/matrix_free_mpir_fem/voxel.py`, `mesh.py`, `boundaries.py` | `VoxelThermalMesh`, active-element mask, exposed-face convection |
 | `thermal/matrix_free_mpir_fem/contact.py` | `ContactMap`, `planar_contact_map` |
 | `multiphysics/staggered_coupling/board_enclosure.py` | interface iteration |
@@ -507,7 +507,7 @@ for the current path and the candidate, with the numbers written to
    contact tolerance; record the number of interface iterations, the total
    solve time, and the interface flux history.
 5. **STEP round trip**: a small KiCad export with copper enabled, compared
-   with the same board's `.kicad_pcb`-derived occupancy from the plane-opt
+   with the same board's `.kicad_pcb`-derived occupancy from the current-field
    mapping.
 
 ## Status
@@ -522,7 +522,7 @@ for the current path and the candidate, with the numbers written to
 | thick conductors to the 3D voxel PEEC (PyPEEC) with Joule loss to the voxel thermal mesh | `feature/voxel-peec-3d` | done; `tests/test_voxel_peec.py`, `VOXEL_PEEC_RESULTS.json` |
 | electro-thermal `σ(T)` loop around the interface iteration | `feature/enclosure-electrothermal-radiation` | done; `tests/test_electro_thermal_enclosure.py`, `ELECTROTHERMAL_ENCLOSURE_RESULTS.json` |
 | graded tensor grids in the rasteriser, component-driven refinement | `feature/tensor-grid-geometry` | done; `tests/test_geometry_step.py`, `tests/test_kicad_step.py`, `KICAD_REFINEMENT_RESULTS.json` |
-| sheet PEEC on graded grids (pFFT) and the plane-opt grid contract v2 | `feature/sheet-peec-pfft` | done; `tests/test_sheet_pfft.py`, `SHEET_PFFT_RESULTS.json`; `plane_opt_problem_mapping` emits v2 grid lines for graded rasters |
+| sheet PEEC on graded grids (pFFT) and the current-field grid contract v2 | `feature/sheet-peec-pfft` | done; `tests/test_sheet_pfft.py`, `SHEET_PFFT_RESULTS.json`; `current_field_problem_mapping` emits v2 grid lines for graded rasters |
 | refinement boxes along narrow traces | `exp/trace-aware-refinement` | measured, not adopted; `TRACE_REFINEMENT_RESULTS.json` |
 | tessellation and C++ winding-number classification | `feature/geometry-native-classify` | done; `tests/test_native_geometry.py`, `GEOMETRY_CLASSIFY_RESULTS.json` |
 

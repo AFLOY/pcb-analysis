@@ -23,7 +23,7 @@ kicad-cli pcb export step --include-tracks --include-pads --include-zones \
 import numpy as np
 from geometry.cad_import import (
     board_barrels, board_vias, kicad_step_body_map, layers_from_kicad_stackup,
-    load_step, plane_opt_problem_mapping, rasterize_board, read_kicad_stackup, resolve_bodies,
+    load_step, current_field_problem_mapping, rasterize_board, read_kicad_stackup, resolve_bodies,
 )
 
 board = "power_module.kicad_pcb"
@@ -47,7 +47,7 @@ include the copper's inductance; that solve is iterative, and at tens of MHz
 it can take many minutes on a CPU.
 
 ```python
-from electrical.sheet_peec import build_plane_opt_sheet_inputs, solve_sheet_case
+from electrical.sheet_peec import build_current_field_sheet_inputs, solve_sheet_case
 
 def pad_cells(layer, x_mm, y_mm, half_width_mm=0.5):
     row, col = raster.cell_of(x_mm * 1e-3, -y_mm * 1e-3)   # the STEP export negates KiCad's y
@@ -62,9 +62,9 @@ terminals = [
     {"name": "VIN", "pad": "J1.3", "current_a": amplitude_a, "cells": pad_cells("F.Cu", 129.0, 97.58)},
     {"name": "SRC", "pad": "Q1.3", "current_a": -amplitude_a, "cells": pad_cells("F.Cu", 149.26, 95.675)},
 ]
-problem = plane_opt_problem_mapping(raster, terminals=terminals, frequency_hz=solve_frequency_hz,
+problem = current_field_problem_mapping(raster, terminals=terminals, frequency_hz=solve_frequency_hz,
                                     vias=board_vias(resolved, raster), barrels=board_barrels(resolved, raster))
-sheet_mesh, operator, sheet_terminals, _ = build_plane_opt_sheet_inputs(problem)
+sheet_mesh, operator, sheet_terminals, _ = build_current_field_sheet_inputs(problem)
 current = solve_sheet_case(sheet_mesh, operator, sheet_terminals, frequency_hz=solve_frequency_hz)
 ```
 

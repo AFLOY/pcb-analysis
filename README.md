@@ -72,16 +72,16 @@ pads act as the input faces: 1 A enters at the input connector's VIN pin
 (J1 pad 3) and leaves at the MOSFET's source pad (Q1 pad 3). The API has no
 pad object: each pad's centre is read from the KiCad board (the pad
 properties, in mm), and the copper cells under it become the terminal's cells.
-`plane_opt_problem_mapping` collects the grid, copper, barrels and terminals
+`current_field_problem_mapping` collects the grid, copper, barrels and terminals
 into one current-field problem.
 
 ```python
 import numpy as np
 from geometry.cad_import import (
     board_barrels, board_vias, kicad_step_body_map, layers_from_kicad_stackup,
-    load_step, plane_opt_problem_mapping, rasterize_board, read_kicad_stackup, resolve_bodies,
+    load_step, current_field_problem_mapping, rasterize_board, read_kicad_stackup, resolve_bodies,
 )
-from electrical.sheet_peec import solve_plane_opt_problem
+from electrical.sheet_peec import solve_current_field_problem
 
 board = "power_module.kicad_pcb"
 layers, board_top_mm = layers_from_kicad_stackup(read_kicad_stackup(board))
@@ -103,9 +103,9 @@ terminals = [
     {"name": "VIN", "pad": "J1.3", "current_a": 1.0, "cells": pad_cells("F.Cu", 129.0, 97.58)},
     {"name": "SRC", "pad": "Q1.3", "current_a": -1.0, "cells": pad_cells("F.Cu", 149.26, 95.675)},
 ]
-problem = plane_opt_problem_mapping(raster, terminals=terminals, frequency_hz=0.0,
+problem = current_field_problem_mapping(raster, terminals=terminals, frequency_hz=0.0,
                                     vias=board_vias(resolved, raster), barrels=board_barrels(resolved, raster))
-result = solve_plane_opt_problem(problem)             # DC sheet PEEC on the CPU
+result = solve_current_field_problem(problem)             # DC sheet PEEC on the CPU
 print(f"voltage span {result.metrics['voltage_span_v'] * 1e3:.3f} mV, "
       f"peak current density {result.metrics['max_current_density_a_per_mm2']:.2f} A/mm2")
 ```

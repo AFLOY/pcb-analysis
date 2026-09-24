@@ -8,8 +8,8 @@
    loss, unknowns, operator build and apply time and GMRES iterations on a
    uniform 0.1 mm grid (convolution), a uniform 0.5 mm grid, and a graded
    grid fine at both ends (pFFT), CPU path.
-3. plane_opt schema v2: ``power_module`` from KiCad with component-driven
-   grading solved through ``solve_plane_opt_problem`` at DC and 1 MHz (one
+3. current-field schema v2: ``power_module`` from KiCad with component-driven
+   grading solved through ``solve_current_field_problem`` at DC and 1 MHz (one
    filament per layer on both grids) against the uniform 0.25 mm v1 problem
    (branches, kernel bytes, wall time, current density).
 
@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 
 from electrical.matrix_free_mpir_fem import TensorGrid, graded_edges  # noqa: E402
-from electrical.sheet_peec.plane_opt_contract import solve_plane_opt_problem  # noqa: E402
+from electrical.sheet_peec.current_field_contract import solve_current_field_problem  # noqa: E402
 from electrical.sheet_peec.sheet_operator import SheetInductanceOperator, SheetLayer, SheetStackup  # noqa: E402
 from electrical.sheet_peec.sheet_peec import SheetMesh, Terminal, ViaBranch, solve_sheet_case  # noqa: E402
 from electrical.sheet_peec.sheet_pfft import PfftSheetInductanceOperator  # noqa: E402
@@ -146,7 +146,7 @@ def strip_line() -> dict[str, Any]:
 def power_module(plane_opt: Path) -> dict[str, Any] | None:
     from geometry.cad_import import (
         board_refined_grid, board_vias, component_boxes, default_kicad_model_dir, export_kicad_step, kicad_cli_available,
-        kicad_component_solids, kicad_step_body_map, layers_from_kicad_stackup, load_step, plane_opt_problem_mapping,
+        kicad_component_solids, kicad_step_body_map, layers_from_kicad_stackup, load_step, current_field_problem_mapping,
         rasterize_board, read_kicad_stackup, resolve_bodies,
     )
 
@@ -182,7 +182,7 @@ def power_module(plane_opt: Path) -> dict[str, Any] | None:
         cells_out = [{"layer": raster.layers[0].name, "x": int(c), "y": int(r)} for r, c in zip(rows_idx, cols_idx) if c == right]
         terminals = [{"name": "in", "pad": "L", "current_a": 1.0, "cells": cells_in}, {"name": "out", "pad": "R", "current_a": -1.0, "cells": cells_out}]
         for frequency in (0.0, 1.0e6):
-            mapping = plane_opt_problem_mapping(raster, terminals=terminals, frequency_hz=frequency, vias=board_vias(resolved, raster))
+            mapping = current_field_problem_mapping(raster, terminals=terminals, frequency_hz=frequency, vias=board_vias(resolved, raster))
             # A barrel whose axis lands on a cell the outline threshold left bare
             # cannot be a branch; drop it as the KiCad acceptance does.
             copper = {name: {(c["x"], c["y"]) for c in cells} for name, cells in mapping["copper_by_layer"].items()}
@@ -194,12 +194,12 @@ def power_module(plane_opt: Path) -> dict[str, Any] | None:
             # One filament per layer on both grids: the comparison is between the
             # two inductance operators, and six filament layers would give the
             # pFFT precorrection 36 layer pairs of near terms on this board.
-            result = solve_plane_opt_problem(mapping, {"maximum_iterations": 60, "relative_tolerance": 1e-8, "maximum_filaments": 1})
+            result = solve_current_field_problem(mapping, {"maximum_iterations": 60, "relative_tolerance": 1e-8, "maximum_filaments": 1})
             wall = time.perf_counter() - start
             diagonal_wall = None
             if frequency > 0.0:
                 start = time.perf_counter()
-                solve_plane_opt_problem(mapping, {"maximum_iterations": 60, "relative_tolerance": 1e-8, "maximum_filaments": 1, "preconditioner": "diagonal"})
+                solve_current_field_problem(mapping, {"maximum_iterations": 60, "relative_tolerance": 1e-8, "maximum_filaments": 1, "preconditioner": "diagonal"})
                 diagonal_wall = (time.perf_counter() - start) * 1e3
             runs.append({
                 "preconditioner": "near", "wall_ms_diagonal_preconditioner": diagonal_wall,

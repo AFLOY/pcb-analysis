@@ -4,6 +4,38 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
+## 0.9.0
+
+**Breaking.** The current-field contract drops the `plane_opt` prefix: the
+library is generic and the prefix named one of its consumers. Every name and
+schema string below was renamed without an alias, so code and serialized
+problems written for 0.8.x must be updated. No physics or numerics changed.
+
+| 0.8.x | 0.9.0 |
+|---|---|
+| module `electrical.sheet_peec.plane_opt_contract` | `electrical.sheet_peec.current_field_contract` |
+| `PLANE_OPT_PROBLEM_SCHEMA` | `CURRENT_FIELD_PROBLEM_SCHEMA` |
+| `PLANE_OPT_PROBLEM_SCHEMA_V2` | `CURRENT_FIELD_PROBLEM_SCHEMA_V2` |
+| `PLANE_OPT_RESULT_SCHEMA` | `CURRENT_FIELD_RESULT_SCHEMA` |
+| `PlaneOptLayer` | `CurrentFieldLayer` |
+| `PlaneOptProblem` | `CurrentFieldProblem` |
+| `PlaneOptSolveResult` | `CurrentFieldSolveResult` |
+| `PlaneOptTerminal` | `CurrentFieldTerminal` |
+| `PlaneOptVerticalSegment` | `CurrentFieldVerticalSegment` |
+| `build_plane_opt_sheet_inputs` | `build_current_field_sheet_inputs` |
+| `solve_plane_opt_problem` | `solve_current_field_problem` |
+| `geometry.cad_import.plane_opt_problem_mapping` | `geometry.cad_import.current_field_problem_mapping` |
+| schema `plane-opt-current-field-problem/v1` | `current-field-problem/v1` |
+| schema `plane-opt-current-field-problem/v2` | `current-field-problem/v2` |
+| schema `plane-opt-current-field-result/v1` | `current-field-result/v1` |
+
+Migration: replace the names as in the table. `CurrentFieldProblem.from_mapping`
+accepts only the new schema strings and raises `ValueError` on the old ones, so
+a stored problem JSON needs its `"schema"` field rewritten; the mapping's other
+fields are unchanged. `current_field_problem_mapping` and the solve's
+`problem_schema` / `result_schema` metrics emit the new strings, so a consumer
+that compares them against the `plane-opt-` strings must switch too.
+
 ## 0.8.2
 
 Plated holes reach the electrical problem as the barrels the STEP export
