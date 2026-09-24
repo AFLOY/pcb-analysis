@@ -6,17 +6,17 @@ three-dimensional one over the board's height; at zero frequency the solve
 reproduces a resistor network to machine precision and above it the transform
 path matches a dense assembly of the same operator.  The thickness of each
 sheet is cut into graded filaments for the skin effect, and
-``plane_opt_contract`` is the serialised problem/result schema the router
+``current_field_contract`` is the serialised problem/result schema a router
 speaks.  A CUDA path (``sheet_cuda``) mirrors the CPU solve.
 """
 
-from .plane_opt_contract import (
-    PLANE_OPT_PROBLEM_SCHEMA,
-    PLANE_OPT_RESULT_SCHEMA,
-    PlaneOptProblem,
-    PlaneOptSolveResult,
-    build_plane_opt_sheet_inputs,
-    solve_plane_opt_problem,
+from .current_field_contract import (
+    CURRENT_FIELD_PROBLEM_SCHEMA,
+    CURRENT_FIELD_RESULT_SCHEMA,
+    CurrentFieldProblem,
+    CurrentFieldSolveResult,
+    build_current_field_sheet_inputs,
+    solve_current_field_problem,
 )
 from .sheet_cuda import (
     CudaSheetSolveError,
@@ -50,15 +50,15 @@ from .skin_filaments import skin_depth_m
 from .skin_screen import LayerSkin, classify_layer_thickness
 
 __all__ = [
+    "CURRENT_FIELD_PROBLEM_SCHEMA",
+    "CURRENT_FIELD_RESULT_SCHEMA",
     "CellGeometry",
     "CudaSheetSolveError",
     "CudaSheetTelemetry",
     "CudaSheetUnavailableError",
+    "CurrentFieldProblem",
+    "CurrentFieldSolveResult",
     "LayerSkin",
-    "PLANE_OPT_PROBLEM_SCHEMA",
-    "PLANE_OPT_RESULT_SCHEMA",
-    "PlaneOptProblem",
-    "PlaneOptSolveResult",
     "SheetFields",
     "SheetInductanceOperator",
     "SheetLayer",
@@ -68,7 +68,7 @@ __all__ = [
     "Terminal",
     "ViaBranch",
     "build_kernel",
-    "build_plane_opt_sheet_inputs",
+    "build_current_field_sheet_inputs",
     "cell_current_density",
     "cell_current_density_phasor",
     "classify_layer_thickness",
@@ -76,7 +76,7 @@ __all__ = [
     "self_partial_inductance",
     "sheet_fields",
     "skin_depth_m",
-    "solve_plane_opt_problem",
+    "solve_current_field_problem",
     "solve_sheet_case",
     "solve_sheet_case_cuda",
     "via_resistance",

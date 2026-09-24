@@ -11,7 +11,7 @@ Three facts make the operator cheap on this mesh.
   for perpendicular bars.  So there is an x operator and a y operator and
   nothing between them, and a via, which carries current along z, couples to
   neither.  Vertical branches do couple to one another, being parallel; that
-  operator is not built here.  See :class:`~plane_opt.sheet_peec.ViaBranch` for
+  operator is not built here.  See :class:`~electrical.sheet_peec.ViaBranch` for
   what its absence costs and where.
 * Between two branches of the same axis, the coupling depends only on their
   offset and on the separation of their layers.  In plane that is a

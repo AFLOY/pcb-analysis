@@ -1,6 +1,6 @@
 """Router-facing sparse operations for multilayer DICE-PEEC.
 
-plane_opt (or any router) submits segment/via edits against a fixed stackup.
+A router submits segment/via edits against a fixed stackup.
 This module compiles them into occupancy deltas and via sets that the 2.5D
 scorer understands.  Geometry DRC remains the router's responsibility (Gate 0).
 """

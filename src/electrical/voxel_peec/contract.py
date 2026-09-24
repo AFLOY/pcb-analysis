@@ -4,7 +4,7 @@ A busbar, a terminal block or heavy copper carries current through its
 thickness, and above a few skin depths a sheet cannot represent it.  Such a
 conductor is voxelised (by ``geometry.cad_import`` from CAD, or directly
 as arrays) and solved with PyPEEC's voxel PEEC, which this module wraps in
-the same way :mod:`electrical.sheet_peec.plane_opt_contract` wraps the sheet solve: the caller
+the same way :mod:`electrical.sheet_peec.current_field_contract` wraps the sheet solve: the caller
 gives arrays, this module owns the PyPEEC geometry/problem/tolerance
 mappings, runs the solve on the CPU or through :class:`.cuda_pypeec.CudaPyPeecExecutor`,
 and returns arrays.  PyPEEC keeps ownership of the assembly and the solve.

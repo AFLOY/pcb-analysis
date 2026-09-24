@@ -9,7 +9,7 @@ import numpy as np
 
 from electrical.dice_peec import Stackup, ViaSet
 from electrical.dice_peec import ViaSpec as PeecViaSpec
-from electrical.sheet_peec.plane_opt_contract import PLANE_OPT_PROBLEM_SCHEMA, PLANE_OPT_PROBLEM_SCHEMA_V2
+from electrical.sheet_peec.current_field_contract import CURRENT_FIELD_PROBLEM_SCHEMA, CURRENT_FIELD_PROBLEM_SCHEMA_V2
 from thermal.matrix_free_mpir_fem import HeatSource, LayeredThermalMesh, VoxelSolidModel, VoxelThermalMesh
 
 from .barrel import Barrel, barrel_of
@@ -269,7 +269,7 @@ def plane_opt_problem_mapping(
             record["barrel"] = barrel.as_dict()
         connections.append(record)
     return {
-        "schema": PLANE_OPT_PROBLEM_SCHEMA if raster.is_uniform else PLANE_OPT_PROBLEM_SCHEMA_V2,
+        "schema": CURRENT_FIELD_PROBLEM_SCHEMA if raster.is_uniform else CURRENT_FIELD_PROBLEM_SCHEMA_V2,
         "name": name,
         "role": role,
         "frequency_hz": float(frequency_hz),

@@ -10,7 +10,7 @@ Matches the DICE-PEEC design:
 
 This is still a scalar magnetoquasistatic interaction proxy, not a full
 PEEC-MNA solve.  The identities and data layout are the production bridge
-that plane_opt multilayer routing can feed.
+that a multilayer router can feed.
 """
 
 from __future__ import annotations

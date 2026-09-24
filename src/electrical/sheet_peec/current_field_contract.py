@@ -1,9 +1,9 @@
-"""Consume plane-opt's backend-independent PEEC current-field schema.
+"""Consume a backend-independent PEEC current-field problem and solve it.
 
-This module intentionally imports no ``plane_opt`` code.  The optimizer owns
-the board/config/scenario resolution; pcb-analysis receives the serialized
-``plane-opt-current-field-problem/v1`` mapping and owns only the physical sheet
-mesh and solve.
+The caller (a router or an optimizer) owns the board, configuration and
+scenario resolution; pcb-analysis receives the serialized
+``current-field-problem/v1`` (one pitch) or ``/v2`` (grid lines) mapping and
+owns only the physical sheet mesh and solve.
 """
 
 from __future__ import annotations
@@ -22,11 +22,11 @@ from .sheet_peec import SheetMesh, Terminal, ViaBranch, solve_sheet_case
 from .sheet_results import cell_current_density_phasor, sheet_fields
 from .skin_filaments import filament_links, graded_filaments, skin_depth_m
 
-PLANE_OPT_PROBLEM_SCHEMA = "plane-opt-current-field-problem/v1"
+CURRENT_FIELD_PROBLEM_SCHEMA = "current-field-problem/v1"
 # v2 carries the grid lines (``x_edges_mm``, ``y_edges_mm``) instead of one pitch,
 # so a graded tensor grid can be solved; a uniform grid may use either form.
-PLANE_OPT_PROBLEM_SCHEMA_V2 = "plane-opt-current-field-problem/v2"
-PLANE_OPT_RESULT_SCHEMA = "plane-opt-current-field-result/v1"
+CURRENT_FIELD_PROBLEM_SCHEMA_V2 = "current-field-problem/v2"
+CURRENT_FIELD_RESULT_SCHEMA = "current-field-result/v1"
 
 NamedNode = tuple[str, int, int]
 
@@ -45,7 +45,7 @@ def _complex_value(value: Any, *, field: str) -> complex:
 
 
 @dataclass(frozen=True)
-class PlaneOptLayer:
+class CurrentFieldLayer:
     name: str
     order: int
     center_z_mm: float
@@ -53,7 +53,7 @@ class PlaneOptLayer:
     resistivity_ohm_m: float
 
     @classmethod
-    def from_mapping(cls, value: Mapping[str, Any]) -> "PlaneOptLayer":
+    def from_mapping(cls, value: Mapping[str, Any]) -> "CurrentFieldLayer":
         layer = cls(
             name=str(value.get("name") or ""),
             order=int(value["order"]),
@@ -80,7 +80,7 @@ class PlaneOptLayer:
 
 
 @dataclass(frozen=True)
-class PlaneOptTerminal:
+class CurrentFieldTerminal:
     name: str
     pad: str
     current_a: complex
@@ -88,7 +88,7 @@ class PlaneOptTerminal:
 
 
 @dataclass(frozen=True)
-class PlaneOptVerticalSegment:
+class CurrentFieldVerticalSegment:
     upper_layer: str
     lower_layer: str
     resistance_ohm: float
@@ -96,19 +96,19 @@ class PlaneOptVerticalSegment:
 
 
 @dataclass(frozen=True)
-class PlaneOptProblem:
+class CurrentFieldProblem:
     name: str
     role: str
     frequency_hz: float
     rows: int
     columns: int
     pitch_mm: float | None
-    layers: tuple[PlaneOptLayer, ...]
+    layers: tuple[CurrentFieldLayer, ...]
     copper_by_layer: Mapping[str, frozenset[tuple[int, int]]]
     vertical_segments: tuple[
-        tuple[str, tuple[int, int], PlaneOptVerticalSegment], ...
+        tuple[str, tuple[int, int], CurrentFieldVerticalSegment], ...
     ]
-    terminals: tuple[PlaneOptTerminal, ...]
+    terminals: tuple[CurrentFieldTerminal, ...]
     source_board_sha256: str | None
     grid: TensorGrid | None = None
 
@@ -117,10 +117,10 @@ class PlaneOptProblem:
         return self.grid is None or self.grid.is_uniform
 
     @classmethod
-    def from_mapping(cls, value: Mapping[str, Any]) -> "PlaneOptProblem":
+    def from_mapping(cls, value: Mapping[str, Any]) -> "CurrentFieldProblem":
         schema = str(value.get("schema") or "")
-        if schema not in (PLANE_OPT_PROBLEM_SCHEMA, PLANE_OPT_PROBLEM_SCHEMA_V2):
-            raise ValueError(f"unsupported plane-opt problem schema: {schema}")
+        if schema not in (CURRENT_FIELD_PROBLEM_SCHEMA, CURRENT_FIELD_PROBLEM_SCHEMA_V2):
+            raise ValueError(f"unsupported current-field problem schema: {schema}")
         grid = value.get("grid") or {}
         rows = int(grid["rows"])
         columns = int(grid["columns"])
@@ -142,7 +142,7 @@ class PlaneOptProblem:
         layers = tuple(
             sorted(
                 (
-                    PlaneOptLayer.from_mapping(item)
+                    CurrentFieldLayer.from_mapping(item)
                     for item in (value.get("layers") or [])
                 ),
                 key=lambda item: item.order,
@@ -174,7 +174,7 @@ class PlaneOptProblem:
             ):
                 raise ValueError(f"{name}: conductor cell lies outside the grid")
 
-        terminals: list[PlaneOptTerminal] = []
+        terminals: list[CurrentFieldTerminal] = []
         for item in value.get("terminals") or []:
             cells = tuple(
                 (
@@ -202,7 +202,7 @@ class PlaneOptProblem:
             if not name or not pad:
                 raise ValueError("terminal name and pad are required")
             terminals.append(
-                PlaneOptTerminal(
+                CurrentFieldTerminal(
                     name=name,
                     pad=pad,
                     current_a=_complex_value(
@@ -232,7 +232,7 @@ class PlaneOptProblem:
             raise ValueError("terminal excitation must be non-zero")
 
         vertical: list[
-            tuple[str, tuple[int, int], PlaneOptVerticalSegment]
+            tuple[str, tuple[int, int], CurrentFieldVerticalSegment]
         ] = []
         layer_order = {layer.name: layer.order for layer in layers}
         vertical_keys: set[tuple[int, int, str, str]] = set()
@@ -275,7 +275,7 @@ class PlaneOptProblem:
                     (
                         str(connection.get("name") or ""),
                         cell,
-                        PlaneOptVerticalSegment(
+                        CurrentFieldVerticalSegment(
                             upper_layer=upper,
                             lower_layer=lower,
                             resistance_ohm=resistance,
@@ -310,8 +310,8 @@ class PlaneOptProblem:
 
 
 @dataclass
-class PlaneOptSolveResult:
-    """Sheet result mapped back to plane-opt's named nodes."""
+class CurrentFieldSolveResult:
+    """Sheet result mapped back to the problem's named nodes."""
 
     metrics: dict[str, Any]
     voltage: dict[NamedNode, float]
@@ -322,7 +322,7 @@ class PlaneOptSolveResult:
 
 @dataclass(frozen=True)
 class _SheetContext:
-    problem: PlaneOptProblem
+    problem: CurrentFieldProblem
     filament_of: Mapping[str, tuple[int, ...]]
     name_of_filament: Mapping[int, str]
     filament_counts: Mapping[str, int]
@@ -340,13 +340,13 @@ def _nearest_filament(
     )
 
 
-def build_plane_opt_sheet_inputs(
-    value: Mapping[str, Any] | PlaneOptProblem,
+def build_current_field_sheet_inputs(
+    value: Mapping[str, Any] | CurrentFieldProblem,
     settings: Mapping[str, Any] | None = None,
 ) -> tuple[SheetMesh, SheetInductanceOperator, list[Terminal], _SheetContext]:
     """Compile schema v1 into the sheet solver's native mesh."""
     problem = (
-        value if isinstance(value, PlaneOptProblem) else PlaneOptProblem.from_mapping(value)
+        value if isinstance(value, CurrentFieldProblem) else CurrentFieldProblem.from_mapping(value)
     )
     settings = dict(settings or {})
     tensor = problem.grid if problem.grid is not None else TensorGrid.uniform(problem.pitch_mm * 1e-3, (problem.rows, problem.columns))
@@ -495,10 +495,10 @@ def build_plane_opt_sheet_inputs(
     return mesh, operator, terminals, context
 
 
-def solve_plane_opt_problem(
-    value: Mapping[str, Any] | PlaneOptProblem,
+def solve_current_field_problem(
+    value: Mapping[str, Any] | CurrentFieldProblem,
     settings: Mapping[str, Any] | None = None,
-) -> PlaneOptSolveResult:
+) -> CurrentFieldSolveResult:
     """Solve schema v1 and return fields keyed by original layer names."""
     settings = dict(settings or {})
     execution_backend = str(settings.get("execution_backend", "cpu"))
@@ -508,9 +508,9 @@ def solve_plane_opt_problem(
         )
     if settings.get("fallback_backend") is not None:
         raise ValueError(
-            "plane-opt sheet solves do not allow implicit backend fallback"
+            "current-field sheet solves do not allow implicit backend fallback"
         )
-    mesh, operator, terminals, context = build_plane_opt_sheet_inputs(
+    mesh, operator, terminals, context = build_current_field_sheet_inputs(
         value, settings
     )
     solve_arguments = {
@@ -592,10 +592,10 @@ def solve_plane_opt_problem(
             "max_current_density_a_per_mm2": (
                 float(density_values.max()) if density_values.size else 0.0
             ),
-            "problem_schema": PLANE_OPT_PROBLEM_SCHEMA if context.problem.grid is None else PLANE_OPT_PROBLEM_SCHEMA_V2,
+            "problem_schema": CURRENT_FIELD_PROBLEM_SCHEMA if context.problem.grid is None else CURRENT_FIELD_PROBLEM_SCHEMA_V2,
             "inductance_operator": type(operator).__name__,
             "grid_uniform": context.problem.is_uniform,
-            "result_schema": PLANE_OPT_RESULT_SCHEMA,
+            "result_schema": CURRENT_FIELD_RESULT_SCHEMA,
             "problem_name": context.problem.name,
             "role": context.problem.role,
             "source_board_sha256": context.problem.source_board_sha256,
@@ -624,7 +624,7 @@ def solve_plane_opt_problem(
             "physical_conductor_cell_count": len(density),
         }
     )
-    return PlaneOptSolveResult(
+    return CurrentFieldSolveResult(
         metrics=metrics,
         voltage=voltage,
         current_density=density,
