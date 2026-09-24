@@ -101,5 +101,5 @@ packageに置き、`[tool.setuptools.package-data]`へ登録する。
   をrepositoryへ置かない。
 - 本番公開の前に`Release`を`workflow_dispatch`、target `testpypi`で手動実行し、
   TestPyPIへ上がることを確認する。
-- 新しいtop-level packageや破壊的なimport pathの変更はminor版を上げ、READMEの移行noteを
+- 新しいtop-level packageや破壊的なimport pathの変更はminor版を上げ、`CHANGELOG.md`の移行noteを
   更新する。

@@ -69,47 +69,9 @@ pip install 'git+https://github.com/AFLOY/pcb-analysis.git@v0.8.1'
 
 The release tag has to match the version in `pyproject.toml`.
 
-Version 0.7.0 adds the `geometry` top-level package (STEP input through
-OpenCASCADE, optional `cad` extra) and the `native` extra with the CMake build
-of the C++ kernels; nothing in `electrical`, `thermal`, `emc` or
-`multiphysics` moved, so no import path changes for existing users.
+Release and migration notes are in [CHANGELOG.md](https://github.com/AFLOY/pcb-analysis/blob/main/CHANGELOG.md).
 
-Version 0.8.0 makes `cadquery-ocp` and `pypeec` base dependencies and the
-`cuda` extra carries CuPy only. `pip install 'pcb-analysis[cuda]'` still
-installs everything it did; `[cad]` is an empty alias.
-
-Version 0.8.0 also splits the electrical package by method: the sheet PEEC
-(`sheet_peec`, `sheet_operator`, `sheet_inductance`, `sheet_results`,
-`sheet_cuda`, `skin_filaments`, `skin_screen`, `plane_opt_contract`) moved to
-`electrical.sheet_peec`; the PyPEEC wrapper (`cuda_pypeec`, `pypeec_memory`)
-and the voxel contract (`voxel_peec` → `contract`) moved to
-`electrical.voxel_peec`; `electrical.dice_peec` keeps the delta scorer,
-`layout_ops`, `controller`, `backends`, `Stackup` and the CLI. The old paths
-are not re-exported; update imports as
-`from electrical.sheet_peec import solve_sheet_case` and
-`from electrical.voxel_peec import CudaPyPeecExecutor`.
-
-Version 0.8.1 adds, without moving any import path: surface-to-ambient
-radiation and backward-Euler transient conduction in `thermal`; the `σ(T)`
-loop around the board/body interface (`ElectroThermalEnclosureScenario`);
-graded tensor grids (`electrical.matrix_free_mpir_fem.grid`) in the thermal
-and DC solvers, the section rasteriser and the sheet PEEC (precorrected FFT,
-`electrical.sheet_peec.sheet_pfft`, with a C++ near-field kernel built like
-the other native modules); component-driven grid refinement from KiCad STEP
-exports; the plane-opt problem schema `v2` whose grid carries `x_edges_mm` /
-`y_edges_mm` (v1 still accepted); a near-field preconditioner that is now the
-default of the sheet solves (`preconditioner="diagonal"` restores the old
-one); and a CUDA sheet solve that stops on the requested tolerance.
-`LayeredThermalMesh.pitch_x_m` / `pitch_y_m` and `LayeredPCBMesh.pitch_x_m` /
-`pitch_y_m` are now per-cell arrays (scalars are still accepted on input).
-
-> **Note**: Requires an NVIDIA driver and CUDA 13.x. Verify with `nvidia-smi`.
-> The package is installed as `electrical`; the former top-level
-> `peec_fastopt` package now lives under `electrical` (split into `sheet_peec`, `dice_peec` and `voxel_peec`), and the thermal
-> and EMC front ends and the coupled scenarios are the separate top-level
-> packages `thermal`, `emc`, and `multiphysics`. Re-run the editable install
-> after pulling these changes so the new packages are importable and the old
-> path is not left on `sys.path`.
+> **Note**: The CUDA paths need an NVIDIA driver and CUDA 13.x. Verify with `nvidia-smi`.
 
 ## Quick start
 
