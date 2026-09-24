@@ -171,9 +171,9 @@ def test_ac_loop_impedance_on_a_graded_grid_agrees_with_the_uniform_fine_grid() 
 
 
 def _graded_problem(frequency_hz: float, *, uniform: bool = False) -> dict:
-    """A plane_opt v2 problem: a 0.2 mm wide F.Cu trace returning on B.Cu, graded along x."""
+    """A current-field v2 problem: a 0.2 mm wide F.Cu trace returning on B.Cu, graded along x."""
 
-    from electrical.sheet_peec.plane_opt_contract import PLANE_OPT_PROBLEM_SCHEMA_V2
+    from electrical.sheet_peec.current_field_contract import CURRENT_FIELD_PROBLEM_SCHEMA_V2
 
     if uniform:
         x_edges = np.linspace(0.0, 6.0, 31)
@@ -198,43 +198,43 @@ def _graded_problem(frequency_hz: float, *, uniform: bool = False) -> dict:
         {"name": "out", "pad": "P2", "current_a": -1.0, "cells": [{"layer": "B.Cu", "x": 0, "y": y} for y in range(rows)]},
     ]
     return {
-        "schema": PLANE_OPT_PROBLEM_SCHEMA_V2, "name": "graded-trace", "role": "test", "frequency_hz": frequency_hz,
+        "schema": CURRENT_FIELD_PROBLEM_SCHEMA_V2, "name": "graded-trace", "role": "test", "frequency_hz": frequency_hz,
         "grid": {"rows": rows, "columns": cols, "x_edges_mm": x_edges.tolist(), "y_edges_mm": y_edges.tolist()},
         "layers": layers, "copper_by_layer": copper, "vertical_connections": connections, "terminals": terminals,
     }
 
 
-def test_plane_opt_schema_v2_solves_graded_grids_with_the_pfft_operator() -> None:
-    from electrical.sheet_peec.plane_opt_contract import PlaneOptProblem, build_plane_opt_sheet_inputs, solve_plane_opt_problem
+def test_current_field_schema_v2_solves_graded_grids_with_the_pfft_operator() -> None:
+    from electrical.sheet_peec.current_field_contract import CurrentFieldProblem, build_current_field_sheet_inputs, solve_current_field_problem
 
-    problem = PlaneOptProblem.from_mapping(_graded_problem(1.0e6))
+    problem = CurrentFieldProblem.from_mapping(_graded_problem(1.0e6))
     assert not problem.is_uniform and problem.pitch_mm is None
-    mesh, operator, _terminals, _context = build_plane_opt_sheet_inputs(problem)
+    mesh, operator, _terminals, _context = build_current_field_sheet_inputs(problem)
     assert isinstance(operator, PfftSheetInductanceOperator) and not mesh.is_uniform
-    result = solve_plane_opt_problem(problem)
+    result = solve_current_field_problem(problem)
     assert result.metrics["inductance_operator"] == "PfftSheetInductanceOperator"
     assert result.metrics["problem_schema"].endswith("/v2") and result.metrics["grid_uniform"] is False
     assert result.metrics["max_current_density_a_per_mm2"] > 0.0
     # A uniform v2 grid keeps the convolution operator and matches the v1 form.
-    uniform = PlaneOptProblem.from_mapping(_graded_problem(1.0e6, uniform=True))
+    uniform = CurrentFieldProblem.from_mapping(_graded_problem(1.0e6, uniform=True))
     assert uniform.is_uniform and uniform.pitch_mm == pytest.approx(0.2)
-    _mesh, operator_u, _t, _c = build_plane_opt_sheet_inputs(uniform)
+    _mesh, operator_u, _t, _c = build_current_field_sheet_inputs(uniform)
     assert isinstance(operator_u, SheetInductanceOperator)
-    forced = build_plane_opt_sheet_inputs(uniform, {"operator": "pfft"})[1]
+    forced = build_current_field_sheet_inputs(uniform, {"operator": "pfft"})[1]
     assert isinstance(forced, PfftSheetInductanceOperator)
     with pytest.raises(ValueError, match="uniform grid"):
-        build_plane_opt_sheet_inputs(problem, {"operator": "fft"})
+        build_current_field_sheet_inputs(problem, {"operator": "fft"})
 
 
 def test_cuda_pfft_solve_matches_the_cpu_solve_on_a_graded_grid() -> None:
     pytest.importorskip("cupy")
     from electrical.matrix_free_mpir_fem import cuda_available
-    from electrical.sheet_peec.plane_opt_contract import build_plane_opt_sheet_inputs
+    from electrical.sheet_peec.current_field_contract import build_current_field_sheet_inputs
     from electrical.sheet_peec.sheet_cuda import CudaPfftSheetInductanceOperator, solve_sheet_case_cuda
 
     if not cuda_available():
         pytest.skip("no CUDA device")
-    mesh, operator, terminals, context = build_plane_opt_sheet_inputs(_graded_problem(1.0e6))
+    mesh, operator, terminals, context = build_current_field_sheet_inputs(_graded_problem(1.0e6))
     cpu = solve_sheet_case(mesh, operator, terminals, frequency_hz=1.0e6, tolerance=1e-9)
     # The CUDA path runs GMRES one restart cycle at a time and stops on the
     # public saddle-point residual, so the tolerance means what it does on the CPU.

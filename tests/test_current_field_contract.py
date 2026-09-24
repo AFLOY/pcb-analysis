@@ -4,12 +4,12 @@ import math
 
 import pytest
 
-from electrical.sheet_peec.plane_opt_contract import (
-    PLANE_OPT_PROBLEM_SCHEMA,
-    PLANE_OPT_RESULT_SCHEMA,
-    PlaneOptProblem,
-    build_plane_opt_sheet_inputs,
-    solve_plane_opt_problem,
+from electrical.sheet_peec.current_field_contract import (
+    CURRENT_FIELD_PROBLEM_SCHEMA,
+    CURRENT_FIELD_RESULT_SCHEMA,
+    CurrentFieldProblem,
+    build_current_field_sheet_inputs,
+    solve_current_field_problem,
 )
 from electrical.sheet_peec.sheet_cuda import CudaSheetTelemetry
 
@@ -69,7 +69,7 @@ def _problem(*, frequency_hz: float = 0.0) -> dict:
             }
         )
     return {
-        "schema": PLANE_OPT_PROBLEM_SCHEMA,
+        "schema": CURRENT_FIELD_PROBLEM_SCHEMA,
         "name": "three_layer_return",
         "role": "POWER",
         "state": "steady",
@@ -105,7 +105,7 @@ def _problem(*, frequency_hz: float = 0.0) -> dict:
 
 
 def test_parser_preserves_dynamic_layer_geometry() -> None:
-    problem = PlaneOptProblem.from_mapping(_problem())
+    problem = CurrentFieldProblem.from_mapping(_problem())
 
     assert [layer.thickness_mm for layer in problem.layers] == [
         0.035,
@@ -125,7 +125,7 @@ def test_parser_accepts_balanced_complex_currents() -> None:
     value["terminals"][0]["current_a"] = {"real": 0.0, "imag": 1.0}
     value["terminals"][1]["current_a"] = {"real": 0.0, "imag": -1.0}
 
-    problem = PlaneOptProblem.from_mapping(value)
+    problem = CurrentFieldProblem.from_mapping(value)
 
     assert problem.terminals[0].current_a == 1.0j
     assert problem.terminals[1].current_a == -1.0j
@@ -136,11 +136,21 @@ def test_parser_rejects_terminal_outside_conductor() -> None:
     value["terminals"][0]["cells"][0]["y"] = 1
 
     with pytest.raises(ValueError, match="cell is not conductor"):
-        PlaneOptProblem.from_mapping(value)
+        CurrentFieldProblem.from_mapping(value)
+
+
+def test_parser_rejects_the_pre_0_9_0_schema_string() -> None:
+    """0.9.0 renamed plane-opt-current-field-problem/v1 without keeping an alias."""
+
+    value = _problem()
+    value["schema"] = "plane-opt-current-field-problem/v1"
+
+    with pytest.raises(ValueError, match="unsupported current-field problem schema"):
+        CurrentFieldProblem.from_mapping(value)
 
 
 def test_sheet_mesh_uses_each_layer_own_thickness() -> None:
-    mesh, _, terminals, context = build_plane_opt_sheet_inputs(_problem())
+    mesh, _, terminals, context = build_current_field_sheet_inputs(_problem())
 
     for actual, expected in zip(
         [layer.thickness_m for layer in mesh.stackup.layers],
@@ -161,11 +171,11 @@ def test_sheet_mesh_uses_each_layer_own_thickness() -> None:
 
 
 def test_end_to_end_dc_contract_result() -> None:
-    result = solve_plane_opt_problem(_problem())
+    result = solve_current_field_problem(_problem())
 
     assert result.metrics["converged"]
-    assert result.metrics["problem_schema"] == PLANE_OPT_PROBLEM_SCHEMA
-    assert result.metrics["result_schema"] == PLANE_OPT_RESULT_SCHEMA
+    assert result.metrics["problem_schema"] == CURRENT_FIELD_PROBLEM_SCHEMA
+    assert result.metrics["result_schema"] == CURRENT_FIELD_RESULT_SCHEMA
     assert result.metrics["source_board_sha256"] == "fixture"
     assert result.metrics["resolved_backend"] == "numpy-scipy-sheet-peec"
     assert not result.metrics["fallback_used"]
@@ -193,8 +203,8 @@ def test_end_to_end_ac_solution_tracks_terminal_phase() -> None:
         "imag": -1.0,
     }
 
-    real_result = solve_plane_opt_problem(real_value)
-    quadrature_result = solve_plane_opt_problem(quadrature_value)
+    real_result = solve_current_field_problem(real_value)
+    quadrature_result = solve_current_field_problem(quadrature_value)
 
     assert real_result.metrics["converged"]
     assert quadrature_result.metrics["converged"]
@@ -208,7 +218,7 @@ def test_end_to_end_ac_solution_tracks_terminal_phase() -> None:
 
 def test_contract_rejects_implicit_backend_fallback() -> None:
     with pytest.raises(ValueError, match="do not allow implicit"):
-        solve_plane_opt_problem(
+        solve_current_field_problem(
             _problem(),
             {"execution_backend": "cuda", "fallback_backend": "cpu"},
         )

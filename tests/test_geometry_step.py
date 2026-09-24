@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from electrical.sheet_peec.plane_opt_contract import PlaneOptProblem
+from electrical.sheet_peec.current_field_contract import CurrentFieldProblem
 from geometry.cad_import import (
     native_classify_available,
     BoardRaster,
@@ -29,7 +29,7 @@ from geometry.cad_import import (
     drilled_solid,
     load_step,
     ocp_available,
-    plane_opt_problem_mapping,
+    current_field_problem_mapping,
     rasterize_board,
     resolve_bodies,
     sample_plane_fill,
@@ -163,7 +163,7 @@ def test_disc_area_error_falls_with_supersampling(model) -> None:
     print(f"disc area error by supersample 1/2/4: {errors}")
 
 
-def test_stackup_vias_thermal_mesh_and_plane_opt_mapping(model) -> None:
+def test_stackup_vias_thermal_mesh_and_current_field_mapping(model) -> None:
     body_map = _body_map()
     resolved = resolve_bodies(model, body_map)
     raster = rasterize_board(resolved, body_map.board, pitch_mm=0.5)
@@ -187,7 +187,7 @@ def test_stackup_vias_thermal_mesh_and_plane_opt_mapping(model) -> None:
     assert mesh.conductivity_w_per_m_k[2, 0, 0] == pytest.approx(0.8)  # bare laminate
     assert mesh.is_full
 
-    mapping = plane_opt_problem_mapping(
+    mapping = current_field_problem_mapping(
         raster,
         terminals=[
             {"name": "src", "pad": "P1", "current_a": 1.0, "cells": [{"layer": "F1", "x": 2, "y": 11}]},
@@ -195,7 +195,7 @@ def test_stackup_vias_thermal_mesh_and_plane_opt_mapping(model) -> None:
         ],
         vias=vias,
     )
-    problem = PlaneOptProblem.from_mapping(mapping)
+    problem = CurrentFieldProblem.from_mapping(mapping)
     assert problem.rows == 24 and problem.columns == 40 and problem.pitch_mm == 0.5
     assert len(problem.copper_by_layer["F1"]) == int(raster.occupancy[1].sum())
     assert len(problem.vertical_segments) == 1
@@ -280,7 +280,7 @@ def test_measured_thickness_and_skin_screening(model) -> None:
     with pytest.warns(UserWarning, match="F1: the copper solids are 0.0350 mm thick"):
         wrong = rasterize_board(resolve_bodies(model, wrong_map), thick, pitch_mm=0.5)
     assert wrong.thickness_mismatches() == (("F1", 0.070, pytest.approx(0.035)),)
-    mapping = plane_opt_problem_mapping(
+    mapping = current_field_problem_mapping(
         wrong,
         terminals=[
             {"name": "src", "pad": "P1", "current_a": 1.0, "cells": [{"layer": "F1", "x": 2, "y": 11}]},
@@ -306,7 +306,7 @@ def test_measured_thickness_and_skin_screening(model) -> None:
     bus_raster = BoardRaster(busbar, raster.pitch_mm, raster.origin_mm, raster.outline, raster.fill)
     assert skin_report(bus_raster, 1.0e6).needs_3d == ("F1",)
     with pytest.warns(UserWarning, match="a 2.5D sheet cannot represent it"):
-        plane_opt_problem_mapping(
+        current_field_problem_mapping(
             bus_raster,
             terminals=[
                 {"name": "src", "pad": "P1", "current_a": 1.0, "cells": [{"layer": "F1", "x": 2, "y": 11}]},
@@ -316,7 +316,7 @@ def test_measured_thickness_and_skin_screening(model) -> None:
         )
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        plane_opt_problem_mapping(
+        current_field_problem_mapping(
             raster,
             terminals=[
                 {"name": "src", "pad": "P1", "current_a": 1.0, "cells": [{"layer": "F1", "x": 2, "y": 11}]},
@@ -459,7 +459,7 @@ def test_graded_raster_conserves_copper_area_and_builds_a_graded_thermal_mesh(mo
     assert thermal.mesh.element_grid_shape[1:] == grid.shape
     np.testing.assert_array_equal(thermal.mesh.pitch_x_m, grid.pitch_x_m)
     np.testing.assert_array_equal(thermal.mesh.pitch_y_m, grid.pitch_y_m)
-    mapping = plane_opt_problem_mapping(graded, terminals=())
+    mapping = current_field_problem_mapping(graded, terminals=())
     assert mapping["schema"].endswith("/v2") and "pitch_mm" not in mapping["grid"]
     assert len(mapping["grid"]["x_edges_mm"]) == grid.shape[1] + 1
     # y-down storage reverses the row heights with the rows.
@@ -530,9 +530,9 @@ def _plated_body_map() -> BodyMap:
 def _solve_through(raster, vias, barrels, row):
     """One vertical connection, its geometry recorded, and a closing solve."""
 
-    from electrical.sheet_peec.plane_opt_contract import solve_plane_opt_problem
+    from electrical.sheet_peec.current_field_contract import solve_current_field_problem
 
-    mapping = plane_opt_problem_mapping(
+    mapping = current_field_problem_mapping(
         raster,
         terminals=[
             {"name": "src", "pad": "P1", "current_a": 1.0, "cells": [{"layer": "F1", "x": 92, "y": row}]},
@@ -541,9 +541,9 @@ def _solve_through(raster, vias, barrels, row):
         vias=vias,
         barrels=barrels,
     )
-    problem = PlaneOptProblem.from_mapping(mapping)
+    problem = CurrentFieldProblem.from_mapping(mapping)
     assert len(problem.vertical_segments) == 1
-    result = solve_plane_opt_problem(problem)
+    result = solve_current_field_problem(problem)
     assert result.metrics["converged"]
     assert result.metrics["undriven_node_count"] == 0
     assert result.metrics["current_closure_error_a"] < 1.0e-9

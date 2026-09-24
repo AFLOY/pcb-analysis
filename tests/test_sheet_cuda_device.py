@@ -10,8 +10,8 @@ import math
 
 import pytest
 
-from electrical.sheet_peec.plane_opt_contract import solve_plane_opt_problem
-from test_plane_opt_contract import _problem
+from electrical.sheet_peec.current_field_contract import solve_current_field_problem
+from test_current_field_contract import _problem
 
 
 def _require_cuda_device() -> None:
@@ -32,10 +32,10 @@ def test_multilayer_nonuniform_contract_matches_cpu_on_cuda() -> None:
         "maximum_iterations": 240,
         "restart": 60,
     }
-    cpu = solve_plane_opt_problem(
+    cpu = solve_current_field_problem(
         problem, {**common, "execution_backend": "cpu"}
     )
-    cuda = solve_plane_opt_problem(
+    cuda = solve_current_field_problem(
         problem,
         {**common, "execution_backend": "cuda", "device_id": 0},
     )
