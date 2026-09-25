@@ -1,4 +1,4 @@
-"""Python loop versus C++ construction of sheet-PEEC current elements.
+"""Legacy Python loop, shipped NumPy path, and C++ construction of sheet-PEEC current elements.
 
 A fully occupied three-layer sheet mesh with a via bank and random complex
 branch currents; ``dipoles_from_sheet_peec`` on the current Python loop, on a
@@ -52,28 +52,39 @@ def mesh_of(rows: int, cols: int) -> SheetMesh:
     return SheetMesh((rows, cols), 2e-4, stackup, occupancy, vias=vias)
 
 
-def vectorised(mesh: SheetMesh, solution: Any) -> CurrentDipoles:
-    """The same elements assembled with NumPy indexing instead of a Python loop."""
+def legacy_loop(mesh: SheetMesh, solution: Any) -> CurrentDipoles:
+    """The Python loop the shipped path replaced (kept here as the reference it was measured against)."""
 
     pitch = float(mesh.pitch_m)
     heights = np.asarray([layer.z_m for layer in mesh.stackup.layers], dtype=np.float64)
     current = np.asarray(solution.branch_current, dtype=np.complex128)
-    bx = np.asarray(mesh.branch_x, dtype=np.int64).reshape(-1, 3)
-    by = np.asarray(mesh.branch_y, dtype=np.int64).reshape(-1, 3)
-    vias = np.asarray(
-        [(via.lower_layer, via.upper_layer, via.row, via.col) for via in mesh.via_branches], dtype=np.int64
-    ).reshape(-1, 4)
-    nx, ny = bx.shape[0], by.shape[0]
-    positions = np.empty((mesh.branch_count, 3))
-    moments = np.zeros((mesh.branch_count, 3), dtype=np.complex128)
-    positions[:nx] = np.column_stack(((bx[:, 2] + 1.0) * pitch, (bx[:, 1] + 0.5) * pitch, heights[bx[:, 0]]))
-    moments[:nx, 0] = current[:nx] * pitch
-    positions[nx : nx + ny] = np.column_stack(((by[:, 2] + 0.5) * pitch, (by[:, 1] + 1.0) * pitch, heights[by[:, 0]]))
-    moments[nx : nx + ny, 1] = current[nx : nx + ny] * pitch
-    lower, upper = heights[vias[:, 0]], heights[vias[:, 1]]
-    positions[nx + ny :] = np.column_stack(((vias[:, 3] + 0.5) * pitch, (vias[:, 2] + 0.5) * pitch, 0.5 * (lower + upper)))
-    moments[nx + ny :, 2] = current[nx + ny :] * (upper - lower)
-    return CurrentDipoles(positions, moments)
+    positions: list[tuple[float, float, float]] = []
+    moments: list[tuple[complex, complex, complex]] = []
+    index = 0
+    for layer, row, col in mesh.branch_x:
+        positions.append(((col + 1.0) * pitch, (row + 0.5) * pitch, heights[layer]))
+        moments.append((current[index] * pitch, 0.0, 0.0))
+        index += 1
+    for layer, row, col in mesh.branch_y:
+        positions.append(((col + 0.5) * pitch, (row + 1.0) * pitch, heights[layer]))
+        moments.append((0.0, current[index] * pitch, 0.0))
+        index += 1
+    for via in mesh.via_branches:
+        lower = heights[via.lower_layer]
+        upper = heights[via.upper_layer]
+        positions.append(((via.col + 0.5) * pitch, (via.row + 0.5) * pitch, 0.5 * (lower + upper)))
+        moments.append((0.0, 0.0, current[index] * (upper - lower)))
+        index += 1
+    return CurrentDipoles(
+        np.asarray(positions, dtype=np.float64).reshape(-1, 3),
+        np.asarray(moments, dtype=np.complex128).reshape(-1, 3),
+    )
+
+
+def vectorised(mesh: SheetMesh, solution: Any) -> CurrentDipoles:
+    """The shipped portable path: NumPy indexing (dipoles_from_sheet_peec with native=False)."""
+
+    return dipoles_from_sheet_peec(mesh, solution, native=False)
 
 
 def _timed(fn: Callable[[], Any], repeats: int, warmups: int) -> tuple[Any, dict[str, Any]]:
@@ -113,7 +124,7 @@ def _case(rows: int, cols: int, repeats: int, threads: list[int]) -> dict[str, A
     mesh = mesh_of(rows, cols)
     rng = np.random.default_rng(rows * 1000 + cols)
     solution = SimpleNamespace(branch_current=rng.standard_normal(mesh.branch_count) + 1j * rng.standard_normal(mesh.branch_count))
-    loop, loop_timing = _timed(lambda: dipoles_from_sheet_peec(mesh, solution, native=False), repeats, 1)
+    loop, loop_timing = _timed(lambda: legacy_loop(mesh, solution), repeats, 1)
     vector, vector_timing = _timed(lambda: vectorised(mesh, solution), repeats, 1)
     by_threads: dict[str, Any] = {}
     for count in threads:
@@ -152,14 +163,14 @@ def run(shapes: list[tuple[int, int]], repeats: int, threads: list[int]) -> dict
                         "cpu": _cpu_model(), "cpu_count": os.cpu_count(), "compiler": _compiler(), "thread_sweep": threads,
                         "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"), "device": "cpu"},
         "definitions": {"timing": "wall time of dipoles_from_sheet_peec (branch order, positions and complex moments)",
-                        "loop": "the shipped Python loop over branches",
-                        "vectorised_numpy": "the same assembly with NumPy indexing, kept in this script as the measured alternative",
+                        "loop": "the Python loop over branches that the shipped path replaced (legacy_loop in this script)",
+                        "vectorised_numpy": "the shipped portable path: dipoles_from_sheet_peec(native=False), NumPy indexing",
                         "native": "C++ kernel sheet_branch_dipoles, OpenMP over branches",
                         "decision_threads": "the first thread count in the sweep"},
         "cases": cases,
         "decision": {
-            "adopted": min(speedups) >= 2.0 and identical,
-            "criteria": "C++ at least 2x faster than the shipped loop on every case at the decision thread count and bit-identical output",
+            "adopted": min(vs_numpy) >= 2.0 and identical,
+            "criteria": "C++ at least 2x faster than the shipped NumPy path on every case at the decision thread count and bit-identical output",
             "minimum_speedup_vs_loop": min(speedups),
             "minimum_speedup_vs_vectorised_numpy": min(vs_numpy),
             "all_identical": identical,
