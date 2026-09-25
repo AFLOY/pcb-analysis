@@ -4,6 +4,38 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
+## 0.9.1
+
+Fused C++ host paths for the electro-thermal coupling, opt-in and result
+preserving. No public name changes.
+
+- `electrical.matrix_free_mpir_fem`: `MatrixFreePCBOperator` and
+  `solve_pcb_dc` take `native=` and `native_threads=`; the layered DC
+  conduction action (float32 and float64), the via links and the whole
+  two-level inner PCG run in the new `_layered_dc_native` extension, built
+  by `python -m electrical.matrix_free_mpir_fem.native.build` next to the
+  Maxwell kernel. `PCB_NATIVE_Q1=1` selects it by default. Same iteration
+  histories as the NumPy path; 1.1 to 2.8x end to end on one thread and
+  10.7 to 31.6x on sixteen (Xeon Platinum 8581C, `DC_NATIVE_XEON_8581C_RESULTS.json`).
+- `thermal.matrix_free_mpir_fem`: with `native=True` the FP64 action (outer
+  residual and coarse assembly) also runs in C++
+  (`high_operator_backend = "cpp-fused-node-gather-hex-q1-fp64"`);
+  construction 1.3 to 2.5x faster, 202k-node solve 612 to 240 ms at sixteen
+  threads (`THERMAL_NATIVE_FP64_XEON_8581C_*_RESULTS.json`).
+- `multiphysics.staggered_coupling`: `run_electro_thermal(native=,
+  native_threads=)` hands one selection to both solvers. A whole coupled
+  solve is 1.6 to 5.9x faster on one thread and 2.9 to 14.7x on sixteen
+  (`ELECTROTHERMAL_NATIVE_XEON_8581C_RESULTS.json`); the Kicad_PowerOpt
+  adopted pipeline on `power_module` goes from 1,895 s to 1,551 s with the
+  same candidate (`KICAD_POWEROPT_SYSTEM_BENCHMARK_XEON_8581C_RESULTS.json`).
+- `emc.tiled_dipole_superposition`: `dipoles_from_sheet_peec` assembles
+  its elements with NumPy indexing, 3.8 to 4.4x faster than the loop and
+  bit-identical. A C++ kernel for it matched NumPy within 1.16x and was not
+  adopted (`EMC_SOURCES_XEON_8581C_RESULTS.json`).
+- New benchmarks `experiments/dc_native_benchmark.py` and
+  `experiments/electrothermal_native_benchmark.py`; the thermal benchmark
+  also reports construction and FP64 action timings.
+
 ## 0.9.0
 
 **Breaking.** The current-field contract drops the `plane_opt` prefix: the
