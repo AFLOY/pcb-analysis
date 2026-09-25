@@ -73,6 +73,30 @@ def evaluate_fields_native(
     return np.asarray(magnetic), (np.asarray(electric_field) if electric else None)
 
 
+def sheet_branch_dipoles_native(
+    branch_x: np.ndarray,
+    branch_y: np.ndarray,
+    vias: np.ndarray,
+    pitch_m: float,
+    heights_m: np.ndarray,
+    branch_current: np.ndarray,
+    *,
+    threads: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Positions and moments of a sheet-PEEC solve's branches, in branch order."""
+
+    positions, moments = _native.sheet_branch_dipoles(
+        np.ascontiguousarray(branch_x, dtype=np.int64).reshape(-1, 3),
+        np.ascontiguousarray(branch_y, dtype=np.int64).reshape(-1, 3),
+        np.ascontiguousarray(vias, dtype=np.int64).reshape(-1, 4),
+        float(pitch_m),
+        np.ascontiguousarray(heights_m, dtype=np.float64).reshape(-1),
+        np.ascontiguousarray(branch_current, dtype=np.complex128).reshape(-1),
+        threads if threads is not None else native_threads(),
+    )
+    return np.asarray(positions), np.asarray(moments)
+
+
 def far_field_pattern_native(
     directions: np.ndarray,
     source_position: np.ndarray,

@@ -26,6 +26,7 @@ from electrical.matrix_free_mpir_fem.pcb import (
 )
 
 from .fields import CurrentDipoles
+from .native_dipole import sheet_branch_dipoles_native, use_native
 
 
 def terminal_closure_dipoles(
@@ -142,7 +143,9 @@ def dipoles_from_pcb_dc(
     return dipoles
 
 
-def dipoles_from_sheet_peec(mesh, solution) -> CurrentDipoles:
+def dipoles_from_sheet_peec(
+    mesh, solution, *, native: bool | None = None, native_threads: int | None = None
+) -> CurrentDipoles:
     """Branch currents of a sheet-PEEC solve as current elements.
 
     ``mesh`` is a ``SheetMesh`` and ``solution`` a ``SheetSolution`` from
@@ -150,7 +153,9 @@ def dipoles_from_sheet_peec(mesh, solution) -> CurrentDipoles:
     long between cell centres; its element sits midway, on the layer's
     ``z_m``.  A via branch spans the two layers' heights.  Branch currents
     are positive from the leaving node to the entering node, which is ``+x``,
-    ``+y``, and lower-to-upper respectively.
+    ``+y``, and lower-to-upper respectively.  ``native=True`` builds the
+    elements in the optional C++ extension (``native_threads`` OpenMP
+    threads); ``None`` follows ``PCB_NATIVE_EMC``.
     """
 
     pitch = float(mesh.pitch_m)
@@ -158,6 +163,21 @@ def dipoles_from_sheet_peec(mesh, solution) -> CurrentDipoles:
     current = np.asarray(solution.branch_current, dtype=np.complex128)
     if current.shape != (mesh.branch_count,):
         raise ValueError("solution.branch_current must hold one value per branch")
+
+    if use_native(native, "cpu", np.complex128):
+        position_array, moment_array = sheet_branch_dipoles_native(
+            np.asarray(mesh.branch_x, dtype=np.int64).reshape(-1, 3),
+            np.asarray(mesh.branch_y, dtype=np.int64).reshape(-1, 3),
+            np.asarray(
+                [(via.lower_layer, via.upper_layer, via.row, via.col) for via in mesh.via_branches],
+                dtype=np.int64,
+            ).reshape(-1, 4),
+            pitch,
+            heights,
+            current,
+            threads=native_threads,
+        )
+        return CurrentDipoles(position_array, moment_array)
 
     positions: list[tuple[float, float, float]] = []
     moments: list[tuple[complex, complex, complex]] = []

@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <stdexcept>
 
 namespace py = pybind11;
@@ -169,8 +170,92 @@ ArrC128 far_field_pattern(ArrF64 directions, ArrF64 source_position, ArrC128 sou
     return pattern;
 }
 
+// Current elements of a sheet-PEEC solve: one element per branch, in the
+// branch order of ``SheetMesh`` (x branches, y branches, via branches).  The
+// geometry matches ``sources.dipoles_from_sheet_peec``: an in-plane element
+// sits midway along its branch on the layer's height with moment ``I pitch``
+// along the branch axis; a via element sits at the cell centre halfway between
+// the two layers with moment ``I (z_upper - z_lower)`` along z.  Returns
+// (positions (N,3) float64, moments (N,3) complex128).
+py::tuple sheet_branch_dipoles(py::array_t<std::int64_t, py::array::c_style | py::array::forcecast> branch_x,
+                               py::array_t<std::int64_t, py::array::c_style | py::array::forcecast> branch_y,
+                               py::array_t<std::int64_t, py::array::c_style | py::array::forcecast> vias,
+                               double pitch, ArrF64 heights, ArrC128 current, int threads) {
+    if (branch_x.ndim() != 2 || branch_x.shape(1) != 3 || branch_y.ndim() != 2 || branch_y.shape(1) != 3) {
+        throw std::invalid_argument("branch_x and branch_y must have shape (branches, 3): layer, row, col");
+    }
+    if (vias.ndim() != 2 || vias.shape(1) != 4) {
+        throw std::invalid_argument("vias must have shape (vias, 4): lower_layer, upper_layer, row, col");
+    }
+    const py::ssize_t nx = branch_x.shape(0), ny = branch_y.shape(0), nv = vias.shape(0);
+    const py::ssize_t total = nx + ny + nv;
+    if (current.ndim() != 1 || current.shape(0) != total) {
+        throw std::invalid_argument("current must hold one value per branch");
+    }
+    const py::ssize_t layers = heights.size();
+    const std::int64_t* bx = branch_x.data();
+    const std::int64_t* by = branch_y.data();
+    const std::int64_t* bv = vias.data();
+    const double* z = heights.data();
+    const c128* cur = current.data();
+    for (py::ssize_t i = 0; i < nx; ++i) {
+        if (bx[3 * i] < 0 || bx[3 * i] >= layers) throw std::invalid_argument("branch_x names a layer outside heights");
+    }
+    for (py::ssize_t i = 0; i < ny; ++i) {
+        if (by[3 * i] < 0 || by[3 * i] >= layers) throw std::invalid_argument("branch_y names a layer outside heights");
+    }
+    for (py::ssize_t i = 0; i < nv; ++i) {
+        if (bv[4 * i] < 0 || bv[4 * i] >= layers || bv[4 * i + 1] < 0 || bv[4 * i + 1] >= layers) {
+            throw std::invalid_argument("a via names a layer outside heights");
+        }
+    }
+    ArrF64 positions({total, static_cast<py::ssize_t>(3)});
+    ArrC128 moments({total, static_cast<py::ssize_t>(3)});
+    double* pos = positions.mutable_data();
+    c128* mom = moments.mutable_data();
+    {
+        py::gil_scoped_release release;
+        const int team = threads < 1 ? 1 : threads;
+#pragma omp parallel for schedule(static) num_threads(team) if (team > 1 && total > 4096)
+        for (py::ssize_t i = 0; i < total; ++i) {
+            double* p = pos + 3 * i;
+            c128* q = mom + 3 * i;
+            if (i < nx) {
+                const std::int64_t layer = bx[3 * i], row = bx[3 * i + 1], col = bx[3 * i + 2];
+                p[0] = (static_cast<double>(col) + 1.0) * pitch;
+                p[1] = (static_cast<double>(row) + 0.5) * pitch;
+                p[2] = z[layer];
+                q[0] = cur[i] * pitch;
+                q[1] = c128(0.0, 0.0);
+                q[2] = c128(0.0, 0.0);
+            } else if (i < nx + ny) {
+                const py::ssize_t k = i - nx;
+                const std::int64_t layer = by[3 * k], row = by[3 * k + 1], col = by[3 * k + 2];
+                p[0] = (static_cast<double>(col) + 0.5) * pitch;
+                p[1] = (static_cast<double>(row) + 1.0) * pitch;
+                p[2] = z[layer];
+                q[0] = c128(0.0, 0.0);
+                q[1] = cur[i] * pitch;
+                q[2] = c128(0.0, 0.0);
+            } else {
+                const py::ssize_t k = i - nx - ny;
+                const std::int64_t lower = bv[4 * k], upper = bv[4 * k + 1], row = bv[4 * k + 2], col = bv[4 * k + 3];
+                p[0] = (static_cast<double>(col) + 0.5) * pitch;
+                p[1] = (static_cast<double>(row) + 0.5) * pitch;
+                p[2] = 0.5 * (z[lower] + z[upper]);
+                q[0] = c128(0.0, 0.0);
+                q[1] = c128(0.0, 0.0);
+                q[2] = cur[i] * (z[upper] - z[lower]);
+            }
+        }
+    }
+    return py::make_tuple(positions, moments);
+}
+
 PYBIND11_MODULE(_dipole_native, m) {
     m.doc() = "Direct Hertzian-dipole superposition on the host";
+    m.def("sheet_branch_dipoles", &sheet_branch_dipoles, py::arg("branch_x"), py::arg("branch_y"), py::arg("vias"),
+          py::arg("pitch"), py::arg("heights"), py::arg("current"), py::arg("threads") = 1);
     m.def("evaluate_fields", &evaluate_fields, py::arg("points"), py::arg("source_position"),
           py::arg("source_moment"), py::arg("wavenumber"), py::arg("electric") = true,
           py::arg("threads") = 1);
