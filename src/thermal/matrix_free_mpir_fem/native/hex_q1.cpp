@@ -4,7 +4,8 @@
 // conduction action used by the CUDA kernel in ``cuda.py``: one output node
 // visits its at most eight adjacent element slabs, applies the two per-slab
 // 8x8 unit tensors weighted by the element conductivities, adds the lumped
-// Robin conductance, and is written once.  The inner PCG with the two-level
+// Robin conductance, and is written once.  The same gather runs in float32
+// for the low path and in float64 for the outer MPIR residual.  The inner PCG with the two-level
 // preconditioner (Jacobi plus patch-constant coarse correction through a
 // dense float32 inverse) runs as one SPMD OpenMP region per outer MPIR step.
 
@@ -30,6 +31,8 @@ namespace {
 using ArrF32 = py::array_t<float, py::array::c_style | py::array::forcecast>;
 using ArrF64 = py::array_t<double, py::array::c_style | py::array::forcecast>;
 using ArrU8 = py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>;
+template <typename T>
+using Arr = py::array_t<T, py::array::c_style | py::array::forcecast>;
 
 class FlushSubnormals {
    public:
@@ -50,12 +53,13 @@ const T* data_of(const py::array_t<T, F>& a, py::ssize_t expected, const char* n
     return a.data();
 }
 
-struct HexOperator {
-    const float* coef;       // (3, slabs, rows, cols): a_x, a_y, a_z per element
-    const float* unit;       // (3, 8, 8): U_x, U_y, U_z
-    const float* robin;      // (nodes,)
+template <typename T>
+struct HexOperatorT {
+    const T* coef;       // (3, slabs, rows, cols): a_x, a_y, a_z per element
+    const T* unit;       // (3, 8, 8): U_x, U_y, U_z
+    const T* robin;      // (nodes,)
     const std::uint8_t* free_nodes;
-    const float* free_mask;  // 1.0f free, 0.0f fixed
+    const T* free_mask;  // 1 free, 0 fixed
     int slabs, rows, cols;   // element grid
     int threads;
 
@@ -67,7 +71,7 @@ struct HexOperator {
     py::ssize_t node_count() const { return static_cast<py::ssize_t>(lines()) * node_cols(); }
 
     // Generic gather for one node, same ordering as the CUDA kernel.
-    float gather(const float* x, int z, int y, int xi) const {
+    T gather(const T* x, int z, int y, int xi) const {
         const int nr = node_rows(), nc = node_cols(), plane = nr * nc;
         const int node = (z * nr + y) * nc + xi;
         if (!free_nodes[node]) return x[node];
@@ -75,16 +79,16 @@ struct HexOperator {
         const int y0 = y > 0 ? y - 1 : 0, y1 = y < rows ? y : rows - 1;
         const int x0 = xi > 0 ? xi - 1 : 0, x1 = xi < cols ? xi : cols - 1;
         const py::ssize_t ne = element_count();
-        const float* ux = unit;
-        const float* uy = unit + 64;
-        const float* uz = unit + 128;
-        float acc = 0.0f;
+        const T* ux = unit;
+        const T* uy = unit + 64;
+        const T* uz = unit + 128;
+        T acc = T(0);
         for (int ez = z0; ez <= z1; ++ez) {
             for (int ey = y0; ey <= y1; ++ey) {
                 for (int ex = x0; ex <= x1; ++ex) {
                     const int lr = 4 * (z - ez) + 2 * (y - ey) + (xi - ex);
                     const py::ssize_t e = static_cast<py::ssize_t>(ez * rows + ey) * cols + ex;
-                    const float a = coef[e], b = coef[ne + e], d = coef[2 * ne + e];
+                    const T a = coef[e], b = coef[ne + e], d = coef[2 * ne + e];
                     const int corner = (ez * nr + ey) * nc + ex;
                     for (int c = 0; c < 8; ++c) {
                         const int cn = corner + (c >> 2) * plane + ((c >> 1) & 1) * nc + (c & 1);
@@ -102,7 +106,7 @@ struct HexOperator {
     // element slabs and rows, unrolled over the two x-neighbour elements and
     // the eight local columns, so the x-loop vectorises; the ends of the line
     // use the generic gather.
-    void apply_lines(const float* x, float* out, int line_begin, int line_end) const {
+    void apply_lines(const T* x, T* out, int line_begin, int line_end) const {
         const int nr = node_rows(), nc = node_cols(), plane = nr * nc;
         for (int line = line_begin; line < line_end; ++line) {
             const int z = line / nr, y = line - z * nr;
@@ -113,33 +117,33 @@ struct HexOperator {
             const int z0 = z > 0 ? z - 1 : 0, z1 = z < slabs ? z : slabs - 1;
             const int y0 = y > 0 ? y - 1 : 0, y1 = y < rows ? y : rows - 1;
             // acc over interior x; robin and the identity blend at the end.
-            float* o = out + base;
-            for (int xi = 1; xi < cols; ++xi) o[xi] = 0.0f;
+            T* o = out + base;
+            for (int xi = 1; xi < cols; ++xi) o[xi] = T(0);
             const py::ssize_t ne = element_count();
-            const float* ux = unit;
-            const float* uy = unit + 64;
-            const float* uz = unit + 128;
+            const T* ux = unit;
+            const T* uy = unit + 64;
+            const T* uz = unit + 128;
             for (int ez = z0; ez <= z1; ++ez) {
                 for (int ey = y0; ey <= y1; ++ey) {
                     const int lr_base = 4 * (z - ez) + 2 * (y - ey);
                     const py::ssize_t e_row = static_cast<py::ssize_t>(ez * rows + ey) * cols;  // element index of ex = 0
-                    const float* ax = coef + e_row;
-                    const float* ay = coef + ne + e_row;
-                    const float* az = coef + 2 * ne + e_row;
+                    const T* ax = coef + e_row;
+                    const T* ay = coef + ne + e_row;
+                    const T* az = coef + 2 * ne + e_row;
                     const int corner_row = (ez * nr + ey) * nc;    // node index of corner ex = 0
 #pragma omp simd
                     for (int xi = 1; xi < cols; ++xi) {
-                        float acc = 0.0f;
+                        T acc = T(0);
 #pragma GCC unroll 2
                         for (int dx = 0; dx < 2; ++dx) {
                             const int ex = xi - 1 + dx;           // element left (dx=0) or right (dx=1)
                             const int lr = lr_base + (1 - dx);     // local x index of the node in it
-                            const float a = ax[ex], b = ay[ex], d = az[ex];
+                            const T a = ax[ex], b = ay[ex], d = az[ex];
                             const int corner = corner_row + ex;
 #pragma GCC unroll 8
                             for (int c = 0; c < 8; ++c) {
                                 const int cn = corner + (c >> 2) * plane + ((c >> 1) & 1) * nc + (c & 1);
-                                const float w = a * ux[8 * lr + c] + b * uy[8 * lr + c] + d * uz[8 * lr + c];
+                                const T w = a * ux[8 * lr + c] + b * uy[8 * lr + c] + d * uz[8 * lr + c];
                                 acc += w * (x[cn] * free_mask[cn]);
                             }
                         }
@@ -150,8 +154,8 @@ struct HexOperator {
 #pragma omp simd
             for (int xi = 1; xi < cols; ++xi) {
                 const int node = base + xi;
-                const float f = free_mask[node];
-                o[xi] = f * (o[xi] + robin[node] * x[node]) + (1.0f - f) * x[node];
+                const T f = free_mask[node];
+                o[xi] = f * (o[xi] + robin[node] * x[node]) + (T(1) - f) * x[node];
             }
         }
     }
@@ -168,11 +172,14 @@ struct HexOperator {
     }
 };
 
-HexOperator make_operator(const ArrF32& coef, const ArrF32& unit,
-                          const ArrF32& robin, const ArrU8& free_nodes,
-                          const ArrF32& free_mask, int slabs, int rows, int cols, int threads) {
+using HexOperator = HexOperatorT<float>;
+
+template <typename T>
+HexOperatorT<T> make_operator(const Arr<T>& coef, const Arr<T>& unit,
+                              const Arr<T>& robin, const ArrU8& free_nodes,
+                              const Arr<T>& free_mask, int slabs, int rows, int cols, int threads) {
     if (slabs < 1 || rows < 1 || cols < 1) throw std::invalid_argument("element grid must be positive");
-    HexOperator op;
+    HexOperatorT<T> op;
     op.slabs = slabs;
     op.rows = rows;
     op.cols = cols;
@@ -212,6 +219,33 @@ ArrF32 apply_hex_q1(ArrF32 vector, ArrF32 coef, ArrF32 unit,
             FlushSubnormals flush;
             int b = 0, e = lines;
             HexOperator::thread_lines(lines, b, e);
+            op.apply_lines(x, y, b, e);
+        }
+    }
+    return out;
+}
+
+// y = A x in float64 for the outer MPIR residual (and the coarse-space
+// assembly of the two-level preconditioner).  Same node-owned gather and line
+// partition as the float32 path; the MXCSR is left untouched so FP64
+// subnormals keep IEEE semantics.
+ArrF64 apply_hex_q1_f64(ArrF64 vector, ArrF64 coef, ArrF64 unit, ArrF64 robin,
+                        ArrU8 free_nodes, ArrF64 free_mask, int slabs, int rows, int cols,
+                        int threads) {
+    const HexOperatorT<double> op = make_operator<double>(coef, unit, robin, free_nodes,
+                                                          free_mask, slabs, rows, cols, threads);
+    const py::ssize_t n = op.node_count();
+    const double* x = data_of(vector, n, "vector");
+    ArrF64 out(n);
+    double* y = out.mutable_data();
+    {
+        py::gil_scoped_release release;
+        const int lines = op.lines();
+        const int team = std::max(1, std::min(op.threads, lines));
+#pragma omp parallel num_threads(team) if (team > 1)
+        {
+            int b = 0, e = lines;
+            HexOperatorT<double>::thread_lines(lines, b, e);
             op.apply_lines(x, y, b, e);
         }
     }
@@ -394,11 +428,14 @@ py::tuple pcg_hex_q1(ArrF64 rhs_high, ArrF32 diagonal, ArrF32 coef, ArrF32 unit,
 }
 
 PYBIND11_MODULE(_thermal_native, m) {
-    m.doc() = "Fused C++ hexahedral Q1 conduction operator and two-level inner PCG";
+    m.doc() = "Fused C++ hexahedral Q1 conduction operator (float32 and float64) and two-level inner PCG";
     m.def("apply_hex_q1", &apply_hex_q1, py::arg("vector"), py::arg("coefficients"), py::arg("unit"),
           py::arg("robin"), py::arg("free_nodes"),
           py::arg("free_mask"), py::arg("slabs"), py::arg("rows"), py::arg("cols"),
           py::arg("threads") = 1);
+    m.def("apply_hex_q1_f64", &apply_hex_q1_f64, py::arg("vector"), py::arg("coefficients"),
+          py::arg("unit"), py::arg("robin"), py::arg("free_nodes"), py::arg("free_mask"),
+          py::arg("slabs"), py::arg("rows"), py::arg("cols"), py::arg("threads") = 1);
     m.def("pcg_hex_q1", &pcg_hex_q1, py::arg("rhs_high"), py::arg("diagonal"), py::arg("coefficients"),
           py::arg("unit"), py::arg("robin"),
           py::arg("free_nodes"), py::arg("free_mask"), py::arg("slabs"), py::arg("rows"),

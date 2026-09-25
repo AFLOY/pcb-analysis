@@ -140,3 +140,60 @@ class NativeThermalHexQ1:
             float(relative_residual),
             int(applications),
         )
+
+
+NATIVE_HIGH_KERNEL_NAME = "cpp-fused-node-gather-hex-q1-fp64"
+
+
+class NativeThermalHexQ1High:
+    """Host float64 operator for the outer MPIR residual and coarse assembly.
+
+    Built before the two-level preconditioner, whose coarse matrix is
+    assembled from FP64 applications, so it holds no preconditioner data.
+    """
+
+    kernel_name = NATIVE_HIGH_KERNEL_NAME
+
+    def __init__(
+        self,
+        element_grid_shape: tuple[int, int, int],
+        coefficients: np.ndarray,
+        unit: np.ndarray,
+        robin: np.ndarray,
+        free_nodes: np.ndarray,
+        *,
+        threads: int | None = None,
+    ) -> None:
+        if _native is None:
+            raise ImportError(
+                "the thermal native extension is not built; run "
+                "python -m thermal.matrix_free_mpir_fem.native.build"
+            )
+        self.slabs, self.rows, self.cols = (int(axis) for axis in element_grid_shape)
+        self.size = (self.slabs + 1) * (self.rows + 1) * (self.cols + 1)
+        self.threads = threads if threads is not None else native_threads()
+        f64 = lambda value: np.ascontiguousarray(value, dtype=np.float64).reshape(-1)
+        self._coefficients = f64(coefficients)
+        self._unit = f64(unit)
+        if self._coefficients.size != 3 * self.slabs * self.rows * self.cols or self._unit.size != 192:
+            raise ValueError("coefficients must be (3, slabs, rows, cols) and unit (3, 8, 8)")
+        self._robin = f64(robin)
+        self._free = np.ascontiguousarray(free_nodes, dtype=np.uint8).reshape(-1)
+        self._free_mask = self._free.astype(np.float64)
+
+    def apply(self, vector: Any) -> np.ndarray:
+        vector = np.ascontiguousarray(vector, dtype=np.float64).reshape(-1)
+        if vector.size != self.size:
+            raise ValueError(f"vector has size {vector.size}, expected {self.size}")
+        return _native.apply_hex_q1_f64(
+            vector,
+            self._coefficients,
+            self._unit,
+            self._robin,
+            self._free,
+            self._free_mask,
+            self.slabs,
+            self.rows,
+            self.cols,
+            self.threads,
+        )

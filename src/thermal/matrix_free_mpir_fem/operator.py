@@ -20,7 +20,7 @@ from electrical.matrix_free_mpir_fem.runtime import (
 from electrical.matrix_free_mpir_fem.solver import MPIRConfig
 
 from .mesh import Preconditioner, _corner_views, _flat_index, unit_hexahedron_matrices
-from .native_hex import NativeThermalHexQ1, native_requested
+from .native_hex import NativeThermalHexQ1, NativeThermalHexQ1High, native_requested
 from .problem import ThermalConductionProblem
 from electrical.matrix_free_mpir_fem.two_level import AggregationCoarseCorrection
 
@@ -154,6 +154,23 @@ class MatrixFreeThermalOperator:
             self._unit_low = runtime_ns.ascontiguousarray(self._unit_low)
             self._robin_total_low = runtime_ns.ascontiguousarray(self._robin_total_low)
 
+        use_native = self._cuda_apply is None and (native or (native is None and native_requested()))
+        # The FP64 action (outer residual and coarse assembly) goes native with
+        # the low path; it is built first because the coarse matrix below is
+        # assembled from FP64 applications.
+        self._native_high: NativeThermalHexQ1High | None = None
+        self.high_operator_backend = "array-corner-products-fp64"
+        if use_native:
+            self._native_high = NativeThermalHexQ1High(
+                mesh.element_grid_shape,
+                self._coefficients_high,
+                self._unit_high,
+                self._robin_total_high,
+                self.free_nodes,
+                threads=native_threads,
+            )
+            self.high_operator_backend = self._native_high.kernel_name
+
         self.preconditioner = preconditioner
         self.coarse_correction: AggregationCoarseCorrection | None = None
         if preconditioner == "two-level":
@@ -165,7 +182,7 @@ class MatrixFreeThermalOperator:
                 runtime=self.runtime,
                 block=coarse_block_nodes,
             )
-        if self._cuda_apply is None and (native or (native is None and native_requested())):
+        if use_native:
             # Opt-in fused C++ host path: operator plus the whole inner PCG
             # with the same preconditioner.  ``native=True`` demands it and
             # ``PCB_NATIVE_THERMAL=1`` selects it for every CPU operator.
@@ -256,6 +273,8 @@ class MatrixFreeThermalOperator:
         vector = np.asarray(vector, dtype=np.float64).reshape(-1)
         if vector.size != self.size:
             raise ValueError(f"vector has size {vector.size}, expected {self.size}")
+        if self._native_high is not None:
+            return self._native_high.apply(vector)
         return self._apply_impl(
             vector, np, self._coefficients_high, self._unit_high, self._robin_total_high, self.free_nodes
         )
