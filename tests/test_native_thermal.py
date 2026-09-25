@@ -72,6 +72,44 @@ def test_native_apply_matches_portable_float32(shape, fixed, threads) -> None:
     np.testing.assert_array_equal(actual[fixed_nodes], vector[fixed_nodes])
 
 
+@pytest.mark.parametrize("shape", [(1, 1), (1, 4), (3, 2), (12, 20)])
+@pytest.mark.parametrize("fixed", [False, True])
+@pytest.mark.parametrize("threads", [1, 3])
+def test_native_apply_high_matches_portable_float64(shape, fixed, threads) -> None:
+    problem = _stack(*shape, fixed=fixed)
+    portable = MatrixFreeThermalOperator(problem, preconditioner="jacobi")
+    native = MatrixFreeThermalOperator(
+        problem, preconditioner="jacobi", native=True, native_threads=threads
+    )
+    assert portable.high_operator_backend == "array-corner-products-fp64"
+    assert native.high_operator_backend == "cpp-fused-node-gather-hex-q1-fp64"
+    rng = np.random.default_rng(5)
+    vector = rng.standard_normal(portable.size)
+    expected = portable.apply_high(vector)
+    actual = native.apply_high(vector)
+    assert actual.dtype == np.float64
+    assert np.linalg.norm(actual - expected) <= 64.0 * np.finfo(np.float64).eps * np.linalg.norm(expected)
+    fixed_nodes = problem.fixed_temperature_mask.reshape(-1)
+    np.testing.assert_array_equal(actual[fixed_nodes], vector[fixed_nodes])
+
+
+def test_native_apply_high_carries_the_backward_euler_capacity() -> None:
+    problem = _stack(6, 9)
+    capacity = np.random.default_rng(7).uniform(0.0, 5.0, problem.mesh.size)
+    portable = MatrixFreeThermalOperator(problem, capacity_per_s=capacity)
+    native = MatrixFreeThermalOperator(problem, capacity_per_s=capacity, native=True, native_threads=2)
+    vector = np.random.default_rng(8).standard_normal(portable.size)
+    expected = portable.apply_high(vector)
+    np.testing.assert_allclose(native.apply_high(vector), expected, rtol=0.0, atol=1e-13 * np.abs(expected).max())
+    # The coarse space assembled from the native FP64 action is the same.
+    np.testing.assert_allclose(
+        native.coarse_correction._coarse_inverse_high,
+        portable.coarse_correction._coarse_inverse_high,
+        rtol=1e-9,
+        atol=1e-12 * np.abs(portable.coarse_correction._coarse_inverse_high).max(),
+    )
+
+
 @pytest.mark.parametrize("preconditioner", ["two-level", "jacobi"])
 @pytest.mark.parametrize("threads", [1, 4])
 def test_native_inner_pcg_reaches_the_same_fp64_solution(preconditioner, threads) -> None:
@@ -109,6 +147,8 @@ def test_native_rejects_wrong_sizes_and_cuda_runtime() -> None:
         native.apply_low(np.zeros(native.size + 1, dtype=np.float32))
     with pytest.raises(ValueError, match="size"):
         native.native_inner_pcg(np.zeros(native.size - 1), MPIRConfig())
+    with pytest.raises(ValueError, match="size"):
+        native.apply_high(np.zeros(native.size + 1))
 
     class FakeCudaRuntime(NumpyFloat32Runtime):
         is_cuda = True
