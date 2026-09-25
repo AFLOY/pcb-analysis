@@ -116,17 +116,26 @@ def _case(elements: int, repeats: int, threads: list[int]) -> dict[str, Any]:
     rng = np.random.default_rng(0)
     probe = rng.standard_normal(portable.size).astype(np.float32)
     portable_apply, portable_apply_timing = _timed(lambda: portable.apply_low(probe), repeats=40, warmups=3)
+    probe_high = rng.standard_normal(portable.size)
+    portable_high, portable_high_timing = _timed(lambda: portable.apply_high(probe_high), repeats=20, warmups=2)
     portable_result, portable_timing = _timed(lambda: solve_mpir(portable, rhs, config=CONFIG), repeats=repeats, warmups=1)
 
     by_threads: dict[str, Any] = {}
     for count in threads:
+        start = time.perf_counter()
         native = MatrixFreeThermalOperator(problem, native=True, native_threads=count)
+        native_construction_ms = (time.perf_counter() - start) * 1e3
+        native_high, high_timing = _timed(lambda: native.apply_high(probe_high), repeats=20, warmups=2)
         native_apply, apply_timing = _timed(lambda: native.apply_low(probe), repeats=40, warmups=3)
         native_result, native_timing = _timed(lambda: solve_mpir(native, rhs, config=CONFIG), repeats=repeats, warmups=1)
         by_threads[str(count)] = {
             "threads": count,
             "kernel": native.low_operator_backend,
             "operator_ms": apply_timing,
+            "construction_ms": native_construction_ms,
+            "high_operator_ms": high_timing,
+            "high_operator_speedup_vs_portable": portable_high_timing["median_ms"] / high_timing["median_ms"],
+            "relative_high_action_error": float(np.linalg.norm(native_high - portable_high) / np.linalg.norm(portable_high)),
             "relative_action_error": float(np.linalg.norm(native_apply - portable_apply) / np.linalg.norm(portable_apply)),
             "mpir": _summary(native_result, native_timing, native.low_operator_backend),
             "speedup_vs_portable": portable_timing["median_ms"] / native_timing["median_ms"],
@@ -142,6 +151,7 @@ def _case(elements: int, repeats: int, threads: list[int]) -> dict[str, Any]:
         "coarse_block": portable.coarse_correction.block,
         "construction_ms_portable": construction_ms,
         "portable_operator_ms": portable_apply_timing,
+        "portable_high_operator_ms": portable_high_timing,
         "portable_mpir": _summary(portable_result, portable_timing, portable.low_operator_backend),
         "native_by_threads": by_threads,
     }
@@ -173,6 +183,8 @@ def run(sizes: list[int], repeats: int, threads: list[int]) -> dict[str, Any]:
         },
         "definitions": {
             "operator_timing": "apply_low wall time on a fixed float32 probe",
+            "high_operator_timing": "apply_high wall time on a fixed float64 probe",
+            "construction_ms": "native MatrixFreeThermalOperator construction wall time (FP64 coarse assembly and dense inverse included)",
             "solver_timing": "solve_mpir wall time; operator construction (27 FP64 applications and the dense coarse inverse) excluded and reported separately",
             "speedup": "portable NumPy median divided by native median",
             "native_path": "fused node-gather hex Q1 operator plus the whole inner PCG with the two-level preconditioner in one SPMD OpenMP region; FTZ/DAZ per thread",
@@ -206,7 +218,7 @@ def main() -> None:
         print(f"nodes={case['nodes']:7d} coarse={case['coarse_size']} portable={p['timing']['median_ms']:9.1f} ms inner={p['inner_iterations']} construction={case['construction_ms_portable']:.0f} ms")
         for item in case["native_by_threads"].values():
             m = item["mpir"]
-            print(f"    threads={item['threads']:2d} solve={m['timing']['median_ms']:8.1f} ms x{item['speedup_vs_portable']:6.2f} operator={item['operator_ms']['median_ms']:.4f} ms x{item['operator_speedup_vs_portable']:5.1f} inner={m['inner_iterations']} conv={m['converged']} soldiff={item['relative_solution_error_vs_portable']:.1e}")
+            print(f"    threads={item['threads']:2d} solve={m['timing']['median_ms']:8.1f} ms x{item['speedup_vs_portable']:6.2f} operator={item['operator_ms']['median_ms']:.4f} ms x{item['operator_speedup_vs_portable']:5.1f} high={item['high_operator_ms']['median_ms']:.3f} ms x{item['high_operator_speedup_vs_portable']:5.1f} construction={item['construction_ms']:.0f} ms inner={m['inner_iterations']} conv={m['converged']} soldiff={item['relative_solution_error_vs_portable']:.1e}")
     print("decision:", json.dumps(report["decision"]))
     print("wrote", args.output)
 
