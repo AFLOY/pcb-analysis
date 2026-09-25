@@ -429,6 +429,68 @@ Decision recorded in the JSON: the benchmark criteria (every case at least 2×
 on one thread, identical convergence outcome, converged solutions within 1e-6)
 are met.  The default stays the array path and one thread.
 
+## Roofline of the matrix-free action (measured on `exp/roofline-matrix-free`)
+
+`experiments/roofline_matrix_free.py` measures the shipped hexahedral C++
+action against the same operator assembled by 27 coloured `apply_low` probes.
+The assembled operator is stored as a 27-array float32 stencil and as CSR with
+int32 indices; the assembled actions agree to 1.1e-7. The method, host, and
+machine probes are those of `docs/MATRIX_FREE_MPIR_FEM.md`: on sixteen cores
+the host peaks at 3,338 GFLOP/s FP32 and reads 198 GB/s from DRAM
+(`ROOFLINE_MATRIX_FREE_XEON_8581C_RESULTS.json`).
+
+Per interior node, the matrix-free action executes 522 flops on 28 compulsory
+bytes (18.6 flop/byte):
+
+- 64 (element, local column) terms. Each term computes `a*Ux + b*Uy + d*Uz`
+  (5 flops), applies the mask (1), and multiplies and adds (2).
+- Partial sums, Robin, and the Dirichlet blend add 10 flops.
+
+The 27-point stencil needs 54 flops on 116 bytes (0.47 flop/byte). The
+matrix-free form therefore executes 9.7 times the useful arithmetic. Of the
+522 flops:
+
+- 61 % forms coefficients;
+- 12 % applies the mask;
+- 14 % is the duplicate products of the 64 terms that the stencil merges
+  into 27.
+
+Stack of four slabs at the in-plane sizes of `thermal_native_benchmark.py`:
+
+| Nodes | Storage MF / stencil / CSR | Threads | Matrix-free | Stencil | CSR | Stencil / MF | MF GFLOP/s (of FP32 peak) | Stencil GB/s |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| 202,005 | 3.7 / 21.8 / 38.4 MB | 1 | 1.074 ms | 0.730 ms | 2.037 ms | 0.68 | 98 (41%) | 32 |
+| 202,005 | 3.7 / 21.8 / 38.4 MB | 16 | 0.100 ms | 0.045 ms | 0.176 ms | 0.45 | 1,053 (32%) | 517 |
+| 1,255,005 | 23.3 / 135.5 / 239.3 MB | 1 | 5.082 ms | 4.086 ms | 18.146 ms | 0.80 | 129 (54%) | 36 |
+| 1,255,005 | 23.3 / 135.5 / 239.3 MB | 16 | 0.480 ms | 0.369 ms | 1.423 ms | 0.77 | 1,365 (41%) | 394 |
+| 11,265,005 | 209.4 / 1,216.6 / 2,152.0 MB | 1 | 52.077 ms | 75.438 ms | 250.898 ms | 1.45 | 113 (47%) | 17 |
+| 11,265,005 | 209.4 / 1,216.6 / 2,152.0 MB | 16 | 4.212 ms | 5.782 ms | 19.385 ms | 1.37 | 1,396 (42%) | 226 |
+
+The matrix-free action is compute-bound at 32 to 54 % of the FP32 peak, and
+the stencil is bandwidth-bound. The stencil wins by 1.3 to 2.2 times while its
+coefficients stay in cache (up to 135 MB). At 11.3 million nodes the
+matrix-free action wins by 1.4 times with 5.8 times less storage than the
+stencil and 10 times less than CSR.
+
+MPIR solve of the 202,005-node documented fixture with the default
+configuration (7 outer steps, 1,015 inner iterations, converged). Shares are
+estimated as applications times the isolated medians:
+
+| Threads | Solve | Low operator | FP64 high operator | Other | Estimated solve with stencil |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 3,374 ms | 32% | 10% (8 x 40.4 ms) | 58% | 3,025 ms |
+| 4 | 1,187 ms | 29% | 27% (8 x 40.6 ms) | 44% | 1,051 ms |
+| 8 | 783 ms | 22% | 40% (8 x 39.3 ms) | 38% | 717 ms |
+| 16 | 606 ms | 17% | 52% (8 x 39.7 ms) | 31% | 551 ms |
+
+**Decision:** the assembled stencil and CSR were measured, not adopted. They
+would save an estimated 8 to 12 % of the solve at this size, and the stencil is
+slower at DRAM size. On sixteen threads the largest cost is the NumPy FP64
+outer operator: it takes 40 ms per application, about 400 times the low action,
+and is half the solve. A native threaded FP64 residual is the next candidate
+(not measured). Inside the low action, 61 % of the arithmetic rebuilds the
+element coefficients from the three unit tensors.
+
 ## Electrothermal coupling
 
 `solve_pcb_dc` now reports `element_joule_loss_w` (the exact element

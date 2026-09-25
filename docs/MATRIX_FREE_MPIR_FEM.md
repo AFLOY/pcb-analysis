@@ -421,6 +421,104 @@ extension is not packaged in the wheel and CUDA execution was not measured in
 this environment, so integration into `feature/` requires the packaging and
 CI work described in `AGENTS.md` before the default path changes.
 
+## Roofline of the matrix-free action (measured on `exp/roofline-matrix-free`)
+
+`experiments/roofline_matrix_free.py` (with `roofline_matrix_free.cpp`) measures
+how the shipped C++ Q1 action uses the host's bandwidth and FMA throughput. It
+compiles the production kernels in from their sources and compares them with the
+same operator assembled by probing `apply_low` with 9 coloured vectors. The
+assembled operator is stored two ways: as a structured stencil with one
+complex64 coefficient array per neighbour offset and no indices, and as CSR
+with int32 indices. All three use the same static row partition and a
+preallocated output. The assembled actions agree with the matrix-free action to
+8.4e-8. This KVM guest has no hardware counters, so flop and byte counts are
+analytic: the flops the loop executes per interior node, and the compulsory
+traffic of one pass with no write-allocate. Host: Xeon Platinum 8581C, GCC
+14.2.1, NumPy 2.3.5, `OMP_PROC_BIND=close`, `OMP_PLACES=cores`
+(`ROOFLINE_MATRIX_FREE_XEON_8581C_RESULTS.json`).
+
+Machine probes (AVX-512 FMA with 16 independent chains; float32 read sums with
+eight accumulators, repeated inside one parallel region):
+
+| Threads | FP32 FMA peak | FP64 FMA peak | L2 read | L3 read | DRAM read | DRAM triad |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 239 GFLOP/s | 120 GFLOP/s | 181 GB/s | 34 GB/s | 18 GB/s | 13 GB/s |
+| 4 | 957 GFLOP/s | 472 GFLOP/s | 627 GB/s | 128 GB/s | 72 GB/s | 53 GB/s |
+| 8 | 1,899 GFLOP/s | 916 GFLOP/s | 1,266 GB/s | 231 GB/s | 139 GB/s | 105 GB/s |
+| 16 | 3,338 GFLOP/s | 1,698 GFLOP/s | 2,457 GB/s | 340 GB/s | 198 GB/s | 171 GB/s |
+| 32 | 3,298 GFLOP/s | 1,661 GFLOP/s | 1,093 GB/s | 335 GB/s | 237 GB/s | 181 GB/s |
+
+On sixteen cores the FP32 machine balance is 17 flop/byte against DRAM, 10
+against L3, and 1.4 against L2.
+
+Per interior node, the matrix-free action executes 391 flops on 36 compulsory
+bytes (10.9 flop/byte):
+
+- 16 (element, local column) terms. Each term forms its coefficient
+  `imu*K + rea*M` (14 flops), applies the Dirichlet mask (2), and does the
+  complex multiply-add (8).
+- The Dirichlet blend adds 7 flops.
+
+The assembled stencil needs 72 flops on 88 bytes (0.82 flop/byte), and CSR
+needs 72 flops on 128 bytes. The matrix-free form therefore executes 5.4 times
+the useful arithmetic. Of the 391 flops:
+
+- 57 % forms coefficients;
+- 8 % applies the mask;
+- 14 % is the duplicate products of the 16 element terms that the stencil
+  merges into 9.
+
+Action medians:
+
+| Nodes | Storage MF / stencil / CSR | Threads | Matrix-free | Stencil | CSR | Stencil / MF | MF GFLOP/s (of FP32 peak) | Stencil GB/s |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| 66,049 | 1.4 / 4.8 / 7.4 MB | 1 | 0.245 ms | 0.168 ms | 0.551 ms | 0.69 | 105 (44%) | 35 |
+| 66,049 | 1.4 / 4.8 / 7.4 MB | 16 | 0.026 ms | 0.012 ms | 0.043 ms | 0.45 | 1,007 (30%) | 500 |
+| 1,050,625 | 22.0 / 75.6 / 117.5 MB | 1 | 3.045 ms | 2.666 ms | 8.616 ms | 0.88 | 135 (56%) | 35 |
+| 1,050,625 | 22.0 / 75.6 / 117.5 MB | 16 | 0.242 ms | 0.336 ms | 0.648 ms | 1.39 | 1,697 (51%) | 275 |
+| 16,785,409 | 352.4 / 1,208.5 / 1,879.4 MB | 1 | 50.666 ms | 112.814 ms | 249.210 ms | 2.23 | 130 (54%) | 13 |
+| 16,785,409 | 352.4 / 1,208.5 / 1,879.4 MB | 16 | 3.760 ms | 8.114 ms | 17.205 ms | 2.16 | 1,746 (52%) | 182 |
+
+The matrix-free action is compute-bound at 30 to 56 % of the FP32 FMA peak at
+every size. The assembled stencil is bandwidth-bound: it reaches the L3 read
+rate on one thread and 92 % of the DRAM read rate on sixteen. The result
+depends on where the working set lives:
+
+- **Cache-resident** (the 66,049-node documented fixture): the stencil is 1.4
+  to 2.2 times faster, because only the flops remain.
+- **DRAM** (16.8 million nodes): the matrix-free action is 2.2 times faster
+  and needs 3.4 times less storage than the stencil and 5.3 times less than
+  CSR. It then runs at 81 % of the DRAM read rate and 52 % of the FMA peak
+  together, which is close to balanced on this host.
+
+CSR is slower than the matrix-free action everywhere.
+
+The action itself is a small part of an MPIR solve. The next table uses the
+66,049-node fixture with the `maxwell_native_benchmark.py` configuration. The
+solve did not converge in 12 outer steps, as recorded above. Operator shares
+are applications times the isolated action median; "other" is the inner
+Gram-Schmidt and vector updates plus the outer bookkeeping. The stencil column
+is an estimate, not a measured solve.
+
+| Threads | Solve | Low operator (4,942 applications) | FP64 high operator | Other | Estimated solve with stencil |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 4,680 ms | 26% | 2% (13 x 6.8 ms) | 72% | 4,300 ms |
+| 4 | 1,330 ms | 25% | 6% (13 x 6.2 ms) | 69% | 1,131 ms |
+| 8 | 793 ms | 23% | 10% (13 x 6.2 ms) | 67% | 700 ms |
+| 16 | 606 ms | 21% | 14% (13 x 6.4 ms) | 65% | 537 ms |
+
+Replacing the action with the assembled stencil would save an estimated 8 to
+15 % at this size and lose 2.2 times at DRAM size, while needing 3.4 times the
+storage. **Decision:** the assembled stencil and CSR were measured, not
+adopted. The waste worth attacking is:
+
+- the Gram-Schmidt and vector passes (two thirds of the solve);
+- the arithmetic inside the action. Coefficient formation is 57 % of it and
+  could be cut by applying the element matrices `K` and `M` to the gathered
+  values before weighting them by `imu` and `rea` (not measured).
+- the single-threaded NumPy FP64 outer operator, whose share grows with the
+  thread count.
+
 ## Tenstorrent Blackhole migration
 
 The intended first Blackhole port keeps FP64 outer refinement on the host and

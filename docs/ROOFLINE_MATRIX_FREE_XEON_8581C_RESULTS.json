@@ -1,0 +1,2289 @@
+{
+  "benchmark": "roofline_matrix_free",
+  "environment": {
+    "timestamp_utc": "2026-09-25T09:15:12.916828+00:00",
+    "cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.10GHz",
+    "logical_cpus": 32,
+    "platform": "Linux-6.12.0-55.103.1.el10_0.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.9",
+    "numpy": "2.3.5",
+    "cupy": null,
+    "device": "cpu",
+    "compiler": "g++ (GCC) 14.2.1 20250110 (Red Hat 14.2.1-7)",
+    "flags": "-O3 -march=native -mprefer-vector-width=512 -fcx-limited-range -fopenmp",
+    "omp": {
+      "OMP_PROC_BIND": "close",
+      "OMP_PLACES": "cores",
+      "OPENBLAS_NUM_THREADS": "1"
+    },
+    "hardware_counters": "unavailable in this KVM guest; flops and bytes are analytic"
+  },
+  "model": {
+    "maxwell": {
+      "matrix_free": {
+        "flops": 391,
+        "bytes": 36
+      },
+      "stencil": {
+        "flops": 72,
+        "bytes": 88
+      },
+      "csr": {
+        "flops": 72,
+        "bytes": 128
+      }
+    },
+    "thermal": {
+      "matrix_free": {
+        "flops": 522,
+        "bytes": 28
+      },
+      "stencil": {
+        "flops": 54,
+        "bytes": 116
+      },
+      "csr": {
+        "flops": 54,
+        "bytes": 228
+      }
+    }
+  },
+  "machine": {
+    "fma_peak": {
+      "fp32": {
+        "gflops_by_threads": {
+          "1": 239.30762881171307,
+          "2": 476.59978817373474,
+          "4": 956.8278838333393,
+          "8": 1899.1890425694692,
+          "16": 3337.620048340488,
+          "32": 3297.971194162076
+        }
+      },
+      "fp64": {
+        "gflops_by_threads": {
+          "1": 119.78982407437151,
+          "2": 238.95741386845359,
+          "4": 472.153121286016,
+          "8": 916.3199855608013,
+          "16": 1698.2766845144656,
+          "32": 1660.9026229234953
+        }
+      }
+    },
+    "bandwidth": {
+      "L1": {
+        "read": {
+          "gbytes_per_s_by_threads": {
+            "1": 413.94691738115813,
+            "2": 649.2889067083079,
+            "4": 1320.241921749061,
+            "8": 2588.873314386706,
+            "16": 4679.66382306477,
+            "32": 4569.193755361125
+          }
+        },
+        "copy": {
+          "gbytes_per_s_by_threads": {
+            "1": 418.40940837804226,
+            "2": 818.5780362671927,
+            "4": 1606.5441780698127,
+            "8": 3029.64235279857,
+            "16": 5914.990415335464,
+            "32": 5032.9745773388095
+          }
+        },
+        "triad": {
+          "gbytes_per_s_by_threads": {
+            "1": 379.8747321876282,
+            "2": 717.0200855765663,
+            "4": 1389.2422914221015,
+            "8": 2898.250992897521,
+            "16": 5354.784644019229,
+            "32": 2005.4286417051096
+          }
+        }
+      },
+      "L2": {
+        "read": {
+          "gbytes_per_s_by_threads": {
+            "1": 181.49802173119986,
+            "2": 315.3629501706776,
+            "4": 626.7796716814215,
+            "8": 1266.4856315008383,
+            "16": 2457.0418659144593,
+            "32": 1093.4315440218036
+          }
+        },
+        "copy": {
+          "gbytes_per_s_by_threads": {
+            "1": 99.15122575431703,
+            "2": 175.02151427462016,
+            "4": 347.68595264875034,
+            "8": 733.9319539459601,
+            "16": 1583.2043031046524,
+            "32": 864.7705035179011
+          }
+        },
+        "triad": {
+          "gbytes_per_s_by_threads": {
+            "1": 114.80187473419235,
+            "2": 176.05290016886983,
+            "4": 370.4037496014375,
+            "8": 695.328022517764,
+            "16": 1385.7348229387746,
+            "32": 1015.603266671803
+          }
+        }
+      },
+      "L3": {
+        "read": {
+          "gbytes_per_s_by_threads": {
+            "1": 34.11402327603191,
+            "2": 67.27576770458978,
+            "4": 128.36791646794478,
+            "8": 230.9493928580715,
+            "16": 339.7473724948417,
+            "32": 335.0882276900885
+          }
+        },
+        "copy": {
+          "gbytes_per_s_by_threads": {
+            "1": 32.7363825367882,
+            "2": 63.25850174553227,
+            "4": 121.2593599700616,
+            "8": 224.94675063966721,
+            "16": 312.3534635677131,
+            "32": 323.2099115317024
+          }
+        },
+        "triad": {
+          "gbytes_per_s_by_threads": {
+            "1": 30.678624551970415,
+            "2": 62.94957570148396,
+            "4": 126.75118203632172,
+            "8": 232.34119908999213,
+            "16": 412.82068218851504,
+            "32": 444.783032873807
+          }
+        }
+      },
+      "DRAM": {
+        "read": {
+          "gbytes_per_s_by_threads": {
+            "1": 18.381210183014055,
+            "2": 36.08311893328516,
+            "4": 72.3620910016861,
+            "8": 138.6009006319604,
+            "16": 197.99706104662366,
+            "32": 236.75948360792373
+          }
+        },
+        "copy": {
+          "gbytes_per_s_by_threads": {
+            "1": 11.75339910069256,
+            "2": 23.512700579096766,
+            "4": 46.557494531683965,
+            "8": 90.79479549135756,
+            "16": 146.95718288611096,
+            "32": 150.24392158721102
+          }
+        },
+        "triad": {
+          "gbytes_per_s_by_threads": {
+            "1": 13.206046798158557,
+            "2": 26.587632766153973,
+            "4": 53.3618922667829,
+            "8": 104.94880160180865,
+            "16": 170.83783607048085,
+            "32": 180.79556108088082
+          }
+        }
+      }
+    },
+    "notes": "bandwidth counts bytes read plus bytes written, no write-allocate; each timed call runs repeated sweeps inside one parallel region; L1/L2 sizes are per thread, L3/DRAM totals; triad a = b + s c in float32"
+  },
+  "kernels": [
+    {
+      "physics": "maxwell",
+      "element_shape": [
+        256,
+        256
+      ],
+      "nodes": 66049,
+      "storage_bytes": {
+        "matrix_free": 1378821,
+        "stencil": 4755528,
+        "csr": 7360532
+      },
+      "assembly_by_probing_s": 0.033442530999991504,
+      "by_threads": {
+        "1": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 0.24504700000000001,
+              "minimum_ms": 0.23966800000000002,
+              "maximum_ms": 0.306757,
+              "repeats": 400
+            },
+            "ns_per_node": 3.7100788808308987,
+            "executed_flops_per_node": 391,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 36,
+            "arithmetic_intensity_flop_per_byte": 10.86111111111111,
+            "executed_gflops": 105.38859484098967,
+            "useful_gflops": 19.406595469440557,
+            "compulsory_gbytes_per_s": 9.703297734720278,
+            "fraction_of_fp32_peak": 0.4403896163457007,
+            "fraction_of_read_bandwidth": 0.28443721387555293,
+            "roofline_bound_ms": 0.10791615431666493,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.4403896163457007,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.168291,
+              "minimum_ms": 0.165459,
+              "maximum_ms": 0.218379,
+              "repeats": 400
+            },
+            "ns_per_node": 2.547971960211358,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 88,
+            "arithmetic_intensity_flop_per_byte": 0.8181818181818182,
+            "executed_gflops": 28.257767795069256,
+            "useful_gflops": 28.257767795069256,
+            "compulsory_gbytes_per_s": 34.53727174952909,
+            "fraction_of_fp32_peak": 0.11808134966437878,
+            "fraction_of_read_bandwidth": 1.0124068764939418,
+            "roofline_bound_ms": 0.17037896565204194,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 1.0124068764939418,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 8.397470452337075e-08
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 0.550982,
+              "minimum_ms": 0.5332629999999999,
+              "maximum_ms": 0.7625559999999999,
+              "repeats": 400
+            },
+            "ns_per_node": 8.342018804221109,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 128,
+            "arithmetic_intensity_flop_per_byte": 0.5625,
+            "executed_gflops": 8.63100427963164,
+            "useful_gflops": 8.63100427963164,
+            "compulsory_gbytes_per_s": 15.344007608234026,
+            "fraction_of_fp32_peak": 0.03606656554364383,
+            "fraction_of_read_bandwidth": 0.4497859277423468,
+            "roofline_bound_ms": 0.24782395003933375,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.4497859277423469,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 8.402171403076863e-08
+          },
+          "stencil_over_matrix_free_time": 0.6867702930458238,
+          "csr_over_matrix_free_time": 2.2484747823886844
+        },
+        "4": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 0.067548,
+              "minimum_ms": 0.062516,
+              "maximum_ms": 0.105244,
+              "repeats": 400
+            },
+            "ns_per_node": 1.0226952716922286,
+            "executed_flops_per_node": 391,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 36,
+            "arithmetic_intensity_flop_per_byte": 10.86111111111111,
+            "executed_gflops": 382.3230739622195,
+            "useful_gflops": 70.40220287795346,
+            "compulsory_gbytes_per_s": 35.20110143897673,
+            "fraction_of_fp32_peak": 0.39957350786070184,
+            "fraction_of_read_bandwidth": 0.05616184287621358,
+            "roofline_bound_ms": 0.02699039130897468,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.3995735078607018,
+            "bandwidth_level": "L2",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.0272635,
+              "minimum_ms": 0.026843,
+              "maximum_ms": 0.04342,
+              "repeats": 400
+            },
+            "ns_per_node": 0.41277687777256283,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 88,
+            "arithmetic_intensity_flop_per_byte": 0.8181818181818182,
+            "executed_gflops": 174.42837493351917,
+            "useful_gflops": 174.42837493351917,
+            "compulsory_gbytes_per_s": 213.19023602985675,
+            "fraction_of_fp32_peak": 0.182298590875829,
+            "fraction_of_read_bandwidth": 0.3401358494252773,
+            "roofline_bound_ms": 0.00927329373080605,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.34013584942527736,
+            "bandwidth_level": "L2",
+            "relative_difference_vs_matrix_free": 8.397470452337075e-08
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 0.136494,
+              "minimum_ms": 0.135173,
+              "maximum_ms": 0.173377,
+              "repeats": 400
+            },
+            "ns_per_node": 2.066556647337583,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 128,
+            "arithmetic_intensity_flop_per_byte": 0.5625,
+            "executed_gflops": 34.84056442041408,
+            "useful_gflops": 34.84056442041408,
+            "compulsory_gbytes_per_s": 61.93878119184726,
+            "fraction_of_fp32_peak": 0.03641257221814266,
+            "fraction_of_read_bandwidth": 0.48250982719123764,
+            "roofline_bound_ms": 0.06585969635264079,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.48250982719123764,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 8.402171403076863e-08
+          },
+          "stencil_over_matrix_free_time": 0.4036166873926689,
+          "csr_over_matrix_free_time": 2.0206963936756086
+        },
+        "8": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 0.0362335,
+              "minimum_ms": 0.034413,
+              "maximum_ms": 0.06013,
+              "repeats": 400
+            },
+            "ns_per_node": 0.5485851413344638,
+            "executed_flops_per_node": 391,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 36,
+            "arithmetic_intensity_flop_per_byte": 10.86111111111111,
+            "executed_gflops": 712.7426000800364,
+            "useful_gflops": 131.24671919632382,
+            "compulsory_gbytes_per_s": 65.62335959816191,
+            "fraction_of_fp32_peak": 0.37528786450649787,
+            "fraction_of_read_bandwidth": 0.051815321047421196,
+            "roofline_bound_ms": 0.013597992838596192,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.37528786450649787,
+            "bandwidth_level": "L2",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.0175125,
+              "minimum_ms": 0.01481,
+              "maximum_ms": 0.032944999999999995,
+              "repeats": 400
+            },
+            "ns_per_node": 0.2651440597132432,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 88,
+            "arithmetic_intensity_flop_per_byte": 0.8181818181818182,
+            "executed_gflops": 271.5504925053533,
+            "useful_gflops": 271.5504925053533,
+            "compulsory_gbytes_per_s": 331.8950463954319,
+            "fraction_of_fp32_peak": 0.14298233952422376,
+            "fraction_of_read_bandwidth": 0.2620598592990924,
+            "roofline_bound_ms": 0.004589323285975355,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.26205985929909237,
+            "bandwidth_level": "L2",
+            "relative_difference_vs_matrix_free": 8.397470452337075e-08
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 0.0805,
+              "minimum_ms": 0.080153,
+              "maximum_ms": 0.099003,
+              "repeats": 400
+            },
+            "ns_per_node": 1.2187921088888554,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 128,
+            "arithmetic_intensity_flop_per_byte": 0.5625,
+            "executed_gflops": 59.07488198757763,
+            "useful_gflops": 59.07488198757763,
+            "compulsory_gbytes_per_s": 105.02201242236025,
+            "fraction_of_fp32_peak": 0.031105319514508928,
+            "fraction_of_read_bandwidth": 0.08292396677087034,
+            "roofline_bound_ms": 0.006675379325055061,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.08292396677087033,
+            "bandwidth_level": "L2",
+            "relative_difference_vs_matrix_free": 8.402171403076863e-08
+          },
+          "stencil_over_matrix_free_time": 0.48332344377440767,
+          "csr_over_matrix_free_time": 2.2217009121393185
+        },
+        "16": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 0.0256545,
+              "minimum_ms": 0.024382,
+              "maximum_ms": 0.041588,
+              "repeats": 400
+            },
+            "ns_per_node": 0.3884161758694303,
+            "executed_flops_per_node": 391,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 36,
+            "arithmetic_intensity_flop_per_byte": 10.86111111111111,
+            "executed_gflops": 1006.6522052661327,
+            "useful_gflops": 185.36818102087352,
+            "compulsory_gbytes_per_s": 92.68409051043676,
+            "fraction_of_fp32_peak": 0.3016077895884687,
+            "fraction_of_read_bandwidth": 0.037721819801365776,
+            "roofline_bound_ms": 0.00773759703799737,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.3016077895884687,
+            "bandwidth_level": "L2",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.011632,
+              "minimum_ms": 0.009625,
+              "maximum_ms": 0.021772,
+              "repeats": 400
+            },
+            "ns_per_node": 0.17611167466577843,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 88,
+            "arithmetic_intensity_flop_per_byte": 0.8181818181818182,
+            "executed_gflops": 408.8314993122421,
+            "useful_gflops": 408.8314993122421,
+            "compulsory_gbytes_per_s": 499.6829436038514,
+            "fraction_of_fp32_peak": 0.12249192340377955,
+            "fraction_of_read_bandwidth": 0.20336769614541342,
+            "roofline_bound_ms": 0.002365573041563449,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.20336769614541345,
+            "bandwidth_level": "L2",
+            "relative_difference_vs_matrix_free": 8.397470452337075e-08
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 0.043332,
+              "minimum_ms": 0.036358,
+              "maximum_ms": 0.062154,
+              "repeats": 400
+            },
+            "ns_per_node": 0.6560583808990296,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 128,
+            "arithmetic_intensity_flop_per_byte": 0.5625,
+            "executed_gflops": 109.74633065632788,
+            "useful_gflops": 109.74633065632788,
+            "compulsory_gbytes_per_s": 195.10458783347178,
+            "fraction_of_fp32_peak": 0.03288161296577042,
+            "fraction_of_read_bandwidth": 0.07940629361675852,
+            "roofline_bound_ms": 0.0034408335150013804,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.07940629361675852,
+            "bandwidth_level": "L2",
+            "relative_difference_vs_matrix_free": 8.402171403076863e-08
+          },
+          "stencil_over_matrix_free_time": 0.45340973318521116,
+          "csr_over_matrix_free_time": 1.6890603987604516
+        }
+      }
+    },
+    {
+      "physics": "maxwell",
+      "element_shape": [
+        1024,
+        1024
+      ],
+      "nodes": 1050625,
+      "storage_bytes": {
+        "matrix_free": 22030341,
+        "stencil": 75645000,
+        "csr": 117522452
+      },
+      "assembly_by_probing_s": 0.4531429449998541,
+      "by_threads": {
+        "1": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 3.044546,
+              "minimum_ms": 3.008553,
+              "maximum_ms": 4.2815259999999995,
+              "repeats": 325
+            },
+            "ns_per_node": 2.897842712671029,
+            "executed_flops_per_node": 391,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 36,
+            "arithmetic_intensity_flop_per_byte": 10.86111111111111,
+            "executed_gflops": 134.92795806008513,
+            "useful_gflops": 24.84606900339164,
+            "compulsory_gbytes_per_s": 12.42303450169582,
+            "fraction_of_fp32_peak": 0.5638263967182019,
+            "fraction_of_read_bandwidth": 0.36416210428114737,
+            "roofline_bound_ms": 1.7165954008228148,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.5638263967182019,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 2.66621,
+              "minimum_ms": 2.55312,
+              "maximum_ms": 3.4001140000000003,
+              "repeats": 303
+            },
+            "ns_per_node": 2.537737061273052,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 88,
+            "arithmetic_intensity_flop_per_byte": 0.8181818181818182,
+            "executed_gflops": 28.37173365938917,
+            "useful_gflops": 28.37173365938917,
+            "compulsory_gbytes_per_s": 34.67656336147566,
+            "fraction_of_fp32_peak": 0.1185575813034862,
+            "fraction_of_read_bandwidth": 1.0164899953573927,
+            "roofline_bound_ms": 2.7101757905218333,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 1.0164899953573925,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 8.401994477935659e-08
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 8.616291,
+              "minimum_ms": 8.566006,
+              "maximum_ms": 11.770117,
+              "repeats": 112
+            },
+            "ns_per_node": 8.20110981558596,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 128,
+            "arithmetic_intensity_flop_per_byte": 0.5625,
+            "executed_gflops": 8.779299584937416,
+            "useful_gflops": 8.779299584937416,
+            "compulsory_gbytes_per_s": 15.60764370655541,
+            "fraction_of_fp32_peak": 0.03668625036540292,
+            "fraction_of_read_bandwidth": 0.45751401352654725,
+            "roofline_bound_ms": 3.942073877122667,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.4575140135265472,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 8.402169271448656e-08
+          },
+          "stencil_over_matrix_free_time": 0.8757331963452022,
+          "csr_over_matrix_free_time": 2.830074171978351
+        },
+        "4": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 0.7796125,
+              "minimum_ms": 0.754318,
+              "maximum_ms": 0.9975419999999999,
+              "repeats": 400
+            },
+            "ns_per_node": 0.7420464009518144,
+            "executed_flops_per_node": 391,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 36,
+            "arithmetic_intensity_flop_per_byte": 10.86111111111111,
+            "executed_gflops": 526.9212268915647,
+            "useful_gflops": 97.02897272683545,
+            "compulsory_gbytes_per_s": 48.514486363417724,
+            "fraction_of_fp32_peak": 0.5506959358046302,
+            "fraction_of_read_bandwidth": 0.37793311364940985,
+            "roofline_bound_ms": 0.4293294352524872,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.5506959358046302,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.7083405,
+              "minimum_ms": 0.693964,
+              "maximum_ms": 0.789869,
+              "repeats": 400
+            },
+            "ns_per_node": 0.6742086853063652,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 88,
+            "arithmetic_intensity_flop_per_byte": 0.8181818181818182,
+            "executed_gflops": 106.79186069411533,
+            "useful_gflops": 106.79186069411533,
+            "compulsory_gbytes_per_s": 130.5233852928076,
+            "fraction_of_fp32_peak": 0.11161031414163551,
+            "fraction_of_read_bandwidth": 1.0167913360609937,
+            "roofline_bound_ms": 0.7202344833811124,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 1.0167913360609937,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 8.401994477935659e-08
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 2.1547875000000003,
+              "minimum_ms": 2.137192,
+              "maximum_ms": 2.774982,
+              "repeats": 400
+            },
+            "ns_per_node": 2.0509577632361693,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 128,
+            "arithmetic_intensity_flop_per_byte": 0.5625,
+            "executed_gflops": 35.10554985120342,
+            "useful_gflops": 35.10554985120342,
+            "compulsory_gbytes_per_s": 62.40986640213942,
+            "fraction_of_fp32_peak": 0.03668951380321408,
+            "fraction_of_read_bandwidth": 0.4861796321024188,
+            "roofline_bound_ms": 1.0476137940088908,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.48617963210241877,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 8.402169271448656e-08
+          },
+          "stencil_over_matrix_free_time": 0.908580224149818,
+          "csr_over_matrix_free_time": 2.7639211787907456
+        },
+        "8": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 0.399714,
+              "minimum_ms": 0.382136,
+              "maximum_ms": 0.5575960000000001,
+              "repeats": 400
+            },
+            "ns_per_node": 0.3804535395597859,
+            "executed_flops_per_node": 391,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 36,
+            "arithmetic_intensity_flop_per_byte": 10.86111111111111,
+            "executed_gflops": 1027.720757841857,
+            "useful_gflops": 189.24781218571277,
+            "compulsory_gbytes_per_s": 94.62390609285639,
+            "fraction_of_fp32_peak": 0.5411366297961698,
+            "fraction_of_read_bandwidth": 0.40971705931700336,
+            "roofline_bound_ms": 0.2162998868423462,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.5411366297961697,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.37371699999999997,
+              "minimum_ms": 0.36060299999999995,
+              "maximum_ms": 0.480937,
+              "repeats": 400
+            },
+            "ns_per_node": 0.3557092207019631,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 88,
+            "arithmetic_intensity_flop_per_byte": 0.8181818181818182,
+            "executed_gflops": 202.41252070416922,
+            "useful_gflops": 202.41252070416922,
+            "compulsory_gbytes_per_s": 247.39308086065125,
+            "fraction_of_fp32_peak": 0.10657839539255098,
+            "fraction_of_read_bandwidth": 1.071200395026304,
+            "roofline_bound_ms": 0.40032579802804524,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 1.071200395026304,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 8.401994477935659e-08
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 1.0874725,
+              "minimum_ms": 1.070738,
+              "maximum_ms": 1.314146,
+              "repeats": 400
+            },
+            "ns_per_node": 1.0350719809637121,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 128,
+            "arithmetic_intensity_flop_per_byte": 0.5625,
+            "executed_gflops": 69.56037968776221,
+            "useful_gflops": 69.56037968776221,
+            "compulsory_gbytes_per_s": 123.66289722268839,
+            "fraction_of_fp32_peak": 0.03662635900302579,
+            "fraction_of_read_bandwidth": 0.5354545240077104,
+            "roofline_bound_ms": 0.5822920698589749,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.5354545240077103,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 8.402169271448656e-08
+          },
+          "stencil_over_matrix_free_time": 0.9349609971129357,
+          "csr_over_matrix_free_time": 2.7206264979460313
+        },
+        "16": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 0.24202449999999998,
+              "minimum_ms": 0.201122,
+              "maximum_ms": 0.301798,
+              "repeats": 400
+            },
+            "ns_per_node": 0.23036240333135038,
+            "executed_flops_per_node": 391,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 36,
+            "arithmetic_intensity_flop_per_byte": 10.86111111111111,
+            "executed_gflops": 1697.3255806746838,
+            "useful_gflops": 312.5510020679725,
+            "compulsory_gbytes_per_s": 156.27550103398625,
+            "fraction_of_fp32_peak": 0.5085436796553934,
+            "fraction_of_read_bandwidth": 0.459975598593802,
+            "roofline_bound_ms": 0.12308002979675674,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.5085436796553934,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.336125,
+              "minimum_ms": 0.325363,
+              "maximum_ms": 0.358386,
+              "repeats": 400
+            },
+            "ns_per_node": 0.31992861392028554,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 88,
+            "arithmetic_intensity_flop_per_byte": 0.8181818181818182,
+            "executed_gflops": 225.0502045370026,
+            "useful_gflops": 225.0502045370026,
+            "compulsory_gbytes_per_s": 275.06136110078097,
+            "fraction_of_fp32_peak": 0.06742834752832358,
+            "fraction_of_read_bandwidth": 0.8096055580384426,
+            "roofline_bound_ms": 0.2721286681956715,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.8096055580384425,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 8.401994477935659e-08
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 0.6480205,
+              "minimum_ms": 0.535503,
+              "maximum_ms": 0.9432419999999999,
+              "repeats": 400
+            },
+            "ns_per_node": 0.616795240928019,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 128,
+            "arithmetic_intensity_flop_per_byte": 0.5625,
+            "executed_gflops": 116.7324181873876,
+            "useful_gflops": 116.7324181873876,
+            "compulsory_gbytes_per_s": 207.52429899980018,
+            "fraction_of_fp32_peak": 0.034974747423820333,
+            "fraction_of_read_bandwidth": 0.610819437618906,
+            "roofline_bound_ms": 0.3958235173755222,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.6108194376189059,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 8.402169271448656e-08
+          },
+          "stencil_over_matrix_free_time": 1.388805678763927,
+          "csr_over_matrix_free_time": 2.6774995919834566
+        }
+      }
+    },
+    {
+      "physics": "maxwell",
+      "element_shape": [
+        4096,
+        4096
+      ],
+      "nodes": 16785409,
+      "storage_bytes": {
+        "matrix_free": 352362501,
+        "stencil": 1208549448,
+        "csr": 1879375892
+      },
+      "assembly_by_probing_s": 11.927221293999992,
+      "by_threads": {
+        "1": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 50.665707999999995,
+              "minimum_ms": 50.297354000000006,
+              "maximum_ms": 53.486018,
+              "repeats": 19
+            },
+            "ns_per_node": 3.0184375012845974,
+            "executed_flops_per_node": 391,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 36,
+            "arithmetic_intensity_flop_per_byte": 10.86111111111111,
+            "executed_gflops": 129.5372191186986,
+            "useful_gflops": 23.853400963034012,
+            "compulsory_gbytes_per_s": 11.926700481517006,
+            "fraction_of_fp32_peak": 0.541299998507855,
+            "fraction_of_read_bandwidth": 0.6488528428089237,
+            "roofline_bound_ms": 32.87458866872683,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.6488528428089237,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 112.814267,
+              "minimum_ms": 112.189672,
+              "maximum_ms": 113.306152,
+              "repeats": 8
+            },
+            "ns_per_node": 6.720972184830289,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 88,
+            "arithmetic_intensity_flop_per_byte": 0.8181818181818182,
+            "executed_gflops": 10.712735898908957,
+            "useful_gflops": 10.712735898908957,
+            "compulsory_gbytes_per_s": 13.09334387644428,
+            "fraction_of_fp32_peak": 0.04476554279570303,
+            "fraction_of_read_bandwidth": 0.7123221891311458,
+            "roofline_bound_ms": 80.36010563466559,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.7123221891311459,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 8.411731755586516e-08
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 249.210191,
+              "minimum_ms": 249.021956,
+              "maximum_ms": 250.23591000000002,
+              "repeats": 7
+            },
+            "ns_per_node": 14.846834593068301,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 128,
+            "arithmetic_intensity_flop_per_byte": 0.5625,
+            "executed_gflops": 4.849518565635224,
+            "useful_gflops": 4.849518565635224,
+            "compulsory_gbytes_per_s": 8.621366338907062,
+            "fraction_of_fp32_peak": 0.020264788839852735,
+            "fraction_of_read_bandwidth": 0.46903148666859845,
+            "roofline_bound_ms": 116.88742637769539,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.4690314866685985,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 8.411746676983967e-08
+          },
+          "stencil_over_matrix_free_time": 2.2266395053632726,
+          "csr_over_matrix_free_time": 4.918715258059752
+        },
+        "4": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 12.923764000000002,
+              "minimum_ms": 12.734675000000001,
+              "maximum_ms": 15.964963,
+              "repeats": 76
+            },
+            "ns_per_node": 0.7699403690431376,
+            "executed_flops_per_node": 391,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 36,
+            "arithmetic_intensity_flop_per_byte": 10.86111111111111,
+            "executed_gflops": 507.83153568882864,
+            "useful_gflops": 93.51373547211166,
+            "compulsory_gbytes_per_s": 46.75686773605583,
+            "fraction_of_fp32_peak": 0.5307449168959242,
+            "fraction_of_read_bandwidth": 0.6461514183575259,
+            "roofline_bound_ms": 8.350708439117934,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.646151418357526,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 28.120549,
+              "minimum_ms": 27.943006999999998,
+              "maximum_ms": 28.409592,
+              "repeats": 35
+            },
+            "ns_per_node": 1.6752972179587642,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 88,
+            "arithmetic_intensity_flop_per_byte": 0.8181818181818182,
+            "executed_gflops": 42.97744855550295,
+            "useful_gflops": 42.97744855550295,
+            "compulsory_gbytes_per_s": 52.52799267894805,
+            "fraction_of_fp32_peak": 0.04491659292298465,
+            "fraction_of_read_bandwidth": 0.7259048481299981,
+            "roofline_bound_ms": 20.41284285117717,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.7259048481299981,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 8.411731755586516e-08
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 63.19110799999999,
+              "minimum_ms": 62.945612999999994,
+              "maximum_ms": 63.547121,
+              "repeats": 15
+            },
+            "ns_per_node": 3.764645115290309,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 128,
+            "arithmetic_intensity_flop_per_byte": 0.5625,
+            "executed_gflops": 19.125308706408504,
+            "useful_gflops": 19.125308706408504,
+            "compulsory_gbytes_per_s": 34.000548811392896,
+            "fraction_of_fp32_peak": 0.019988243475709322,
+            "fraction_of_read_bandwidth": 0.46986686455205745,
+            "roofline_bound_ms": 29.69140778353043,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.46986686455205745,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 8.411746676983967e-08
+          },
+          "stencil_over_matrix_free_time": 2.1758791788522287,
+          "csr_over_matrix_free_time": 4.889528159133824
+        },
+        "8": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 6.536287,
+              "minimum_ms": 6.409115,
+              "maximum_ms": 8.465686999999999,
+              "repeats": 151
+            },
+            "ns_per_node": 0.38940290343833744,
+            "executed_flops_per_node": 391,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 36,
+            "arithmetic_intensity_flop_per_byte": 10.86111111111111,
+            "executed_gflops": 1004.1013986992921,
+            "useful_gflops": 184.89846727966503,
+            "compulsory_gbytes_per_s": 92.44923363983251,
+            "fraction_of_fp32_peak": 0.5287000799777223,
+            "fraction_of_read_bandwidth": 0.6670175534091325,
+            "roofline_bound_ms": 4.359818163119919,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.6670175534091326,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 14.394629,
+              "minimum_ms": 14.270611,
+              "maximum_ms": 14.681695,
+              "repeats": 65
+            },
+            "ns_per_node": 0.8575679627466927,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 88,
+            "arithmetic_intensity_flop_per_byte": 0.8181818181818182,
+            "executed_gflops": 83.95836030230441,
+            "useful_gflops": 83.95836030230441,
+            "compulsory_gbytes_per_s": 102.61577370281651,
+            "fraction_of_fp32_peak": 0.044207479308491934,
+            "fraction_of_read_bandwidth": 0.7403687366743852,
+            "roofline_bound_ms": 10.65733328762647,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.7403687366743852,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 8.411731755586516e-08
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 32.195531,
+              "minimum_ms": 31.762249,
+              "maximum_ms": 33.987992,
+              "repeats": 31
+            },
+            "ns_per_node": 1.9180665183672319,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 128,
+            "arithmetic_intensity_flop_per_byte": 0.5625,
+            "executed_gflops": 37.537801379949286,
+            "useful_gflops": 37.537801379949286,
+            "compulsory_gbytes_per_s": 66.73386911990984,
+            "fraction_of_fp32_peak": 0.019765173733923443,
+            "fraction_of_read_bandwidth": 0.48148221848221867,
+            "roofline_bound_ms": 15.501575691093045,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.4814822184822187,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 8.411746676983967e-08
+          },
+          "stencil_over_matrix_free_time": 2.2022639152778942,
+          "csr_over_matrix_free_time": 4.925660547035344
+        },
+        "16": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 3.759729,
+              "minimum_ms": 3.3540639999999997,
+              "maximum_ms": 5.085392000000001,
+              "repeats": 260
+            },
+            "ns_per_node": 0.2239879290400371,
+            "executed_flops_per_node": 391,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 36,
+            "arithmetic_intensity_flop_per_byte": 10.86111111111111,
+            "executed_gflops": 1745.6297831572433,
+            "useful_gflops": 321.44589357371234,
+            "compulsory_gbytes_per_s": 160.72294678685617,
+            "fraction_of_fp32_peak": 0.5230163283640374,
+            "fraction_of_read_bandwidth": 0.8117441033582296,
+            "roofline_bound_ms": 3.0519378459749333,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.8117441033582297,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 8.114135000000001,
+              "minimum_ms": 8.009091,
+              "maximum_ms": 8.408911,
+              "repeats": 124
+            },
+            "ns_per_node": 0.4834040683786735,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 88,
+            "arithmetic_intensity_flop_per_byte": 0.8181818181818182,
+            "executed_gflops": 148.94371957084763,
+            "useful_gflops": 148.94371957084763,
+            "compulsory_gbytes_per_s": 182.04232391992488,
+            "fraction_of_fp32_peak": 0.04462572653975534,
+            "fraction_of_read_bandwidth": 0.9194193234871209,
+            "roofline_bound_ms": 7.460292512383171,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.9194193234871209,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 8.411731755586516e-08
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 17.205013,
+              "minimum_ms": 16.916298,
+              "maximum_ms": 18.163983,
+              "repeats": 55
+            },
+            "ns_per_node": 1.0249981397534014,
+            "executed_flops_per_node": 72,
+            "useful_flops_per_node": 72,
+            "compulsory_bytes_per_node": 128,
+            "arithmetic_intensity_flop_per_byte": 0.5625,
+            "executed_gflops": 70.24402992313925,
+            "useful_gflops": 70.24402992313925,
+            "compulsory_gbytes_per_s": 124.87827541891423,
+            "fraction_of_fp32_peak": 0.02104614333140334,
+            "fraction_of_read_bandwidth": 0.63070772242174,
+            "roofline_bound_ms": 10.85133456346643,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.6307077224217401,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 8.411746676983967e-08
+          },
+          "stencil_over_matrix_free_time": 2.158170176627092,
+          "csr_over_matrix_free_time": 4.576131152005902
+        }
+      }
+    },
+    {
+      "physics": "thermal",
+      "element_grid_shape": [
+        4,
+        200,
+        200
+      ],
+      "nodes": 202005,
+      "storage_bytes": {
+        "matrix_free": 3738045,
+        "stencil": 21816540,
+        "csr": 38372928
+      },
+      "assembly_by_probing_s": 0.3860201820000384,
+      "by_threads": {
+        "1": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 1.07403,
+              "minimum_ms": 1.0605580000000001,
+              "maximum_ms": 1.29662,
+              "repeats": 400
+            },
+            "ns_per_node": 5.316848592856613,
+            "executed_flops_per_node": 522,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 28,
+            "arithmetic_intensity_flop_per_byte": 18.642857142857142,
+            "executed_gflops": 98.17845870227087,
+            "useful_gflops": 10.156392279545264,
+            "compulsory_gbytes_per_s": 5.2662774782827295,
+            "fraction_of_fp32_peak": 0.41026046344522327,
+            "fraction_of_read_bandwidth": 0.15437280544926962,
+            "roofline_bound_ms": 0.4406320455540732,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.41026046344522327,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.730189,
+              "minimum_ms": 0.715411,
+              "maximum_ms": 0.8658710000000001,
+              "repeats": 400
+            },
+            "ns_per_node": 3.6147075567436446,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 116,
+            "arithmetic_intensity_flop_per_byte": 0.46551724137931033,
+            "executed_gflops": 14.938967856267348,
+            "useful_gflops": 14.938967856267348,
+            "compulsory_gbytes_per_s": 32.09111613568542,
+            "fraction_of_fp32_peak": 0.06242579031202264,
+            "fraction_of_read_bandwidth": 0.9407015958223913,
+            "roofline_bound_ms": 0.6868899575519561,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.9407015958223913,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 1.0221339863392132e-07
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 2.0366085,
+              "minimum_ms": 2.029866,
+              "maximum_ms": 3.19336,
+              "repeats": 400
+            },
+            "ns_per_node": 10.081970743298433,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 228,
+            "arithmetic_intensity_flop_per_byte": 0.23684210526315788,
+            "executed_gflops": 5.356095685547811,
+            "useful_gflops": 5.356095685547811,
+            "compulsory_gbytes_per_s": 22.614626227868538,
+            "fraction_of_fp32_peak": 0.02238163368273554,
+            "fraction_of_read_bandwidth": 0.6629129037312141,
+            "roofline_bound_ms": 1.3500940544986726,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.6629129037312143,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 1.0972745201343059e-07
+          },
+          "stencil_over_matrix_free_time": 0.6798590355949089,
+          "csr_over_matrix_free_time": 1.8962305522192116
+        },
+        "4": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 0.3376525,
+              "minimum_ms": 0.327274,
+              "maximum_ms": 0.43826,
+              "repeats": 400
+            },
+            "ns_per_node": 1.6715056558005992,
+            "executed_flops_per_node": 522,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 28,
+            "arithmetic_intensity_flop_per_byte": 18.642857142857142,
+            "executed_gflops": 312.2932896987287,
+            "useful_gflops": 32.306202382627106,
+            "compulsory_gbytes_per_s": 16.75136419839924,
+            "fraction_of_fp32_peak": 0.32638397665376156,
+            "fraction_of_read_bandwidth": 0.02672608087856684,
+            "roofline_bound_ms": 0.11020436567708422,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.3263839766537615,
+            "bandwidth_level": "L2",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.2041445,
+              "minimum_ms": 0.20052899999999999,
+              "maximum_ms": 0.241876,
+              "repeats": 400
+            },
+            "ns_per_node": 1.0105913219969802,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 116,
+            "arithmetic_intensity_flop_per_byte": 0.46551724137931033,
+            "executed_gflops": 53.43406263700467,
+            "useful_gflops": 53.43406263700467,
+            "compulsory_gbytes_per_s": 114.78428270171375,
+            "fraction_of_fp32_peak": 0.05584500989136291,
+            "fraction_of_read_bandwidth": 0.8941820188409535,
+            "roofline_bound_ms": 0.182542341145277,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.8941820188409534,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 1.0221339863392132e-07
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 0.5960000000000001,
+              "minimum_ms": 0.578569,
+              "maximum_ms": 0.800512,
+              "repeats": 400
+            },
+            "ns_per_node": 2.9504220192569495,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 228,
+            "arithmetic_intensity_flop_per_byte": 0.23684210526315788,
+            "executed_gflops": 18.30246644295302,
+            "useful_gflops": 18.30246644295302,
+            "compulsory_gbytes_per_s": 77.27708053691275,
+            "fraction_of_fp32_peak": 0.019128274533166668,
+            "fraction_of_read_bandwidth": 0.6019968436288353,
+            "roofline_bound_ms": 0.3587901188027859,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.6019968436288353,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 1.0972745201343059e-07
+          },
+          "stencil_over_matrix_free_time": 0.6045994032326134,
+          "csr_over_matrix_free_time": 1.7651283494124879
+        },
+        "8": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 0.1690445,
+              "minimum_ms": 0.163446,
+              "maximum_ms": 0.213449,
+              "repeats": 400
+            },
+            "ns_per_node": 0.8368332467018142,
+            "executed_flops_per_node": 522,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 28,
+            "arithmetic_intensity_flop_per_byte": 18.642857142857142,
+            "executed_gflops": 623.7801880569909,
+            "useful_gflops": 64.52898497141285,
+            "compulsory_gbytes_per_s": 33.45947368888074,
+            "fraction_of_fp32_peak": 0.3284455491661116,
+            "fraction_of_read_bandwidth": 0.026419149855833636,
+            "roofline_bound_ms": 0.05552191363601074,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.3284455491661116,
+            "bandwidth_level": "L2",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.104191,
+              "minimum_ms": 0.1014,
+              "maximum_ms": 0.126036,
+              "repeats": 400
+            },
+            "ns_per_node": 0.5157842627657732,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 116,
+            "arithmetic_intensity_flop_per_byte": 0.46551724137931033,
+            "executed_gflops": 104.69493526312253,
+            "useful_gflops": 104.69493526312253,
+            "compulsory_gbytes_per_s": 224.9002313059669,
+            "fraction_of_fp32_peak": 0.05512612642366431,
+            "fraction_of_read_bandwidth": 0.9738074152209525,
+            "roofline_bound_ms": 0.10146196839928627,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.9738074152209525,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 1.0221339863392132e-07
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 0.29836399999999996,
+              "minimum_ms": 0.29094800000000004,
+              "maximum_ms": 0.435019,
+              "repeats": 400
+            },
+            "ns_per_node": 1.4770129452241278,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 228,
+            "arithmetic_intensity_flop_per_byte": 0.23684210526315788,
+            "executed_gflops": 36.560275368342026,
+            "useful_gflops": 36.560275368342026,
+            "compulsory_gbytes_per_s": 154.36560711077746,
+            "fraction_of_fp32_peak": 0.019250466672279525,
+            "fraction_of_read_bandwidth": 0.6683958126083573,
+            "roofline_bound_ms": 0.19942524823307992,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.6683958126083573,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 1.0972745201343059e-07
+          },
+          "stencil_over_matrix_free_time": 0.6163524988982192,
+          "csr_over_matrix_free_time": 1.7650027063879627
+        },
+        "16": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 0.10011600000000001,
+              "minimum_ms": 0.083271,
+              "maximum_ms": 0.127007,
+              "repeats": 400
+            },
+            "ns_per_node": 0.4956114947649812,
+            "executed_flops_per_node": 522,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 28,
+            "arithmetic_intensity_flop_per_byte": 18.642857142857142,
+            "executed_gflops": 1053.244336569579,
+            "useful_gflops": 108.95631067961163,
+            "compulsory_gbytes_per_s": 56.49586479683566,
+            "fraction_of_fp32_peak": 0.3155674766195352,
+            "fraction_of_read_bandwidth": 0.02299344817057445,
+            "roofline_bound_ms": 0.031593353489241395,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.31556747661953527,
+            "bandwidth_level": "L2",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.0453485,
+              "minimum_ms": 0.044466,
+              "maximum_ms": 0.064157,
+              "repeats": 400
+            },
+            "ns_per_node": 0.22449196802059357,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 116,
+            "arithmetic_intensity_flop_per_byte": 0.46551724137931033,
+            "executed_gflops": 240.5431271155606,
+            "useful_gflops": 240.5431271155606,
+            "compulsory_gbytes_per_s": 516.722273063056,
+            "fraction_of_fp32_peak": 0.07207025474189671,
+            "fraction_of_read_bandwidth": 0.21030259200355256,
+            "roofline_bound_ms": 0.009536907093473103,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.21030259200355256,
+            "bandwidth_level": "L2",
+            "relative_difference_vs_matrix_free": 1.0221339863392132e-07
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 0.176444,
+              "minimum_ms": 0.149001,
+              "maximum_ms": 0.22462000000000001,
+              "repeats": 400
+            },
+            "ns_per_node": 0.8734635281304918,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 228,
+            "arithmetic_intensity_flop_per_byte": 0.23684210526315788,
+            "executed_gflops": 61.822844641926054,
+            "useful_gflops": 61.822844641926054,
+            "compulsory_gbytes_per_s": 261.0297884881322,
+            "fraction_of_fp32_peak": 0.018523032504153745,
+            "fraction_of_read_bandwidth": 0.7683055399997106,
+            "roofline_bound_ms": 0.13556290269970894,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.7683055399997106,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 1.0972745201343059e-07
+          },
+          "stencil_over_matrix_free_time": 0.4529595669023932,
+          "csr_over_matrix_free_time": 1.7623956210795475
+        }
+      }
+    },
+    {
+      "physics": "thermal",
+      "element_grid_shape": [
+        4,
+        500,
+        500
+      ],
+      "nodes": 1255005,
+      "storage_bytes": {
+        "matrix_free": 23295045,
+        "stencil": 135540540,
+        "csr": 239332128
+      },
+      "assembly_by_probing_s": 2.5394267379999746,
+      "by_threads": {
+        "1": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 5.082454,
+              "minimum_ms": 5.0558369999999995,
+              "maximum_ms": 6.970114000000001,
+              "repeats": 196
+            },
+            "ns_per_node": 4.0497480089720765,
+            "executed_flops_per_node": 522,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 28,
+            "arithmetic_intensity_flop_per_byte": 18.642857142857142,
+            "executed_gflops": 128.89690885544658,
+            "useful_gflops": 13.3341629850462,
+            "compulsory_gbytes_per_s": 6.9140104366906225,
+            "fraction_of_fp32_peak": 0.538624320066547,
+            "fraction_of_read_bandwidth": 0.20267355687560668,
+            "roofline_bound_ms": 2.737533330019503,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.5386243200665471,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 4.086476,
+              "minimum_ms": 4.0755870000000005,
+              "maximum_ms": 4.488404,
+              "repeats": 216
+            },
+            "ns_per_node": 3.256143202616723,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 116,
+            "arithmetic_intensity_flop_per_byte": 0.46551724137931033,
+            "executed_gflops": 16.584037199778,
+            "useful_gflops": 16.584037199778,
+            "compulsory_gbytes_per_s": 35.62496879952311,
+            "fraction_of_fp32_peak": 0.06930007740299118,
+            "fraction_of_read_bandwidth": 1.0442910386519193,
+            "roofline_bound_ms": 4.267470266466141,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 1.0442910386519193,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 1.0347397250143331e-07
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 18.145555,
+              "minimum_ms": 17.526243,
+              "maximum_ms": 18.847299000000003,
+              "repeats": 45
+            },
+            "ns_per_node": 14.458551957960328,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 228,
+            "arithmetic_intensity_flop_per_byte": 0.23684210526315788,
+            "executed_gflops": 3.7348138428391966,
+            "useful_gflops": 3.7348138428391966,
+            "compulsory_gbytes_per_s": 15.76921400309883,
+            "fraction_of_fp32_peak": 0.015606747939397049,
+            "fraction_of_read_bandwidth": 0.8578985739291011,
+            "roofline_bound_ms": 15.567045757652073,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.8578985739291012,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 1.1039020364478347e-07
+          },
+          "stencil_over_matrix_free_time": 0.8040360030804017,
+          "csr_over_matrix_free_time": 3.570234969170405
+        },
+        "4": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 1.6455495,
+              "minimum_ms": 1.618592,
+              "maximum_ms": 2.103603,
+              "repeats": 400
+            },
+            "ns_per_node": 1.3111895968541958,
+            "executed_flops_per_node": 522,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 28,
+            "arithmetic_intensity_flop_per_byte": 18.642857142857142,
+            "executed_gflops": 398.1117614511141,
+            "useful_gflops": 41.18397532252904,
+            "compulsory_gbytes_per_s": 21.354653870940982,
+            "fraction_of_fp32_peak": 0.41607458162293415,
+            "fraction_of_read_bandwidth": 0.16635507109966632,
+            "roofline_bound_ms": 0.6846713197523283,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.41607458162293404,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 1.2633645,
+              "minimum_ms": 1.2514399999999999,
+              "maximum_ms": 1.476391,
+              "repeats": 400
+            },
+            "ns_per_node": 1.0066609296377307,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 116,
+            "arithmetic_intensity_flop_per_byte": 0.46551724137931033,
+            "executed_gflops": 53.64268981754672,
+            "useful_gflops": 53.64268981754672,
+            "compulsory_gbytes_per_s": 115.2324447932485,
+            "fraction_of_fp32_peak": 0.05606305033945919,
+            "fraction_of_read_bandwidth": 0.897673250169357,
+            "roofline_bound_ms": 1.1340885168635846,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.897673250169357,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 1.0347397250143331e-07
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 5.0411600000000005,
+              "minimum_ms": 4.935974,
+              "maximum_ms": 5.516916,
+              "repeats": 171
+            },
+            "ns_per_node": 4.016844554404166,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 228,
+            "arithmetic_intensity_flop_per_byte": 0.23684210526315788,
+            "executed_gflops": 13.443388029739188,
+            "useful_gflops": 13.443388029739188,
+            "compulsory_gbytes_per_s": 56.760971681121006,
+            "fraction_of_fp32_peak": 0.014049954288414908,
+            "fraction_of_read_bandwidth": 0.7844020383517998,
+            "roofline_bound_ms": 3.9542961796575593,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.7844020383517998,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 1.1039020364478347e-07
+          },
+          "stencil_over_matrix_free_time": 0.7677462756361932,
+          "csr_over_matrix_free_time": 3.063511611166969
+        },
+        "8": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 0.83905,
+              "minimum_ms": 0.806683,
+              "maximum_ms": 0.9997910000000001,
+              "repeats": 400
+            },
+            "ns_per_node": 0.6685630734538905,
+            "executed_flops_per_node": 522,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 28,
+            "arithmetic_intensity_flop_per_byte": 18.642857142857142,
+            "executed_gflops": 780.7789881413504,
+            "useful_gflops": 80.7702401525535,
+            "compulsory_gbytes_per_s": 41.880865264286996,
+            "fraction_of_fp32_peak": 0.41111178015486616,
+            "fraction_of_read_bandwidth": 0.1813421752098938,
+            "roofline_bound_ms": 0.34494333913894043,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.41111178015486616,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.65449,
+              "minimum_ms": 0.630936,
+              "maximum_ms": 0.775509,
+              "repeats": 400
+            },
+            "ns_per_node": 0.5215038983908431,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 116,
+            "arithmetic_intensity_flop_per_byte": 0.46551724137931033,
+            "executed_gflops": 103.54668520527434,
+            "useful_gflops": 103.54668520527434,
+            "compulsory_gbytes_per_s": 222.4336200705893,
+            "fraction_of_fp32_peak": 0.05452152623268243,
+            "fraction_of_read_bandwidth": 0.9631271046782293,
+            "roofline_bound_ms": 0.6303570587408542,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.9631271046782292,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 1.0347397250143331e-07
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 2.5675965,
+              "minimum_ms": 2.490181,
+              "maximum_ms": 2.929986,
+              "repeats": 336
+            },
+            "ns_per_node": 2.0458854745598622,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 228,
+            "arithmetic_intensity_flop_per_byte": 0.23684210526315788,
+            "executed_gflops": 26.394439313186478,
+            "useful_gflops": 26.394439313186478,
+            "compulsory_gbytes_per_s": 111.4431882112318,
+            "fraction_of_fp32_peak": 0.013897741994907816,
+            "fraction_of_read_bandwidth": 0.8040581821842345,
+            "roofline_bound_ms": 2.0644969743726027,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.8040581821842345,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 1.1039020364478347e-07
+          },
+          "stencil_over_matrix_free_time": 0.7800369465466898,
+          "csr_over_matrix_free_time": 3.06012335379298
+        },
+        "16": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 0.4798675,
+              "minimum_ms": 0.40836300000000003,
+              "maximum_ms": 0.522951,
+              "repeats": 400
+            },
+            "ns_per_node": 0.38236301847403,
+            "executed_flops_per_node": 522,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 28,
+            "arithmetic_intensity_flop_per_byte": 18.642857142857142,
+            "executed_gflops": 1365.194788144644,
+            "useful_gflops": 141.22704704944596,
+            "compulsory_gbytes_per_s": 73.22883921082382,
+            "fraction_of_fp32_peak": 0.4090324148260789,
+            "fraction_of_read_bandwidth": 0.21553908915641615,
+            "roofline_bound_ms": 0.1962813623215534,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.4090324148260789,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 0.369145,
+              "minimum_ms": 0.36074300000000004,
+              "maximum_ms": 0.46314700000000003,
+              "repeats": 400
+            },
+            "ns_per_node": 0.2941382703654567,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 116,
+            "arithmetic_intensity_flop_per_byte": 0.46551724137931033,
+            "executed_gflops": 183.58712700971165,
+            "useful_gflops": 183.58712700971165,
+            "compulsory_gbytes_per_s": 394.3723469097509,
+            "fraction_of_fp32_peak": 0.05500540036035371,
+            "fraction_of_read_bandwidth": 1.160781153401675,
+            "roofline_bound_ms": 0.42849655887246135,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 1.1607811534016752,
+            "bandwidth_level": "L3",
+            "relative_difference_vs_matrix_free": 1.0347397250143331e-07
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 1.423084,
+              "minimum_ms": 1.2865369999999998,
+              "maximum_ms": 1.627155,
+              "repeats": 400
+            },
+            "ns_per_node": 1.133926956466309,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 228,
+            "arithmetic_intensity_flop_per_byte": 0.23684210526315788,
+            "executed_gflops": 47.62211506840074,
+            "useful_gflops": 47.62211506840074,
+            "compulsory_gbytes_per_s": 201.07115251102536,
+            "fraction_of_fp32_peak": 0.014268285298705323,
+            "fraction_of_read_bandwidth": 1.0155259449213634,
+            "roofline_bound_ms": 1.4451787238024734,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 1.0155259449213632,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 1.1039020364478347e-07
+          },
+          "stencil_over_matrix_free_time": 0.7692644323693519,
+          "csr_over_matrix_free_time": 2.9655769561389342
+        }
+      }
+    },
+    {
+      "physics": "thermal",
+      "element_grid_shape": [
+        4,
+        1500,
+        1500
+      ],
+      "nodes": 11265005,
+      "storage_bytes": {
+        "matrix_free": 209385045,
+        "stencil": 1216620540,
+        "csr": 2151996128
+      },
+      "assembly_by_probing_s": 32.498903201000076,
+      "by_threads": {
+        "1": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 52.07671,
+              "minimum_ms": 51.404955,
+              "maximum_ms": 53.596075,
+              "repeats": 19
+            },
+            "ns_per_node": 4.6228750009431865,
+            "executed_flops_per_node": 522,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 28,
+            "arithmetic_intensity_flop_per_byte": 18.642857142857142,
+            "executed_gflops": 112.91674550869286,
+            "useful_gflops": 11.681042638830295,
+            "compulsory_gbytes_per_s": 6.05683692383793,
+            "fraction_of_fp32_peak": 0.4718476634839569,
+            "fraction_of_read_bandwidth": 0.3295124131399689,
+            "roofline_bound_ms": 24.572273935431614,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.4718476634839569,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 75.437756,
+              "minimum_ms": 74.559343,
+              "maximum_ms": 76.37395199999999,
+              "repeats": 13
+            },
+            "ns_per_node": 6.696646472859976,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 116,
+            "arithmetic_intensity_flop_per_byte": 0.46551724137931033,
+            "executed_gflops": 8.063737606404942,
+            "useful_gflops": 8.063737606404942,
+            "compulsory_gbytes_per_s": 17.322103006351355,
+            "fraction_of_fp32_peak": 0.03369611594267009,
+            "fraction_of_read_bandwidth": 0.9423809876434898,
+            "roofline_bound_ms": 71.0911070048886,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.94238098764349,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 1.0063412503313884e-07
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 250.897521,
+              "minimum_ms": 250.49129599999998,
+              "maximum_ms": 251.36968199999998,
+              "repeats": 7
+            },
+            "ns_per_node": 22.272295573770275,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 228,
+            "arithmetic_intensity_flop_per_byte": 0.23684210526315788,
+            "executed_gflops": 2.4245367892654466,
+            "useful_gflops": 2.4245367892654466,
+            "compulsory_gbytes_per_s": 10.236933110231886,
+            "fraction_of_fp32_peak": 0.010131464681274616,
+            "fraction_of_read_bandwidth": 0.5569237829450295,
+            "roofline_bound_ms": 139.73079652684999,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.5569237829450295,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 1.0618783363725015e-07
+          },
+          "stencil_over_matrix_free_time": 1.4485891293824051,
+          "csr_over_matrix_free_time": 4.817845078922997
+        },
+        "4": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 14.951837999999999,
+              "minimum_ms": 14.618741,
+              "maximum_ms": 17.852948,
+              "repeats": 62
+            },
+            "ns_per_node": 1.327281967473605,
+            "executed_flops_per_node": 522,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 28,
+            "arithmetic_intensity_flop_per_byte": 18.642857142857142,
+            "executed_gflops": 393.2849332637232,
+            "useful_gflops": 40.68464826866102,
+            "compulsory_gbytes_per_s": 21.095743546713123,
+            "fraction_of_fp32_peak": 0.4110299667356117,
+            "fraction_of_read_bandwidth": 0.29153032001551166,
+            "roofline_bound_ms": 6.145653475776254,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.4110299667356117,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 20.942259999999997,
+              "minimum_ms": 20.608244000000003,
+              "maximum_ms": 21.464805,
+              "repeats": 46
+            },
+            "ns_per_node": 1.8590546564337962,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 116,
+            "arithmetic_intensity_flop_per_byte": 0.46551724137931033,
+            "executed_gflops": 29.047021190645136,
+            "useful_gflops": 29.047021190645136,
+            "compulsory_gbytes_per_s": 62.397304779904374,
+            "fraction_of_fp32_peak": 0.03035762406324747,
+            "fraction_of_read_bandwidth": 0.8622927269811822,
+            "roofline_bound_ms": 18.058358484548933,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.8622927269811823,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 1.0063412503313884e-07
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 71.666944,
+              "minimum_ms": 71.476106,
+              "maximum_ms": 73.277249,
+              "repeats": 13
+            },
+            "ns_per_node": 6.361909648508811,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 228,
+            "arithmetic_intensity_flop_per_byte": 0.23684210526315788,
+            "executed_gflops": 8.488017432416262,
+            "useful_gflops": 8.488017432416262,
+            "compulsory_gbytes_per_s": 35.838295825757555,
+            "fraction_of_fp32_peak": 0.008870997151975462,
+            "fraction_of_read_bandwidth": 0.495263408362847,
+            "roofline_bound_ms": 35.49401495238928,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.4952634083628469,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 1.0618783363725015e-07
+          },
+          "stencil_over_matrix_free_time": 1.4006478668375084,
+          "csr_over_matrix_free_time": 4.793186229010775
+        },
+        "8": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 7.2810785,
+              "minimum_ms": 7.154159,
+              "maximum_ms": 9.444091,
+              "repeats": 120
+            },
+            "ns_per_node": 0.6463448973169563,
+            "executed_flops_per_node": 522,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 28,
+            "arithmetic_intensity_flop_per_byte": 18.642857142857142,
+            "executed_gflops": 807.6183507704251,
+            "useful_gflops": 83.54672594176812,
+            "compulsory_gbytes_per_s": 43.320524562398276,
+            "fraction_of_fp32_peak": 0.4252437923071493,
+            "fraction_of_read_bandwidth": 0.3125558662669243,
+            "roofline_bound_ms": 3.0962334334260495,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.42524379230714926,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 10.6277495,
+              "minimum_ms": 10.456462,
+              "maximum_ms": 10.972333,
+              "repeats": 90
+            },
+            "ns_per_node": 0.9434305177849455,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 116,
+            "arithmetic_intensity_flop_per_byte": 0.46551724137931033,
+            "executed_gflops": 57.23791946733407,
+            "useful_gflops": 57.23791946733407,
+            "compulsory_gbytes_per_s": 122.95553070760654,
+            "fraction_of_fp32_peak": 0.030138084300389178,
+            "fraction_of_read_bandwidth": 0.8871192766207311,
+            "roofline_bound_ms": 9.428081448546337,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.8871192766207311,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 1.0063412503313884e-07
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 36.301054,
+              "minimum_ms": 36.155634,
+              "maximum_ms": 36.743593999999995,
+              "repeats": 27
+            },
+            "ns_per_node": 3.222462306940831,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 228,
+            "arithmetic_intensity_flop_per_byte": 0.23684210526315788,
+            "executed_gflops": 16.757372113768376,
+            "useful_gflops": 16.757372113768376,
+            "compulsory_gbytes_per_s": 70.75334892479982,
+            "fraction_of_fp32_peak": 0.008823435549679052,
+            "fraction_of_read_bandwidth": 0.510482605828642,
+            "roofline_bound_ms": 18.53105664024625,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.510482605828642,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 1.0618783363725015e-07
+          },
+          "stencil_over_matrix_free_time": 1.459639461379245,
+          "csr_over_matrix_free_time": 4.9856699114011755
+        },
+        "16": {
+          "matrix_free": {
+            "timing": {
+              "median_ms": 4.211585,
+              "minimum_ms": 3.575002,
+              "maximum_ms": 4.909654000000001,
+              "repeats": 225
+            },
+            "ns_per_node": 0.373864459003791,
+            "executed_flops_per_node": 522,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 28,
+            "arithmetic_intensity_flop_per_byte": 18.642857142857142,
+            "executed_gflops": 1396.2279308146458,
+            "useful_gflops": 144.4373721532392,
+            "compulsory_gbytes_per_s": 74.89345222760551,
+            "fraction_of_fp32_peak": 0.41833040028294116,
+            "fraction_of_read_bandwidth": 0.37825537324500924,
+            "roofline_bound_ms": 1.7618340388756306,
+            "roofline_limiter": "compute",
+            "achieved_fraction_of_roofline": 0.4183304002829411,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 0.0
+          },
+          "stencil": {
+            "timing": {
+              "median_ms": 5.7815015,
+              "minimum_ms": 5.691926,
+              "maximum_ms": 6.0487969999999995,
+              "repeats": 158
+            },
+            "ns_per_node": 0.5132267140582717,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 116,
+            "arithmetic_intensity_flop_per_byte": 0.46551724137931033,
+            "executed_gflops": 105.21665868286983,
+            "useful_gflops": 105.21665868286983,
+            "compulsory_gbytes_per_s": 226.0209705039426,
+            "fraction_of_fp32_peak": 0.03152445669637712,
+            "fraction_of_read_bandwidth": 1.1415369971108813,
+            "roofline_bound_ms": 6.599797861102056,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 1.1415369971108813,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 1.0063412503313884e-07
+          },
+          "csr": {
+            "timing": {
+              "median_ms": 19.384774,
+              "minimum_ms": 18.994493000000002,
+              "maximum_ms": 19.861256,
+              "repeats": 50
+            },
+            "ns_per_node": 1.7207958629401408,
+            "executed_flops_per_node": 54,
+            "useful_flops_per_node": 54,
+            "compulsory_bytes_per_node": 228,
+            "arithmetic_intensity_flop_per_byte": 0.23684210526315788,
+            "executed_gflops": 31.38082858226771,
+            "useful_gflops": 31.38082858226771,
+            "compulsory_gbytes_per_s": 132.496831791797,
+            "fraction_of_fp32_peak": 0.009402157264087236,
+            "fraction_of_read_bandwidth": 0.6691858509990566,
+            "roofline_bound_ms": 12.972016485614384,
+            "roofline_limiter": "bandwidth",
+            "achieved_fraction_of_roofline": 0.6691858509990565,
+            "bandwidth_level": "DRAM",
+            "relative_difference_vs_matrix_free": 1.0618783363725015e-07
+          },
+          "stencil_over_matrix_free_time": 1.37276144254479,
+          "csr_over_matrix_free_time": 4.60272652694888
+        }
+      }
+    }
+  ],
+  "solver_share": [
+    {
+      "physics": "maxwell",
+      "nodes": 66049,
+      "threads": 1,
+      "solve_ms": 4679.55684399999,
+      "converged": false,
+      "outer_iterations": 12,
+      "inner_iterations": 4792,
+      "low_operator_applications": 4942,
+      "estimated_operator_ms": 1211.0222740000002,
+      "estimated_operator_share": 0.2587899483586234,
+      "estimated_solve_ms_with_stencil_operator": 4300.22869199999,
+      "high_operator_applications": 13,
+      "high_operator_apply_ms": 6.807676500102389,
+      "estimated_high_operator_share": 0.018912003305356417,
+      "estimated_other_share": 0.7222980483360202,
+      "note": "operator times = applications x isolated action medians (the FP64 high operator is the NumPy path, single threaded); other = inner vector updates, Gram-Schmidt or preconditioner, and outer bookkeeping; the stencil solve is an estimate, not a measured solve"
+    },
+    {
+      "physics": "maxwell",
+      "nodes": 66049,
+      "threads": 4,
+      "solve_ms": 1330.487918000017,
+      "converged": false,
+      "outer_iterations": 12,
+      "inner_iterations": 4792,
+      "low_operator_applications": 4942,
+      "estimated_operator_ms": 333.82221599999997,
+      "estimated_operator_share": 0.25090210251724787,
+      "estimated_solve_ms_with_stencil_operator": 1131.4019190000172,
+      "high_operator_applications": 13,
+      "high_operator_apply_ms": 6.200657000022147,
+      "estimated_high_operator_share": 0.06058569935866707,
+      "estimated_other_share": 0.688512198124085,
+      "note": "operator times = applications x isolated action medians (the FP64 high operator is the NumPy path, single threaded); other = inner vector updates, Gram-Schmidt or preconditioner, and outer bookkeeping; the stencil solve is an estimate, not a measured solve"
+    },
+    {
+      "physics": "maxwell",
+      "nodes": 66049,
+      "threads": 8,
+      "solve_ms": 792.8187120000985,
+      "converged": false,
+      "outer_iterations": 12,
+      "inner_iterations": 4792,
+      "low_operator_applications": 4942,
+      "estimated_operator_ms": 179.065957,
+      "estimated_operator_share": 0.22585990250943744,
+      "estimated_solve_ms_with_stencil_operator": 700.2995300000985,
+      "high_operator_applications": 13,
+      "high_operator_apply_ms": 6.185696499983351,
+      "estimated_high_operator_share": 0.10142804815607527,
+      "estimated_other_share": 0.6727120493344872,
+      "note": "operator times = applications x isolated action medians (the FP64 high operator is the NumPy path, single threaded); other = inner vector updates, Gram-Schmidt or preconditioner, and outer bookkeeping; the stencil solve is an estimate, not a measured solve"
+    },
+    {
+      "physics": "maxwell",
+      "nodes": 66049,
+      "threads": 16,
+      "solve_ms": 606.3412220000828,
+      "converged": false,
+      "outer_iterations": 12,
+      "inner_iterations": 4792,
+      "low_operator_applications": 4942,
+      "estimated_operator_ms": 126.784539,
+      "estimated_operator_share": 0.20909767371874757,
+      "estimated_solve_ms_with_stencil_operator": 537.0420270000827,
+      "high_operator_applications": 13,
+      "high_operator_apply_ms": 6.390915499991934,
+      "estimated_high_operator_share": 0.13702169419694146,
+      "estimated_other_share": 0.6538806320843109,
+      "note": "operator times = applications x isolated action medians (the FP64 high operator is the NumPy path, single threaded); other = inner vector updates, Gram-Schmidt or preconditioner, and outer bookkeeping; the stencil solve is an estimate, not a measured solve"
+    },
+    {
+      "physics": "thermal",
+      "nodes": 202005,
+      "threads": 1,
+      "solve_ms": 3374.0954769998552,
+      "converged": true,
+      "outer_iterations": 7,
+      "inner_iterations": 1015,
+      "low_operator_applications": 1015,
+      "estimated_operator_ms": 1090.14045,
+      "estimated_operator_share": 0.3230911684127328,
+      "estimated_solve_ms_with_stencil_operator": 3025.0968619998553,
+      "high_operator_applications": 8,
+      "high_operator_apply_ms": 40.397405000021536,
+      "estimated_high_operator_share": 0.09578248220987913,
+      "estimated_other_share": 0.5811263493773882,
+      "note": "operator times = applications x isolated action medians (the FP64 high operator is the NumPy path, single threaded); other = inner vector updates, Gram-Schmidt or preconditioner, and outer bookkeeping; the stencil solve is an estimate, not a measured solve"
+    },
+    {
+      "physics": "thermal",
+      "nodes": 202005,
+      "threads": 4,
+      "solve_ms": 1186.887939999906,
+      "converged": true,
+      "outer_iterations": 7,
+      "inner_iterations": 1015,
+      "low_operator_applications": 1015,
+      "estimated_operator_ms": 342.7172875,
+      "estimated_operator_share": 0.28875286027426245,
+      "estimated_solve_ms_with_stencil_operator": 1051.377319999906,
+      "high_operator_applications": 8,
+      "high_operator_apply_ms": 40.56981850010288,
+      "estimated_high_operator_share": 0.27345340454032147,
+      "estimated_other_share": 0.4377937351854161,
+      "note": "operator times = applications x isolated action medians (the FP64 high operator is the NumPy path, single threaded); other = inner vector updates, Gram-Schmidt or preconditioner, and outer bookkeeping; the stencil solve is an estimate, not a measured solve"
+    },
+    {
+      "physics": "thermal",
+      "nodes": 202005,
+      "threads": 8,
+      "solve_ms": 783.2102750001013,
+      "converged": true,
+      "outer_iterations": 7,
+      "inner_iterations": 1015,
+      "low_operator_applications": 1015,
+      "estimated_operator_ms": 171.5801675,
+      "estimated_operator_share": 0.2190729271267257,
+      "estimated_solve_ms_with_stencil_operator": 717.3839725001013,
+      "high_operator_applications": 8,
+      "high_operator_apply_ms": 39.33821499992973,
+      "estimated_high_operator_share": 0.40181510642132107,
+      "estimated_other_share": 0.3791119664519532,
+      "note": "operator times = applications x isolated action medians (the FP64 high operator is the NumPy path, single threaded); other = inner vector updates, Gram-Schmidt or preconditioner, and outer bookkeeping; the stencil solve is an estimate, not a measured solve"
+    },
+    {
+      "physics": "thermal",
+      "nodes": 202005,
+      "threads": 16,
+      "solve_ms": 606.3689600000544,
+      "converged": true,
+      "outer_iterations": 7,
+      "inner_iterations": 1015,
+      "low_operator_applications": 1015,
+      "estimated_operator_ms": 101.61774000000001,
+      "estimated_operator_share": 0.16758400693859873,
+      "estimated_solve_ms_with_stencil_operator": 550.7799475000544,
+      "high_operator_applications": 8,
+      "high_operator_apply_ms": 39.74906399992051,
+      "estimated_high_operator_share": 0.5244208278724154,
+      "estimated_other_share": 0.30799516518898584,
+      "note": "operator times = applications x isolated action medians (the FP64 high operator is the NumPy path, single threaded); other = inner vector updates, Gram-Schmidt or preconditioner, and outer bookkeeping; the stencil solve is an estimate, not a measured solve"
+    }
+  ],
+  "decision": {
+    "adopted": "none; this is a measurement of the current kernels",
+    "assembled_stencil": "measured, not adopted",
+    "cases_where_assembled_stencil_is_faster_by_10_percent": [
+      {
+        "physics": "maxwell",
+        "nodes": 66049,
+        "threads": 1,
+        "stencil_over_matrix_free_time": 0.6867702930458238
+      },
+      {
+        "physics": "maxwell",
+        "nodes": 66049,
+        "threads": 4,
+        "stencil_over_matrix_free_time": 0.4036166873926689
+      },
+      {
+        "physics": "maxwell",
+        "nodes": 66049,
+        "threads": 8,
+        "stencil_over_matrix_free_time": 0.48332344377440767
+      },
+      {
+        "physics": "maxwell",
+        "nodes": 66049,
+        "threads": 16,
+        "stencil_over_matrix_free_time": 0.45340973318521116
+      },
+      {
+        "physics": "maxwell",
+        "nodes": 1050625,
+        "threads": 1,
+        "stencil_over_matrix_free_time": 0.8757331963452022
+      },
+      {
+        "physics": "thermal",
+        "nodes": 202005,
+        "threads": 1,
+        "stencil_over_matrix_free_time": 0.6798590355949089
+      },
+      {
+        "physics": "thermal",
+        "nodes": 202005,
+        "threads": 4,
+        "stencil_over_matrix_free_time": 0.6045994032326134
+      },
+      {
+        "physics": "thermal",
+        "nodes": 202005,
+        "threads": 8,
+        "stencil_over_matrix_free_time": 0.6163524988982192
+      },
+      {
+        "physics": "thermal",
+        "nodes": 202005,
+        "threads": 16,
+        "stencil_over_matrix_free_time": 0.4529595669023932
+      },
+      {
+        "physics": "thermal",
+        "nodes": 1255005,
+        "threads": 1,
+        "stencil_over_matrix_free_time": 0.8040360030804017
+      },
+      {
+        "physics": "thermal",
+        "nodes": 1255005,
+        "threads": 4,
+        "stencil_over_matrix_free_time": 0.7677462756361932
+      },
+      {
+        "physics": "thermal",
+        "nodes": 1255005,
+        "threads": 8,
+        "stencil_over_matrix_free_time": 0.7800369465466898
+      },
+      {
+        "physics": "thermal",
+        "nodes": 1255005,
+        "threads": 16,
+        "stencil_over_matrix_free_time": 0.7692644323693519
+      }
+    ]
+  }
+}
