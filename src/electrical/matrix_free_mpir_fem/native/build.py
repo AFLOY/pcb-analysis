@@ -57,6 +57,8 @@ def compile_extension(
 
 
 def build(*, openmp: bool = True, verbose: bool = True) -> Path:
+    """Compile the scalar Maxwell kernel; returns its module path."""
+
     here = Path(__file__).resolve().parent
     return compile_extension(
         here / "scalar_maxwell_q1.cpp",
@@ -67,12 +69,25 @@ def build(*, openmp: bool = True, verbose: bool = True) -> Path:
     )
 
 
+def build_layered_dc(*, openmp: bool = True, verbose: bool = True) -> Path:
+    """Compile the layered-PCB DC conduction kernel; returns its module path."""
+
+    here = Path(__file__).resolve().parent
+    return compile_extension(
+        here / "layered_dc_q1.cpp",
+        "_layered_dc_native",
+        here.parent,
+        openmp=openmp,
+        verbose=verbose,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--no-openmp", action="store_true")
     args = parser.parse_args()
-    output = build(openmp=not args.no_openmp)
-    print(f"built {output}")
+    for output in (build(openmp=not args.no_openmp), build_layered_dc(openmp=not args.no_openmp)):
+        print(f"built {output}")
 
 
 if __name__ == "__main__":

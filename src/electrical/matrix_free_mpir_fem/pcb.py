@@ -15,6 +15,7 @@ from typing import Any, Literal, Sequence
 import numpy as np
 
 from .grid import check_pitch_axis
+from .native_dc import NativeLayeredDCQ1, NativeLayeredDCQ1High, native_requested
 from .runtime import LowPrecisionRuntime, RuntimeBackend, make_float32_runtime
 from .solver import MPIRConfig, MPIRResult, solve_mpir
 from .two_level import AggregationCoarseCorrection
@@ -215,6 +216,11 @@ class MatrixFreePCBOperator:
     correction of :mod:`.two_level` to Jacobi scaling; a wide copper sheet or
     a graded grid with elongated elements otherwise costs hundreds of inner
     PCG iterations per outer step.  ``"jacobi"`` keeps the plain scaling.
+
+    ``native=True`` runs the FP32 action, the whole inner PCG and the FP64
+    action in the optional C++ extension (CPU runtime only, ``native_threads``
+    OpenMP threads); ``None`` follows ``PCB_NATIVE_Q1``.  The results are the
+    same either way; only the speed differs.
     """
 
     def __init__(
@@ -228,6 +234,8 @@ class MatrixFreePCBOperator:
         device_id: int = 0,
         preconditioner: Preconditioner = "two-level",
         coarse_block_nodes: int | None = None,
+        native: bool | None = None,
+        native_threads: int | None = None,
     ) -> None:
         if runtime is not None and backend is not None:
             raise ValueError("pass either runtime or backend, not both")
@@ -284,6 +292,29 @@ class MatrixFreePCBOperator:
         self._via_b_low = self.runtime.namespace.asarray(via_b, dtype=np.int64)
         self._via_g_low = self.runtime.namespace.asarray(via_g, dtype=self.runtime.dtype)
 
+        if getattr(self.runtime, "is_cuda", False) and native:
+            raise ValueError("native=True requires the CPU runtime")
+        use_native = not getattr(self.runtime, "is_cuda", False) and (
+            native or (native is None and native_requested())
+        )
+        # The FP64 action (outer residual and coarse assembly) goes native with
+        # the low path; it is built first because the coarse matrix below is
+        # assembled from FP64 applications.
+        self._native_high: NativeLayeredDCQ1High | None = None
+        self.high_operator_backend = "array-element-loops-fp64"
+        if use_native:
+            self._native_high = NativeLayeredDCQ1High(
+                mesh.node_shape,
+                self._coefficients_high,
+                self._unit_high,
+                self.free_nodes,
+                self._via_a_high,
+                self._via_b_high,
+                self._via_g_high,
+                threads=native_threads,
+            )
+            self.high_operator_backend = self._native_high.kernel_name
+
         diagonal = self._build_diagonal(
             np,
             self._coefficients_high,
@@ -308,6 +339,26 @@ class MatrixFreePCBOperator:
                 runtime=self.runtime,
                 block=coarse_block_nodes,
             )
+        # Opt-in fused C++ host path: operator plus the whole inner PCG with
+        # the same preconditioner.
+        self._native: NativeLayeredDCQ1 | None = None
+        self.low_operator_backend = "array-element-loops"
+        if use_native:
+            coarse = self.coarse_correction
+            self._native = NativeLayeredDCQ1(
+                mesh.node_shape,
+                self._coefficients_high,
+                self._unit_high,
+                self.free_nodes,
+                self._via_a_high,
+                self._via_b_high,
+                self._via_g_high,
+                diagonal,
+                coarse_block=None if coarse is None else coarse.block,
+                coarse_inverse=None if coarse is None else coarse._coarse_inverse_high,
+                threads=native_threads,
+            )
+            self.low_operator_backend = self._native.kernel_name
 
     @staticmethod
     def _element_views(grid: Any) -> tuple[Any, Any, Any, Any]:
@@ -373,6 +424,8 @@ class MatrixFreePCBOperator:
         vector = np.asarray(vector, dtype=np.float64).reshape(-1)
         if vector.size != self.size:
             raise ValueError(f"vector has size {vector.size}, expected {self.size}")
+        if self._native_high is not None:
+            return self._native_high.apply(vector)
         return self._apply_impl(
             vector,
             np,
@@ -384,7 +437,22 @@ class MatrixFreePCBOperator:
             self._via_g_high,
         )
 
+    def native_inner_pcg(
+        self, rhs_high: np.ndarray, config: MPIRConfig
+    ) -> tuple[np.ndarray, int, float, int] | None:
+        """Whole inner PCG in C++; ``None`` when the native path is off."""
+
+        if self._native is None:
+            return None
+        return self._native.inner_pcg(
+            rhs_high,
+            inner_relative_tolerance=config.inner_relative_tolerance,
+            max_inner_iterations=config.max_inner_iterations,
+        )
+
     def apply_low(self, vector: Any) -> Any:
+        if self._native is not None:
+            return self._native.apply(vector)
         return self._apply_impl(
             vector,
             self.runtime.namespace,
@@ -493,6 +561,8 @@ def solve_pcb_dc(
     initial_potential_v: np.ndarray | None = None,
     preconditioner: Preconditioner = "two-level",
     coarse_block_nodes: int | None = None,
+    native: bool | None = None,
+    native_threads: int | None = None,
 ) -> PCBConductionSolution:
     """Solve a layered PCB's DC conduction problem with matrix-free MPIR.
 
@@ -500,7 +570,8 @@ def solve_pcb_dc(
     the potential of the previous iteration of a coupled analysis; NaN entries
     (inactive nodes of a reported solution) are treated as zero.
     ``preconditioner`` selects the two-level (default) or Jacobi inner
-    preconditioner.
+    preconditioner.  ``native`` and ``native_threads`` select the fused C++
+    host path of :class:`MatrixFreePCBOperator`.
     """
 
     operator = MatrixFreePCBOperator(
@@ -512,6 +583,8 @@ def solve_pcb_dc(
         device_id=device_id,
         preconditioner=preconditioner,
         coarse_block_nodes=coarse_block_nodes,
+        native=native,
+        native_threads=native_threads,
     )
     rhs = operator.build_rhs(problem.terminals)
     initial = None
