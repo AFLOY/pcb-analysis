@@ -320,8 +320,15 @@ def run_electro_thermal(
     config: CouplingConfig | None = None,
     backend: RuntimeBackend | None = None,
     device_id: int = 0,
+    native: bool | None = None,
+    native_threads: int | None = None,
 ) -> ElectroThermalResult:
-    """Iterate electrical and thermal solves to a self-consistent ρ(T) state."""
+    """Iterate electrical and thermal solves to a self-consistent ρ(T) state.
+
+    ``native`` and ``native_threads`` select the fused C++ host paths of both
+    solvers (``solve_pcb_dc`` and ``solve_thermal_conduction``); ``None``
+    leaves each to its own environment flag.
+    """
 
     config = config or CouplingConfig()
     problem = scenario.electrical
@@ -341,6 +348,8 @@ def run_electro_thermal(
             backend=backend,
             device_id=device_id,
             initial_potential_v=potential,
+            native=native,
+            native_threads=native_threads,
         )
         potential = electrical_solution.potential_v
         loss = electrical_solution.joule_loss_w
@@ -353,6 +362,8 @@ def run_electro_thermal(
             backend=backend,
             device_id=device_id,
             initial_temperature_k=fixed_point.temperature,
+            native=native,
+            native_threads=native_threads,
         )
         # Nodes outside a masked mesh are NaN; hold them at the coldest node so
         # the fixed point sees finite fields (they carry no copper anyway).
