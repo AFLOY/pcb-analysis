@@ -179,24 +179,29 @@ def dipoles_from_sheet_peec(
         )
         return CurrentDipoles(position_array, moment_array)
 
-    positions: list[tuple[float, float, float]] = []
-    moments: list[tuple[complex, complex, complex]] = []
-    index = 0
-    for layer, row, col in mesh.branch_x:
-        positions.append(((col + 1.0) * pitch, (row + 0.5) * pitch, heights[layer]))
-        moments.append((current[index] * pitch, 0.0, 0.0))
-        index += 1
-    for layer, row, col in mesh.branch_y:
-        positions.append(((col + 0.5) * pitch, (row + 1.0) * pitch, heights[layer]))
-        moments.append((0.0, current[index] * pitch, 0.0))
-        index += 1
-    for via in mesh.via_branches:
-        lower = heights[via.lower_layer]
-        upper = heights[via.upper_layer]
-        positions.append(((via.col + 0.5) * pitch, (via.row + 0.5) * pitch, 0.5 * (lower + upper)))
-        moments.append((0.0, 0.0, current[index] * (upper - lower)))
-        index += 1
-    return CurrentDipoles(
-        np.asarray(positions, dtype=np.float64).reshape(-1, 3),
-        np.asarray(moments, dtype=np.complex128).reshape(-1, 3),
+    # Assembled with array indexing rather than one Python tuple per branch:
+    # a plane at the acceptance grid has 10^5 to 10^6 branches, and the
+    # indexing form is four times faster than the loop it replaces and as
+    # fast as the C++ kernel above (measured, see EMC_DIPOLE_SUPERPOSITION.md).
+    branch_x = np.asarray(mesh.branch_x, dtype=np.int64).reshape(-1, 3)
+    branch_y = np.asarray(mesh.branch_y, dtype=np.int64).reshape(-1, 3)
+    vias = np.asarray(
+        [(via.lower_layer, via.upper_layer, via.row, via.col) for via in mesh.via_branches], dtype=np.int64
+    ).reshape(-1, 4)
+    count_x, count_y = branch_x.shape[0], branch_y.shape[0]
+    positions = np.empty((mesh.branch_count, 3), dtype=np.float64)
+    moments = np.zeros((mesh.branch_count, 3), dtype=np.complex128)
+    positions[:count_x] = np.column_stack(
+        ((branch_x[:, 2] + 1.0) * pitch, (branch_x[:, 1] + 0.5) * pitch, heights[branch_x[:, 0]])
     )
+    moments[:count_x, 0] = current[:count_x] * pitch
+    positions[count_x : count_x + count_y] = np.column_stack(
+        ((branch_y[:, 2] + 0.5) * pitch, (branch_y[:, 1] + 1.0) * pitch, heights[branch_y[:, 0]])
+    )
+    moments[count_x : count_x + count_y, 1] = current[count_x : count_x + count_y] * pitch
+    lower, upper = heights[vias[:, 0]], heights[vias[:, 1]]
+    positions[count_x + count_y :] = np.column_stack(
+        ((vias[:, 3] + 0.5) * pitch, (vias[:, 2] + 0.5) * pitch, 0.5 * (lower + upper))
+    )
+    moments[count_x + count_y :, 2] = current[count_x + count_y :] * (upper - lower)
+    return CurrentDipoles(positions, moments)
