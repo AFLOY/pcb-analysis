@@ -1,0 +1,320 @@
+{
+  "schema": "emc-sources-benchmark/v1",
+  "measured_at": "2026-09-25T12:56:40+00:00",
+  "environment": {
+    "platform": "Linux-6.12.0-55.103.1.el10_0.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.9",
+    "numpy": "2.3.5",
+    "cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.10GHz",
+    "cpu_count": 32,
+    "compiler": "g++ (GCC) 14.2.1 20250110 (Red Hat 14.2.1-7)",
+    "thread_sweep": [
+      1,
+      4,
+      16
+    ],
+    "OPENBLAS_NUM_THREADS": "1",
+    "device": "cpu"
+  },
+  "definitions": {
+    "timing": "wall time of dipoles_from_sheet_peec (branch order, positions and complex moments)",
+    "loop": "the Python loop over branches that the shipped path replaced (legacy_loop in this script)",
+    "vectorised_numpy": "the shipped portable path: dipoles_from_sheet_peec(native=False), NumPy indexing",
+    "native": "C++ kernel sheet_branch_dipoles, OpenMP over branches",
+    "decision_threads": "the first thread count in the sweep"
+  },
+  "cases": [
+    {
+      "shape": [
+        100,
+        100
+      ],
+      "branches": 59761,
+      "vias": 361,
+      "loop_ms": {
+        "median_ms": 34.39435600012075,
+        "minimum_ms": 33.90981700067641,
+        "maximum_ms": 39.43557599995984,
+        "samples_ms": [
+          39.43557599995984,
+          35.961729001428466,
+          34.39435600012075,
+          33.90981700067641,
+          34.33442200002901
+        ],
+        "repeats": 5
+      },
+      "vectorised_numpy_ms": {
+        "median_ms": 9.040992001246195,
+        "minimum_ms": 8.783420000327169,
+        "maximum_ms": 9.520665000309236,
+        "samples_ms": [
+          9.520665000309236,
+          8.783420000327169,
+          9.07108200044604,
+          9.040992001246195,
+          8.925848998842412
+        ],
+        "repeats": 5
+      },
+      "vectorised_numpy_identical_to_loop": true,
+      "vectorised_numpy_speedup_vs_loop": 3.8042679382284477,
+      "native_by_threads": {
+        "1": {
+          "threads": 1,
+          "native_ms": {
+            "median_ms": 8.473617999698035,
+            "minimum_ms": 8.406623999690055,
+            "maximum_ms": 9.111847000895068,
+            "samples_ms": [
+              9.111847000895068,
+              8.48115900043922,
+              8.425603000432602,
+              8.406623999690055,
+              8.473617999698035
+            ],
+            "repeats": 5
+          },
+          "speedup_vs_loop": 4.058992982849406,
+          "speedup_vs_vectorised_numpy": 1.066957703494349,
+          "identical_to_loop": true
+        },
+        "4": {
+          "threads": 4,
+          "native_ms": {
+            "median_ms": 8.4806530012429,
+            "minimum_ms": 8.392630999878747,
+            "maximum_ms": 9.704443998998613,
+            "samples_ms": [
+              9.704443998998613,
+              8.4806530012429,
+              8.597179999924265,
+              8.427860999290715,
+              8.392630999878747
+            ],
+            "repeats": 5
+          },
+          "speedup_vs_loop": 4.055625904642015,
+          "speedup_vs_vectorised_numpy": 1.0660726243511172,
+          "identical_to_loop": true
+        },
+        "16": {
+          "threads": 16,
+          "native_ms": {
+            "median_ms": 9.076853999431478,
+            "minimum_ms": 8.563838000554824,
+            "maximum_ms": 9.772543000508449,
+            "samples_ms": [
+              8.942754000599962,
+              8.563838000554824,
+              9.441427000638214,
+              9.772543000508449,
+              9.076853999431478
+            ],
+            "repeats": 5
+          },
+          "speedup_vs_loop": 3.7892375488550347,
+          "speedup_vs_vectorised_numpy": 0.9960490718273612,
+          "identical_to_loop": true
+        }
+      }
+    },
+    {
+      "shape": [
+        300,
+        300
+      ],
+      "branches": 538561,
+      "vias": 361,
+      "loop_ms": {
+        "median_ms": 375.7268549998116,
+        "minimum_ms": 366.42053600007785,
+        "maximum_ms": 377.53619700015406,
+        "samples_ms": [
+          377.5358889997733,
+          377.53619700015406,
+          375.7268549998116,
+          366.42053600007785,
+          368.4876820007048
+        ],
+        "repeats": 5
+      },
+      "vectorised_numpy_ms": {
+        "median_ms": 86.02985399920726,
+        "minimum_ms": 83.18486700045469,
+        "maximum_ms": 91.21893399969849,
+        "samples_ms": [
+          90.35874199980753,
+          83.69420400049421,
+          91.21893399969849,
+          86.02985399920726,
+          83.18486700045469
+        ],
+        "repeats": 5
+      },
+      "vectorised_numpy_identical_to_loop": true,
+      "vectorised_numpy_speedup_vs_loop": 4.367400821153013,
+      "native_by_threads": {
+        "1": {
+          "threads": 1,
+          "native_ms": {
+            "median_ms": 79.64753299893346,
+            "minimum_ms": 79.13682000071276,
+            "maximum_ms": 83.16641400051594,
+            "samples_ms": [
+              83.16641400051594,
+              79.13682000071276,
+              80.30144599979394,
+              79.64753299893346,
+              79.28169700062426
+            ],
+            "repeats": 5
+          },
+          "speedup_vs_loop": 4.71736965167324,
+          "speedup_vs_vectorised_numpy": 1.0801320613453185,
+          "identical_to_loop": true
+        },
+        "4": {
+          "threads": 4,
+          "native_ms": {
+            "median_ms": 76.3605070005724,
+            "minimum_ms": 76.32130899946787,
+            "maximum_ms": 81.16356299979088,
+            "samples_ms": [
+              81.16356299979088,
+              76.3605070005724,
+              76.32130899946787,
+              76.64450699849112,
+              76.32392899904517
+            ],
+            "repeats": 5
+          },
+          "speedup_vs_loop": 4.920434263185225,
+          "speedup_vs_vectorised_numpy": 1.126627590340153,
+          "identical_to_loop": true
+        },
+        "16": {
+          "threads": 16,
+          "native_ms": {
+            "median_ms": 80.72689399887167,
+            "minimum_ms": 77.80287700006738,
+            "maximum_ms": 89.80751899980532,
+            "samples_ms": [
+              89.80751899980532,
+              81.9359209999675,
+              80.72689399887167,
+              77.80287700006738,
+              78.08989499972085
+            ],
+            "repeats": 5
+          },
+          "speedup_vs_loop": 4.654295940149304,
+          "speedup_vs_vectorised_numpy": 1.0656901280062838,
+          "identical_to_loop": true
+        }
+      }
+    },
+    {
+      "shape": [
+        600,
+        600
+      ],
+      "branches": 2156761,
+      "vias": 361,
+      "loop_ms": {
+        "median_ms": 1665.0437699991016,
+        "minimum_ms": 1654.635937000421,
+        "maximum_ms": 1666.2289399992005,
+        "samples_ms": [
+          1665.0437699991016,
+          1654.635937000421,
+          1661.907608000547,
+          1666.2289399992005,
+          1665.1922569999442
+        ],
+        "repeats": 5
+      },
+      "vectorised_numpy_ms": {
+        "median_ms": 436.46658699981344,
+        "minimum_ms": 432.5071349994687,
+        "maximum_ms": 437.9875360009464,
+        "samples_ms": [
+          434.9196759994811,
+          436.46658699981344,
+          432.5071349994687,
+          437.9875360009464,
+          437.67903899970406
+        ],
+        "repeats": 5
+      },
+      "vectorised_numpy_identical_to_loop": true,
+      "vectorised_numpy_speedup_vs_loop": 3.814825280084529,
+      "native_by_threads": {
+        "1": {
+          "threads": 1,
+          "native_ms": {
+            "median_ms": 402.4358740007301,
+            "minimum_ms": 398.33385100064334,
+            "maximum_ms": 403.9334190001682,
+            "samples_ms": [
+              398.33385100064334,
+              402.4358740007301,
+              399.81182500014256,
+              402.8458939992561,
+              403.9334190001682
+            ],
+            "repeats": 5
+          },
+          "speedup_vs_loop": 4.137413877760015,
+          "speedup_vs_vectorised_numpy": 1.0845618276044189,
+          "identical_to_loop": true
+        },
+        "4": {
+          "threads": 4,
+          "native_ms": {
+            "median_ms": 380.1404829991952,
+            "minimum_ms": 377.1673489991372,
+            "maximum_ms": 387.98800699987623,
+            "samples_ms": [
+              387.98800699987623,
+              380.9756919999927,
+              380.06500099982077,
+              380.1404829991952,
+              377.1673489991372
+            ],
+            "repeats": 5
+          },
+          "speedup_vs_loop": 4.380074852492431,
+          "speedup_vs_vectorised_numpy": 1.148171811526681,
+          "identical_to_loop": true
+        },
+        "16": {
+          "threads": 16,
+          "native_ms": {
+            "median_ms": 377.6858599994739,
+            "minimum_ms": 375.4063899996254,
+            "maximum_ms": 380.33223700040253,
+            "samples_ms": [
+              377.6858599994739,
+              380.33223700040253,
+              375.904537999304,
+              379.3543520005187,
+              375.4063899996254
+            ],
+            "repeats": 5
+          },
+          "speedup_vs_loop": 4.4085414529456335,
+          "speedup_vs_vectorised_numpy": 1.155633909621137,
+          "identical_to_loop": true
+        }
+      }
+    }
+  ],
+  "decision": {
+    "adopted": false,
+    "criteria": "C++ at least 2x faster than the shipped NumPy path on every case at the decision thread count and bit-identical output",
+    "minimum_speedup_vs_loop": 4.058992982849406,
+    "minimum_speedup_vs_vectorised_numpy": 1.066957703494349,
+    "all_identical": true
+  }
+}

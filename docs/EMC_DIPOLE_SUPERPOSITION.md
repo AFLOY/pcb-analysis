@@ -165,6 +165,34 @@ Decision recorded in the JSON: criteria met (near field at least 2× on every
 case, far field not slower, results within 1e-10).  The default stays the
 array path.
 
+### Current elements from a sheet-PEEC solve (measured on `exp/cpp-multiphysics-dc-emc`)
+
+`dipoles_from_sheet_peec` assembled one Python tuple per branch. A plane at
+the acceptance grid has 10^5 to 10^6 branches, so the loop was tried two
+ways: a C++ kernel `sheet_branch_dipoles` in `_dipole_native` (OpenMP over
+branches, `native=True` or `PCB_NATIVE_EMC=1`), and the same assembly with
+NumPy indexing. Measured with `experiments/emc_sources_benchmark.py --shapes
+100x100,300x300,600x600 --threads 1,4,16` on the Xeon Platinum 8581C (GCC
+14.2.1, NumPy 2.3.5, `OPENBLAS_NUM_THREADS=1`;
+`EMC_SOURCES_XEON_8581C_RESULTS.json`), three layers, fully occupied, a via
+bank, random complex branch currents:
+
+| Branches | Python loop | NumPy indexing | C++ 1 / 4 / 16 threads | C++ over NumPy |
+|---:|---:|---:|---:|---:|
+| 59,761 | 34.4 ms | 9.0 ms | 8.5 / 8.5 / 9.1 ms | 1.00 to 1.07× |
+| 538,561 | 375.7 ms | 86.0 ms | 79.7 / 76.4 / 80.7 ms | 1.07 to 1.13× |
+| 2,156,761 | 1,665.0 ms | 436.5 ms | 402.4 / 380.1 / 377.7 ms | 1.08 to 1.16× |
+
+All three produce bit-identical positions and moments. The assembly is a
+gather of a few index arrays into two output arrays and is bound by memory
+traffic and by the `np.asarray` conversion of the mesh's branch lists, which
+the kernel needs as well; threads do not help it. **Decision:** the NumPy
+indexing form is the shipped path (`perf:` on the same branch, 3.8 to 4.4×
+over the loop); the C++ kernel is measured, not adopted, and exists only on
+the `exp/cpp-multiphysics-dc-emc` branch (tag `work/cpp-multiphysics-dc-emc`),
+together with its test and `experiments/emc_sources_benchmark.py`. The near
+and far fields above remain the parts of this package where C++ pays.
+
 ## Software boundary
 
 | Module | Responsibility |

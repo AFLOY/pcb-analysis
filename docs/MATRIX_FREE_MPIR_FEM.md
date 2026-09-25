@@ -421,6 +421,67 @@ extension is not packaged in the wheel and CUDA execution was not measured in
 this environment, so integration into `feature/` requires the packaging and
 CI work described in `AGENTS.md` before the default path changes.
 
+## Fused C++ host path for the layered DC conduction operator (measured on `exp/cpp-multiphysics-dc-emc`)
+
+The layered-PCB DC conduction operator (`MatrixFreePCBOperator`, the electrical
+half of the electro-thermal coupling) had only the NumPy path. `native=True`
+on the operator or on `solve_pcb_dc`, or `PCB_NATIVE_Q1=1` for the process,
+now selects `_layered_dc_native`, built together with the Maxwell kernel by
+`python -m electrical.matrix_free_mpir_fem.native.build`:
+
+- the float32 action as a node-owned gather over the two adjacent element
+  rows of the node's own layer (`low_operator_backend =
+  "cpp-fused-node-gather-layered-dc-q1"`);
+- the resistive via links as a node-owned adjacency in CSR form, each link
+  stored under both of its ends, so no thread writes another thread's node
+  and no atomics are needed;
+- the float64 action for the outer residual and the 27 coarse probes
+  (`high_operator_backend = "cpp-fused-node-gather-layered-dc-q1-fp64"`),
+  built before the two-level coarse space;
+- the whole inner PCG with the two-level preconditioner in one SPMD OpenMP
+  region, with the control flow of `solver._inner_pcg`.
+
+The corner weights are formed as `fl(fl(a U_x) + fl(b U_y))` with two
+separate roundings, like the NumPy path, so on a uniform grid the four
+weights an element row contributes to a constant vector cancel bit for bit.
+With `-O3 -march=native` GCC contracted the sum into an FMA, every element
+then left a bias of order `eps32 a` in the constant mode, and since a DC
+problem pins that mode only through its reference node the inner PCG spent
+its iterations on the bias (80,802 nodes: 159 inner iterations against 95).
+Contraction is off in the two gather functions; the float32 action then costs
+about 10 % more per call and the iteration histories are identical to the
+NumPy path.
+
+Measured with `experiments/dc_native_benchmark.py --sizes 100,200,320
+--threads 1,4,16` on the Xeon Platinum 8581C (GCC 14.2.1, NumPy 2.3.5,
+`OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`, `OMP_PLACES=cores`;
+`DC_NATIVE_XEON_8581C_RESULTS.json`). The board is 60 mm square, two copper
+layers joined by a via bank, a slot in the top layer, 10 A from the left edge
+of the top layer to the right edge of the bottom layer:
+
+| Nodes | Vias | Portable solve | Native solve 1 / 4 / 16 threads | Portable / native float32 action | Portable / native FP64 action | Construction portable / native | Inner iterations | Solution difference |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 20,402 | 144 | 52.1 ms | 45.3 (1.1×) / 12.0 (4.3×) / 4.9 ms (10.7×) | 0.405 / 0.048 ms | 0.725 / 0.068 ms | 328 / 309 ms | 60 / 60 | 5.6e-14 |
+| 80,802 | 144 | 242.7 ms | 133.6 (1.8×) / 36.3 (6.7×) / 13.7 ms (17.7×) | 1.516 / 0.201 ms | 3.288 / 0.290 ms | 591 / 548 ms | 95 / 95 | 1.2e-13 |
+| 206,082 | 120 | 903.6 ms | 317.9 (2.8×) / 82.5 (11.0×) / 28.6 ms (31.6×) | 5.169 / 0.464 ms | 11.055 / 0.679 ms | 851 / 632 ms | 134 / 134 | 3.3e-13 |
+
+Action times are at one thread; at sixteen threads the float32 action is
+0.013 to 0.041 ms and the FP64 action 0.016 to 0.058 ms. Construction is the
+27 FP64 coarse probes plus the dense coarse inverse; the inverse (NumPy
+`cholesky` and two triangular solves on a 1,352 to 1,800 square matrix)
+dominates it and is unchanged, which is why construction gains only 1.03 to
+1.35×.
+
+The benchmark's own criterion (at least 2× end to end on every case at the
+decision thread count, which is one) is not met: on one thread the smallest
+case gains 1.1×, because a 20k-node solve is 60 inner iterations of a 0.4 ms
+action against a 0.3 s construction that the solve time excludes but the
+Python-side loop does not. At four threads every case gains at least 4.3×
+and at sixteen at least 10.7×. Convergence outcomes are identical and the
+converged solutions agree to 3.3e-13. **Decision:** kept opt-in on the `exp/`
+branch as measured; the adoption question is the coupled solve below, which is
+what the operator is used for.
+
 ## Tenstorrent Blackhole migration
 
 The intended first Blackhole port keeps FP64 outer refinement on the host and
