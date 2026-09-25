@@ -429,6 +429,63 @@ Decision recorded in the JSON: the benchmark criteria (every case at least 2×
 on one thread, identical convergence outcome, converged solutions within 1e-6)
 are met.  The default stays the array path and one thread.
 
+### Native FP64 outer action (measured on `exp/cpp-thermal-fp64-residual`)
+
+With `native=True` the FP64 action also runs in C++. It is the same
+node-gather kernel, templated over float and double, with the same line
+partition and without FTZ/DAZ (`high_operator_backend =
+"cpp-fused-node-gather-hex-q1-fp64"`). It is built before the two-level
+coarse space, so two things use it:
+
+- the outer MPIR residual;
+- the 27 FP64 applications that assemble the coarse space.
+
+It matches the NumPy action to 2.0e-16. Measured with
+`experiments/thermal_native_benchmark.py --threads 1,4,8,16` on the Xeon
+Platinum 8581C (GCC 14.2.1, NumPy 2.3.5, `OMP_PROC_BIND=close`,
+`OMP_PLACES=cores`), before and after the change
+(`THERMAL_NATIVE_FP64_XEON_8581C_{BASELINE,CANDIDATE}_RESULTS.json`):
+
+| In-plane elements (nodes) | Threads | FP64 action before / after | Construction before / after | Solve before / after | Outer / inner before → after |
+|---|---:|---:|---:|---:|---:|
+| 50 (13,005) | 1 | 1.749 / 0.113 ms | 179 / 138 ms | 229.6 / 216.5 ms | 7 / 585 → 7 / 584 |
+| 50 (13,005) | 4 | 1.710 / 0.041 ms | 177 / 134 ms | 82.5 / 68.6 ms | 7 / 585 → 7 / 584 |
+| 50 (13,005) | 16 | 1.781 / 0.020 ms | 180 / 137 ms | 43.1 / 26.6 ms | 7 / 585 → 7 / 584 |
+| 100 (51,005) | 1 | 7.070 / 0.470 ms | 608 / 424 ms | 967.4 / 921.4 ms | 7 / 785 → 7 / 795 |
+| 100 (51,005) | 4 | 6.851 / 0.172 ms | 602 / 415 ms | 317.0 / 266.6 ms | 7 / 785 → 7 / 795 |
+| 100 (51,005) | 16 | 7.021 / 0.051 ms | 679 / 430 ms | 159.0 / 94.0 ms | 7 / 785 → 7 / 795 |
+| 200 (202,005) | 1 | 40.396 / 1.738 ms | 1,786 / 762 ms | 3,410.0 / 2,724.9 ms | 7 / 1015 → 6 / 891 |
+| 200 (202,005) | 4 | 42.157 / 0.545 ms | 1,844 / 743 ms | 1,196.9 / 763.2 ms | 7 / 1015 → 6 / 891 |
+| 200 (202,005) | 16 | 40.141 / 0.162 ms | 1,790 / 725 ms | 611.6 / 239.7 ms | 7 / 1015 → 6 / 891 |
+
+The iteration counts change because the coarse matrix is now assembled from
+the native action. Its entries differ from the NumPy assembly at the rounding
+level, and the dense coarse inverse amplifies the difference. On 202,005 nodes
+the solve then crosses the 1e-10 tolerance one outer step earlier (9.2e-11
+against about 1e-10). This is a threshold effect, not an algorithmic gain.
+
+A controlled run isolates the residual path
+(`THERMAL_NATIVE_FP64_XEON_8581C_CONTROLLED_RESULTS.json`). It uses one
+native operator, and so one coarse space, and toggles only the FP64 residual
+between NumPy and C++. The iteration counts are then equal:
+
+| Nodes | Threads | NumPy residual | Native residual | Outer / inner |
+|---:|---:|---:|---:|---:|
+| 51,005 | 1 | 971.8 ms | 918.5 ms | 7 / 795 |
+| 51,005 | 16 | 150.9 ms | 92.0 ms | 7 / 795 |
+| 202,005 | 1 | 2,934.0 ms | 2,708.9 ms | 6 / 890 (891 native) |
+| 202,005 | 16 | 534.0 ms | 242.5 ms | 6 / 890 (891 native) |
+
+At equal iterations the native residual saves 5 to 8 % on one thread and 1.6
+to 2.2 times on sixteen, where the single-threaded NumPy action had been half
+the solve. Construction, which includes the coarse assembly, is 1.3 to 2.5
+times faster at every thread count.
+
+The benchmark criteria hold: a speedup of at least 2× over the portable path,
+the same convergence outcome, and converged solutions within 2.7e-10 of the
+portable solve. **Decision:** adopted on the `exp/` branch. It remains opt-in
+through `native=True` / `PCB_NATIVE_THERMAL=1`.
+
 ## Electrothermal coupling
 
 `solve_pcb_dc` now reports `element_joule_loss_w` (the exact element

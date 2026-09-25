@@ -1,0 +1,95 @@
+{
+  "schema": "thermal-native-fp64-controlled/v1",
+  "environment": {
+    "platform": "Linux-6.12.0-55.103.1.el10_0.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.9",
+    "numpy": "2.3.5",
+    "cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.10GHz",
+    "cpu_count": 32,
+    "compiler": "g++ (GCC) 14.2.1 20250110 (Red Hat 14.2.1-7)",
+    "thread_sweep": [
+      1,
+      4,
+      8,
+      16
+    ],
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_PROC_BIND": "close",
+    "device": "cpu",
+    "measured_at": "2026-09-25T09:56:20+00:00"
+  },
+  "definitions": {
+    "setup": "one native=True operator per case (coarse space assembled by the native FP64 action); the solve is repeated with the FP64 outer residual on NumPy (native high path detached) and on the native path, 5 repeats, medians",
+    "config": "thermal_native_benchmark CONFIG, MPIRConfig(max_outer_iterations=16)"
+  },
+  "cases": {
+    "51005@1": {
+      "numpy_residual": {
+        "median_ms": 971.7670280001585,
+        "outer": 7,
+        "inner": 795,
+        "residual": 1.3576064326122047e-11,
+        "high_apps": 8
+      },
+      "native_residual": {
+        "median_ms": 918.5238969998863,
+        "outer": 7,
+        "inner": 795,
+        "residual": 1.1779203291898746e-11,
+        "high_apps": 8
+      }
+    },
+    "51005@16": {
+      "numpy_residual": {
+        "median_ms": 150.90300199972262,
+        "outer": 7,
+        "inner": 795,
+        "residual": 1.3576064326122047e-11,
+        "high_apps": 8
+      },
+      "native_residual": {
+        "median_ms": 91.9831430001068,
+        "outer": 7,
+        "inner": 795,
+        "residual": 1.1779203291898746e-11,
+        "high_apps": 8
+      }
+    },
+    "202005@1": {
+      "numpy_residual": {
+        "median_ms": 2934.029907999957,
+        "outer": 6,
+        "inner": 890,
+        "residual": 9.289774539248532e-11,
+        "high_apps": 7
+      },
+      "native_residual": {
+        "median_ms": 2708.858211000006,
+        "outer": 6,
+        "inner": 891,
+        "residual": 9.159519388550999e-11,
+        "high_apps": 7
+      }
+    },
+    "202005@16": {
+      "numpy_residual": {
+        "median_ms": 533.9659050000591,
+        "outer": 6,
+        "inner": 890,
+        "residual": 9.289774539248532e-11,
+        "high_apps": 7
+      },
+      "native_residual": {
+        "median_ms": 242.53302700026325,
+        "outer": 6,
+        "inner": 891,
+        "residual": 9.159519388550999e-11,
+        "high_apps": 7
+      }
+    }
+  },
+  "decision": {
+    "native_fp64_residual": "adopted on exp/cpp-thermal-fp64-residual (opt-in with native=True); adoption into main pending the user's decision",
+    "iteration_counts_equal": true
+  }
+}
