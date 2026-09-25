@@ -37,3 +37,5 @@ experiments/*
 !experiments/tensor_grid_acceptance.py
 !experiments/kicad_refinement_acceptance.py
 !experiments/sheet_pfft_acceptance.py
+!experiments/roofline_matrix_free.py
+!experiments/roofline_matrix_free.cpp
