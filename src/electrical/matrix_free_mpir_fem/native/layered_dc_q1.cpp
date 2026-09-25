@@ -90,7 +90,15 @@ struct LayeredOperatorT {
         return acc;
     }
 
-    // Generic gather for one node.
+    // The corner weights are formed as fl(fl(a U_x) + fl(b U_y)) with two
+    // separate roundings, like the NumPy path.  With one rounding (an FMA)
+    // the four weights a row of a uniform element contributes to a constant
+    // vector no longer cancel exactly, and every element then leaves a bias
+    // of order eps32 * a in the constant mode -- the one mode a DC problem
+    // pins only through its reference node, so the inner PCG would spend
+    // its iterations on rounding noise.  Contraction is therefore off in the
+    // two gather functions.
+    __attribute__((optimize("-ffp-contract=off")))
     T gather(const T* x, int l, int y, int xi) const {
         const int nr = node_rows(), nc = node_cols();
         const py::ssize_t node = (static_cast<py::ssize_t>(l) * nr + y) * nc + xi;
@@ -121,6 +129,7 @@ struct LayeredOperatorT {
     // adjacent element rows, unrolled over the two x-neighbour elements and
     // the four local columns, so the x-loop vectorises; the ends of the line
     // use the generic gather.
+    __attribute__((optimize("-ffp-contract=off")))
     void apply_lines(const T* x, T* out, int line_begin, int line_end) const {
         const int nr = node_rows(), nc = node_cols();
         for (int line = line_begin; line < line_end; ++line) {
