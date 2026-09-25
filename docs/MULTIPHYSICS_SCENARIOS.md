@@ -189,6 +189,87 @@ decade in field and that the FCC Class B limits at 3 m are read correctly.
   is the small in-plane variation, whose residual is accurate, and the solve
   finishes in a few more outer steps.
 
+## Fused C++ host paths in the coupled solve (measured on `exp/cpp-multiphysics-dc-emc`)
+
+`run_electro_thermal(native=, native_threads=)` hands one selection to both
+solvers, `solve_pcb_dc` and `solve_thermal_conduction`; `None` (the default)
+leaves each to its own flag, `PCB_NATIVE_Q1` and `PCB_NATIVE_THERMAL`. The
+coupling itself stays NumPy: the Joule-heat mapping, the ρ(T) update of the
+element conductivities and the Aitken fixed point are O(elements) array
+passes and do not show in a profile.
+
+### Where a coupled solve spends its time
+
+One case of the Kicad_PowerOpt thermal coupling (power_module, full-domain
+PGND copper on both layers, 201,248 electrical nodes, 0.1 mm grid, four
+staggered iterations, one thread) took 126.7 s on the NumPy paths, of which
+103.3 s (82 %) was the thermal `apply_low` (`_stiffness_action`), 14.7 s the
+two two-level preconditioner constructions per iteration (27 FP64 probes and
+the dense coarse inverse, electrical and thermal), 8.5 s the electrical DC
+solves and 4.4 s the dense coarse solves. The thermal action already had its
+opt-in C++ path; the DC operator did not (see `MATRIX_FREE_MPIR_FEM.md`).
+
+### pcb-analysis benchmark
+
+`experiments/electrothermal_native_benchmark.py --sizes 100,200,320
+--threads 1,4,16 --repeats 3` on the Xeon Platinum 8581C (GCC 14.2.1, NumPy
+2.3.5, `OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`, `OMP_PLACES=cores`;
+`ELECTROTHERMAL_NATIVE_XEON_8581C_RESULTS.json`). The board of the DC
+benchmark on a three-slab thermal stack (35 µm copper, 1.5 mm laminate,
+35 µm copper), 10 W/m²/K on both faces, ρ(T) copper, 10 A. One whole
+`run_electro_thermal`, every solve and every operator construction included,
+both solvers portable against both native:
+
+| Electrical / thermal nodes | Portable | Native 1 / 4 / 16 threads | Coupling iterations | Temperature difference (of the rise) |
+|---:|---:|---:|---:|---:|
+| 20,402 / 40,804 | 12.3 s | 7.7 (1.6×) / 4.9 (2.5×) / 4.2 s (2.9×) | 4 | 2.5e-11 |
+| 80,802 / 161,604 | 42.3 s | 11.9 (3.6×) / 7.1 (6.0×) / 5.7 s (7.5×) | 4 | 1.1e-10 |
+| 206,082 / 412,164 | 118.0 s | 19.9 (5.9×) / 10.6 (11.2×) / 8.0 s (14.7×) | 4 | 1.1e-10 |
+
+The Joule losses agree to 8e-13 and the temperatures to 1.1e-10 of the rise.
+At sixteen threads the remaining 4 to 8 s is dominated by the preconditioner
+constructions (eight per coupled solve, each with a dense inverse of a 1,352
+to 1,800 square coarse matrix) and by the FP64 residual work the outer MPIR
+loops do in NumPy. The benchmark's own criterion (at least 2× on every case
+at one thread) misses on the smallest case (1.6×) for the same reason; from
+four threads on every case gains at least 2.5×.
+
+### Kicad_PowerOpt system benchmark
+
+The consumer of this path is Kicad_PowerOpt's thermal coupling
+(`plane_opt.physics.electro_thermal`, `thermal_coupling.enabled`). The whole
+adopted pipeline was run twice on the same host and the same inputs
+(`KICAD_POWEROPT_SYSTEM_BENCHMARK_XEON_8581C_RESULTS.json`): Kicad_PowerOpt
+`origin/main` `d25c11e` (pcb-analysis 0.9 names), board `power_module`, the
+board's settings plus `thermal_coupling.enabled`, `geometry_interface.
+authoritative = "grid"` (the STEP default needs `kicad-cli`, absent here),
+`sheet_peec` current field, one bootstrap order, 03 skipped, physics and
+contour workers in parallel, `OPENBLAS_NUM_THREADS=1`.
+
+| pcb-analysis | Native flags | Wall | User CPU | Thermal coupling, 9 cases standalone |
+|---|---|---:|---:|---:|
+| `main` `00e4491` (0.9.0), no extension built | none | 1,895 s | 4,275 s | 177.1 s |
+| `exp/cpp-multiphysics-dc-emc` `836b144`, all extensions built | `PCB_NATIVE_Q1=1 PCB_NATIVE_THERMAL=1 PCB_NATIVE_EMC=1 PCB_NATIVE_THREADS=3` | 1,551 s | 3,132 s | 21.7 s |
+| same, thermal kernel only | `PCB_NATIVE_THERMAL=1 PCB_NATIVE_THREADS=3` | — | — | 27.2 s |
+
+The 9-case column is `evaluate_thermal_coupling` on the full-domain copper of
+every role with the run's own thread pool (nine scenario threads, three
+OpenMP threads each on the 32-core host); the pipeline evaluates it more than
+once per candidate, which accounts for the 344 s the run saved. The two runs
+reach the same candidate: the same masks and areas, the same 9-case
+authoritative ratios (maximum 4.2668, voltage 3.4186), the same coupling
+iteration counts, and a hottest rise of 0.67018 K in both to 1e-10. Kicad_
+PowerOpt does not call the emc package, so `PCB_NATIVE_EMC` had no effect
+there. The run before the FMA fix of the DC kernel took 1,546 s with 10 to
+25 % more electrical inner iterations; it is kept out of the record because
+its DC path was not the one shipped.
+
+**Decision:** the coupled path is 2.5 to 14.7× faster from four threads on
+and the consumer's thermal coupling 8.2× faster at its own thread layout,
+with the same results. Both kernels stay opt-in through `native=True` or
+their environment flags; adoption into `main` is a separate `feature/`
+step.
+
 ## Limitations
 
 - The thermal feedback is through copper resistivity only. Laminate

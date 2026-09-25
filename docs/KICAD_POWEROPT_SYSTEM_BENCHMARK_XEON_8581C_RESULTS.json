@@ -1,0 +1,78 @@
+{
+  "schema": "kicad-poweropt-system-benchmark/v1",
+  "measured_at": "2026-09-25",
+  "purpose": "whole adopted Kicad_PowerOpt pipeline on power_module with pcb-analysis main against the exp/cpp-multiphysics-dc-emc branch; the consumer-side measurement of the fused C++ paths of the electro-thermal coupling",
+  "environment": {
+    "host_cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.10GHz",
+    "cpu_count": 32,
+    "device": "cpu",
+    "python": "3.12.9",
+    "numpy": "2.3.5",
+    "compiler": "g++ (GCC) 14.2.1 20250110 (Red Hat 14.2.1-7)",
+    "kicad_poweropt": {
+      "commit": "d25c11e07f6cd3516fecdbd84a72097b4253336a",
+      "ref": "origin/main as cached on 2026-09-25 (fetch unavailable, remote may be ahead)",
+      "plane_opt_native_kernels": "not built (python) in both runs",
+      "pcb_analysis_pin": ">=0.9.0,<0.10"
+    },
+    "command": "python -m plane_opt.application.run --root . --results-root <run> --boards power_module --board-settings-dir work/bench/settings --skip-kicad-validate --kicad-cli <stub that exits 1> --bootstrap-orders 1 --parallel-physics-scenarios --parallel-multiscale-contours --copper-parasitics screen --radiation-report screen --keep-previous-runs",
+    "board_settings": "board/power_module/.plane_opt/board.json plus thermal_coupling {enabled: true, gate: report} and geometry_interface {authoritative: grid}",
+    "geometry_interface_note": "the STEP default needs kicad-cli for the fixed-world export; kicad-cli is absent on this host so the grid interface was selected per board",
+    "kicad_validate": "skipped (kicad-cli absent); the run therefore reports the 03 stage as failed and exits 2 in both cases",
+    "common_env": {"OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"},
+    "hardware_counters": "unavailable (KVM guest); wall, user and sys from bash time",
+    "runs_serialised": "no other benchmark ran during either run"
+  },
+  "runs": {
+    "baseline": {
+      "pcb_analysis": {"ref": "main", "commit": "00e4491", "version": "0.9.0", "native_extensions_built": false},
+      "native_flags": {},
+      "run_id": "20260925T104303Z-408664e",
+      "wall_s": 1894.976,
+      "user_s": 4274.922,
+      "sys_s": 217.278,
+      "stopped_reason": "single_cycle_candidate_ready_for_kicad_validation",
+      "final_evaluation": {"maximum_ratio": 4.266790222608109, "worst_voltage_ratio": 3.418575009417803, "hottest_rise_k": 0.6701795292572683, "mean_rise_k": 0.2981518407689805, "coupling_iterations": [4, 4, 4, 4, 4, 4, 4, 4, 4], "electrical_inner_iterations_per_case": [216, 244, 204, 229, 238, 269, 381, 302, 346]},
+      "final_area_mm2": {"PGND": 114.0, "SW": 225.84, "VIN": 129.84, "VOUT": 97.04}
+    },
+    "candidate": {
+      "pcb_analysis": {"ref": "exp/cpp-multiphysics-dc-emc", "commit": "836b144", "version": "0.9.0", "native_extensions_built": ["_scalar_maxwell_native", "_layered_dc_native", "_thermal_native", "_dipole_native", "_sheet_pfft_native", "_voxelize_native"]},
+      "native_flags": {"PCB_NATIVE_Q1": "1", "PCB_NATIVE_THERMAL": "1", "PCB_NATIVE_EMC": "1", "PCB_NATIVE_THREADS": "3"},
+      "thread_layout": "nine scenario threads (physics_scenario_workers auto) times three OpenMP threads per native call on 32 cores",
+      "run_id": "20260925T122915Z-408664e",
+      "wall_s": 1550.927,
+      "user_s": 3131.507,
+      "sys_s": 77.783,
+      "stopped_reason": "single_cycle_candidate_ready_for_kicad_validation",
+      "final_evaluation": {"maximum_ratio": 4.266790222608109, "worst_voltage_ratio": 3.418575009417803, "hottest_rise_k": 0.6701795291106691, "mean_rise_k": 0.2981518407528559, "coupling_iterations": [4, 4, 4, 4, 4, 4, 4, 4, 4], "electrical_inner_iterations_per_case": [216, 244, 204, 229, 238, 269, 348, 301, 346]},
+      "final_area_mm2": {"PGND": 114.0, "SW": 225.84, "VIN": 129.84, "VOUT": 97.04},
+      "notes": ["the sheet PEEC current field runs the uniform-grid convolution operator, not the pFFT operator, so _sheet_pfft_native is not exercised", "Kicad_PowerOpt does not import the emc package, so PCB_NATIVE_EMC has no effect in this run", "geometry native kernels are only used by the STEP interface, which was off"]
+    },
+    "candidate_before_fma_fix": {
+      "pcb_analysis": {"ref": "exp/cpp-multiphysics-dc-emc", "commit": "01f9337"},
+      "wall_s": 1545.61,
+      "user_s": 3122.423,
+      "sys_s": 66.985,
+      "electrical_inner_iterations_per_case": [262, 255, 220, 242, 247, 271, 422, 380, 425],
+      "note": "same results; excluded from the decision because its DC kernel formed the corner weights with an FMA and is not the shipped one (see MATRIX_FREE_MPIR_FEM.md)"
+    }
+  },
+  "thermal_coupling_standalone": {
+    "definition": "evaluate_thermal_coupling on the full-domain copper of every role, 9 configured cases, physics_scenario_workers auto (9), 0.1 mm grid, same overlay as the run; wall time of the call",
+    "baseline_main_numpy_s": 177.067,
+    "candidate_all_natives_t3_s": 21.707,
+    "candidate_thermal_native_only_t3_s": 27.240,
+    "speedup_all_natives": 8.16,
+    "dc_native_share_of_the_gain": "5.5 s of the 27.2 s thermal-only time",
+    "all_converged": true,
+    "worst_rise_k": 0.19878,
+    "single_case_profile_numpy_one_thread": {"case": "pgnd_input_cap_return_2a", "electrical_nodes": 201248, "wall_s": 126.7, "thermal_stiffness_action_s": 103.3, "two_level_construction_s": 14.7, "dc_solves_s": 8.5, "dense_coarse_solves_s": 4.4}
+  },
+  "decision": {
+    "adopted": true,
+    "criteria": "same candidate (masks, areas, all-case ratios, thermal rise) from both runs and a shorter wall time with no other benchmark running",
+    "wall_speedup": 1.222,
+    "thermal_coupling_speedup": 8.16,
+    "scope": "kept opt-in through native=True or the PCB_NATIVE_* flags on the exp branch; merging into pcb-analysis main is a separate feature/ step, and Kicad_PowerOpt passes no native arguments itself"
+  }
+}
