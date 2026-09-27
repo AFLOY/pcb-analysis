@@ -50,8 +50,19 @@ function(pcb_native_module name package_dir)
   target_compile_options(${name} PRIVATE
     -O3 -fcx-limited-range -fno-math-errno -DNDEBUG)
   if(PCB_NATIVE_MARCH)
-    target_compile_options(${name} PRIVATE
-      "-march=${PCB_NATIVE_MARCH}" -mprefer-vector-width=512)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+      # -march on AArch64 selects features only; -mcpu also tunes.
+      if(PCB_NATIVE_MARCH STREQUAL "native")
+        target_compile_options(${name} PRIVATE -mcpu=native)
+      else()
+        target_compile_options(${name} PRIVATE "-march=${PCB_NATIVE_MARCH}")
+      endif()
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|i.86)$")
+      target_compile_options(${name} PRIVATE
+        "-march=${PCB_NATIVE_MARCH}" -mprefer-vector-width=512)
+    else()
+      target_compile_options(${name} PRIVATE "-march=${PCB_NATIVE_MARCH}")
+    endif()
   endif()
   if(PCB_NATIVE_OPENMP)
     target_link_libraries(${name} PRIVATE OpenMP::OpenMP_CXX)

@@ -21,7 +21,9 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+#if defined(__x86_64__) || defined(__i386__)
 #include <xmmintrin.h>
+#endif
 
 namespace py = pybind11;
 
@@ -172,16 +174,34 @@ struct Q1Operator {
 // Flush subnormal complex64 values to zero for the duration of a native call.
 // The low-precision correction is only an approximation refined by the FP64
 // outer residual, and subnormal operands make FP32 SIMD arithmetic tens of
-// times slower.  The previous MXCSR state is restored on exit.
+// times slower.  The previous MXCSR (x86) or FPCR (AArch64) state is restored
+// on exit.
 class FlushSubnormals {
    public:
+#if defined(__x86_64__) || defined(__i386__)
+    // MXCSR FTZ (bit 15) and DAZ (bit 6).
     FlushSubnormals() : saved_(_mm_getcsr()) { _mm_setcsr(saved_ | 0x8040u); }
     ~FlushSubnormals() { _mm_setcsr(saved_); }
+#elif defined(__aarch64__)
+    // FPCR FZ (bit 24) flushes subnormal inputs and results of FP32/FP64.
+    FlushSubnormals() {
+        asm volatile("mrs %0, fpcr" : "=r"(saved_));
+        const std::uint64_t flushed = saved_ | (std::uint64_t{1} << 24);
+        asm volatile("msr fpcr, %0" : : "r"(flushed));
+    }
+    ~FlushSubnormals() { asm volatile("msr fpcr, %0" : : "r"(saved_)); }
+#else
+    FlushSubnormals() = default;
+#endif
     FlushSubnormals(const FlushSubnormals&) = delete;
     FlushSubnormals& operator=(const FlushSubnormals&) = delete;
 
    private:
-    unsigned int saved_;
+#if defined(__aarch64__)
+    std::uint64_t saved_ = 0;
+#else
+    unsigned int saved_ = 0;
+#endif
 };
 
 template <typename T>
@@ -410,7 +430,7 @@ py::tuple gmres_q1(ArrC128 rhs_high, ArrC64 diagonal, ArrC64 inverse_mu, ArrC64 
 
 #pragma omp parallel num_threads(team) if (team > 1)
         {
-            FlushSubnormals flush;  // MXCSR is per thread
+            FlushSubnormals flush;  // MXCSR / FPCR is per thread
 #ifdef _OPENMP
             const int tid = omp_get_thread_num();
             const int nt = omp_get_num_threads();

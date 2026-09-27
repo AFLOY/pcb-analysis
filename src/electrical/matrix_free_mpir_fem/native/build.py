@@ -10,10 +10,22 @@ modules pass their own source file and module name.
 from __future__ import annotations
 
 import argparse
+import platform
 import subprocess
 import sys
 import sysconfig
 from pathlib import Path
+
+
+def _isa_flags() -> list[str]:
+    """Host ISA flags: AVX-512-wide vectors on x86, CPU tuning on AArch64."""
+
+    machine = platform.machine().lower()
+    if machine in {"aarch64", "arm64"}:
+        return ["-mcpu=native"]
+    if machine in {"x86_64", "amd64", "i386", "i686"}:
+        return ["-march=native", "-mprefer-vector-width=512"]
+    return ["-march=native"]
 
 
 def compile_extension(
@@ -33,8 +45,7 @@ def compile_extension(
     command = [
         "g++",
         "-O3",
-        "-march=native",
-        "-mprefer-vector-width=512",
+        *_isa_flags(),
         "-fcx-limited-range",
         "-fno-math-errno",
         "-std=c++17",

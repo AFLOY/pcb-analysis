@@ -22,7 +22,9 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+#if defined(__x86_64__) || defined(__i386__)
 #include <xmmintrin.h>
+#endif
 
 namespace py = pybind11;
 
@@ -36,13 +38,30 @@ using Arr = py::array_t<T, py::array::c_style | py::array::forcecast>;
 
 class FlushSubnormals {
    public:
+#if defined(__x86_64__) || defined(__i386__)
+    // MXCSR FTZ (bit 15) and DAZ (bit 6).
     FlushSubnormals() : saved_(_mm_getcsr()) { _mm_setcsr(saved_ | 0x8040u); }
     ~FlushSubnormals() { _mm_setcsr(saved_); }
+#elif defined(__aarch64__)
+    // FPCR FZ (bit 24) flushes subnormal inputs and results of FP32/FP64.
+    FlushSubnormals() {
+        asm volatile("mrs %0, fpcr" : "=r"(saved_));
+        const std::uint64_t flushed = saved_ | (std::uint64_t{1} << 24);
+        asm volatile("msr fpcr, %0" : : "r"(flushed));
+    }
+    ~FlushSubnormals() { asm volatile("msr fpcr, %0" : : "r"(saved_)); }
+#else
+    FlushSubnormals() = default;
+#endif
     FlushSubnormals(const FlushSubnormals&) = delete;
     FlushSubnormals& operator=(const FlushSubnormals&) = delete;
 
    private:
-    unsigned int saved_;
+#if defined(__aarch64__)
+    std::uint64_t saved_ = 0;
+#else
+    unsigned int saved_ = 0;
+#endif
 };
 
 template <typename T, int F>
@@ -227,7 +246,7 @@ ArrF32 apply_hex_q1(ArrF32 vector, ArrF32 coef, ArrF32 unit,
 
 // y = A x in float64 for the outer MPIR residual (and the coarse-space
 // assembly of the two-level preconditioner).  Same node-owned gather and line
-// partition as the float32 path; the MXCSR is left untouched so FP64
+// partition as the float32 path; the FP control register is left untouched so FP64
 // subnormals keep IEEE semantics.
 ArrF64 apply_hex_q1_f64(ArrF64 vector, ArrF64 coef, ArrF64 unit, ArrF64 robin,
                         ArrU8 free_nodes, ArrF64 free_mask, int slabs, int rows, int cols,
