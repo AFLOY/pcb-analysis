@@ -510,6 +510,34 @@ smaller cases; the one-thread iteration was not broken down on this host. Scalin
 and at 32 threads the solve is faster than the Xeon at 16 (23.0 / 74.0 /
 218.4 ms against 26.6 / 94.0 / 239.7 ms). **Decision:** unchanged (opt-in).
 
+### Core i7-14700KF (hybrid x86)
+
+`experiments/thermal_native_benchmark.py --threads 1,2,4,8,16,20` on
+an Intel Core i7-14700KF desktop (20 physical cores: 8 P-cores with two
+hyper-threads each and 12 E-cores, 28 logical CPUs; AVX2, no AVX-512), RHEL 10.2,
+GCC 14.3.1 (`-O3 -march=native -mprefer-vector-width=512`), NumPy 2.3.5,
+Python 3.12.12, `OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`,
+`OMP_PLACES=cores`, at most one thread per physical core (1 to 8 threads run
+on the P-cores, 16 on 8 P + 8 E, 20 on every core; no hyper-thread sibling is
+used), runs sequential, source `b65d700`
+(`THERMAL_NATIVE_I7_14700KF_RESULTS.json`; the FP64 native action is in the
+measured path). Solve without construction, NumPy ratio in brackets:
+
+| Nodes | Portable | Native 1 / 4 / 8 / 16 / 20 threads | Native FP64 action 1 / 8 / 20 threads | Inner iterations portable / native | Xeon native 1 / 8 / 16 threads |
+|---:|---:|---:|---:|---:|---:|
+| 13,005 | 535.7 ms | 218.7 (2.45×) / 66.0 (8.12×) / 39.1 (13.70×) / 50.5 (10.60×) / 49.6 ms (10.81×) | 0.115 / 0.024 / 0.030 ms | 586 / 585 | 216.5 / 38.7 / 26.6 ms |
+| 51,005 | 2,179.9 ms | 922.1 (2.36×) / 255.1 (8.54×) / 136.0 (16.03×) / 156.7 (13.91×) / 136.5 ms (15.97×) | 0.431 / 0.074 / 0.087 ms | 805 / 786 | 921.4 / 149.1 / 94.0 ms |
+| 202,005 | 9,888.5 ms | 2,473.9 (4.00×) / 673.2 (14.69×) / 351.1 (28.17×) / 409.0 (24.18×) / 342.1 ms (28.90×) | 1.642 / 0.280 / 0.308 ms | 1025 / 890 | 2,724.9 / 402.7 / 239.7 ms |
+
+Construction is 82 to 85 / 294 to 306 / 549 to 592 ms native (NumPy 118 / 410 /
+1,074 ms). Converged solutions agree with NumPy to 2.7e-10. One thread is
+within 1 % of the Xeon on the two smaller cases and 9 % faster on the largest,
+and the criteria are met on every case (minimum 2.36×). The eight P-cores give
+the fastest or nearly fastest solve (39.1 / 136.0 / 351.1 ms, within 1 % of or
+below the Xeon at eight threads); 16 threads, which add eight E-cores, are 15
+to 29 % slower than eight, and 20 threads only recover the
+eight-thread time on the two larger cases. **Decision:** unchanged (opt-in).
+
 ## Electrothermal coupling
 
 `solve_pcb_dc` now reports `element_joule_loss_w` (the exact element

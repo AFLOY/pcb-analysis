@@ -183,6 +183,26 @@ C++ times per thread are within 20 % of the Xeon. The direct sum scales
 linearly to 32 cores. Criteria met. **Decision:** unchanged, the default stays
 the array path.
 
+On an Intel Core i7-14700KF desktop (20 physical cores: 8 P-cores with two
+hyper-threads each and 12 E-cores, 28 logical CPUs; AVX2, no AVX-512), RHEL 10.2,
+GCC 14.3.1 (`-O3 -march=native -mprefer-vector-width=512`), NumPy 2.3.5,
+Python 3.12.12, `OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`,
+`OMP_PLACES=cores`, at most one thread per physical core (1 to 8 threads run
+on the P-cores, 16 on 8 P + 8 E, 20 on every core; no hyper-thread sibling is
+used), runs sequential, source `b65d700`
+(`EMC_NATIVE_I7_14700KF_RESULTS.json`):
+
+| Sources | Points | Array near field | C++ 1 thread | 4 | 8 | 16 | 20 | Array far field | C++ 1 thread | 16 | 20 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2,000 | 1,764 | 789 ms | 68 ms (11.6×) | 17 ms | 8.8 ms | 9.5 ms | 7.1 ms (111×) | 59 ms | 31 ms (1.9×) | 5.6 ms | 4.7 ms (12.5×) |
+| 8,000 | 4,096 | 7,323 ms | 633 ms (11.6×) | 161 ms | 80 ms | 80 ms | 64 ms (114×) | 258 ms | 128 ms (2.0×) | 20 ms | 17 ms (15.4×) |
+
+Agreement 3.1e-15. A P-core runs the direct sum 1.5× faster than a Xeon core
+(633 against 932 ms). The sum scales linearly on the eight P-cores; 16 threads
+are no faster than eight, since the static split waits for the E-cores, and
+20 threads gain 20 %. Criteria met. **Decision:** unchanged, the default
+stays the array path.
+
 ### Current elements from a sheet-PEEC solve (measured on `exp/cpp-multiphysics-dc-emc`)
 
 `dipoles_from_sheet_peec` assembled one Python tuple per branch. A plane at
