@@ -1,0 +1,419 @@
+{
+  "schema": "emc-native-benchmark/v1",
+  "measured_at": "2026-09-27T17:04:54+00:00",
+  "environment": {
+    "platform": "Linux-7.0.0-1011-gcp-aarch64-with-glibc2.39",
+    "python": "3.12.3",
+    "numpy": "2.3.5",
+    "cpu": "Neoverse-V2 (aarch64)",
+    "cpu_count": 32,
+    "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "thread_sweep": [
+      1,
+      4,
+      8,
+      16,
+      32
+    ],
+    "OPENBLAS_NUM_THREADS": "1",
+    "device": "cpu",
+    "cpu_note": "recorded as 'aarch64' by the run (platform.processor(); /proc/cpuinfo has no model name on AArch64); filled from lscpu when promoted to docs/",
+    "host": "Google Axion, GCE c4a-highcpu-32 (32 cores, no SMT, 64 GB), SVE2 128-bit vector length, Ubuntu 24.04",
+    "native_build_flags": "-fopenmp -O3 -mcpu=native -fcx-limited-range -fno-math-errno",
+    "run_env": {
+      "OPENBLAS_NUM_THREADS": "1",
+      "OMP_PROC_BIND": "close",
+      "OMP_PLACES": "cores",
+      "runs_serialised": "one benchmark at a time, no other load"
+    },
+    "source_commit": "6a9bf06 (fix/native-aarch64)"
+  },
+  "definitions": {
+    "timing": "wall time of evaluate_fields (electric and magnetic) and far_field_pattern; complex128 on both paths",
+    "speedup": "array-path median divided by native median",
+    "frequency_hz": 300000000.0,
+    "native_path": "direct pairwise summation in C++, threads own disjoint observation points",
+    "decision_threads": "the first thread count in the sweep"
+  },
+  "cases": [
+    {
+      "sources": 2000,
+      "points": 1764,
+      "directions": 2048,
+      "pairs_near": 3528000,
+      "array_near_field_ms": {
+        "median_ms": 705.7605830000284,
+        "minimum_ms": 705.0255919998563,
+        "maximum_ms": 706.2344349997147,
+        "samples_ms": [
+          705.0255919998563,
+          705.7605830000284,
+          706.2344349997147
+        ],
+        "repeats": 3
+      },
+      "array_far_field_ms": {
+        "median_ms": 83.94632499994259,
+        "minimum_ms": 83.88835400000971,
+        "maximum_ms": 84.08721399973729,
+        "samples_ms": [
+          83.88835400000971,
+          84.08721399973729,
+          83.94632499994259
+        ],
+        "repeats": 3
+      },
+      "array_radiated_power_w": 2.528705210858176,
+      "native_by_threads": {
+        "1": {
+          "threads": 1,
+          "near_field_ms": {
+            "median_ms": 119.1991290002079,
+            "minimum_ms": 119.17316300014136,
+            "maximum_ms": 119.2010259997005,
+            "samples_ms": [
+              119.2010259997005,
+              119.1991290002079,
+              119.17316300014136
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 53.73623500008762,
+            "minimum_ms": 53.67649000027086,
+            "maximum_ms": 53.81246499973713,
+            "samples_ms": [
+              53.81246499973713,
+              53.73623500008762,
+              53.67649000027086
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 5.9208535240118865,
+          "far_speedup_vs_array": 1.5621921595326824,
+          "relative_error_magnetic": 3.16826628551655e-16,
+          "relative_error_electric": 3.5847815408448535e-16,
+          "relative_error_far_field": 2.1146561805932674e-15,
+          "radiated_power_w": 2.5287052108581762
+        },
+        "4": {
+          "threads": 4,
+          "near_field_ms": {
+            "median_ms": 30.04155400003583,
+            "minimum_ms": 30.03896199970768,
+            "maximum_ms": 30.056227999921248,
+            "samples_ms": [
+              30.056227999921248,
+              30.03896199970768,
+              30.04155400003583
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 14.296834000106173,
+            "minimum_ms": 14.286122000157775,
+            "maximum_ms": 14.347181000175624,
+            "samples_ms": [
+              14.347181000175624,
+              14.296834000106173,
+              14.286122000157775
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 23.492812089520623,
+          "far_speedup_vs_array": 5.871672357622616,
+          "relative_error_magnetic": 3.16826628551655e-16,
+          "relative_error_electric": 3.5847815408448535e-16,
+          "relative_error_far_field": 2.1146561805932674e-15,
+          "radiated_power_w": 2.5287052108581762
+        },
+        "8": {
+          "threads": 8,
+          "near_field_ms": {
+            "median_ms": 15.071153000008053,
+            "minimum_ms": 15.066025000123773,
+            "maximum_ms": 15.092127000116307,
+            "samples_ms": [
+              15.092127000116307,
+              15.071153000008053,
+              15.066025000123773
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 7.53686000007292,
+            "minimum_ms": 7.515318000059779,
+            "maximum_ms": 7.5756460000775405,
+            "samples_ms": [
+              7.5756460000775405,
+              7.515318000059779,
+              7.53686000007292
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 46.82857263804908,
+          "far_speedup_vs_array": 11.138103268354513,
+          "relative_error_magnetic": 3.16826628551655e-16,
+          "relative_error_electric": 3.5847815408448535e-16,
+          "relative_error_far_field": 2.1146561805932674e-15,
+          "radiated_power_w": 2.5287052108581762
+        },
+        "16": {
+          "threads": 16,
+          "near_field_ms": {
+            "median_ms": 7.578202999866335,
+            "minimum_ms": 7.570817000214447,
+            "maximum_ms": 7.590170000185026,
+            "samples_ms": [
+              7.590170000185026,
+              7.578202999866335,
+              7.570817000214447
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 4.123345000152767,
+            "minimum_ms": 4.113917999802652,
+            "maximum_ms": 4.141632000028039,
+            "samples_ms": [
+              4.123345000152767,
+              4.113917999802652,
+              4.141632000028039
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 93.13033485807608,
+          "far_speedup_vs_array": 20.358792435954893,
+          "relative_error_magnetic": 3.16826628551655e-16,
+          "relative_error_electric": 3.5847815408448535e-16,
+          "relative_error_far_field": 2.1146561805932674e-15,
+          "radiated_power_w": 2.5287052108581762
+        },
+        "32": {
+          "threads": 32,
+          "near_field_ms": {
+            "median_ms": 3.832382999917172,
+            "minimum_ms": 3.8290289999167726,
+            "maximum_ms": 3.8544280000678555,
+            "samples_ms": [
+              3.8544280000678555,
+              3.832382999917172,
+              3.8290289999167726
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 2.473843999723613,
+            "minimum_ms": 2.44379299965658,
+            "maximum_ms": 2.4866080002539093,
+            "samples_ms": [
+              2.473843999723613,
+              2.4866080002539093,
+              2.44379299965658
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 184.1571113887317,
+          "far_speedup_vs_array": 33.933556444675325,
+          "relative_error_magnetic": 3.16826628551655e-16,
+          "relative_error_electric": 3.5847815408448535e-16,
+          "relative_error_far_field": 2.1146561805932674e-15,
+          "radiated_power_w": 2.5287052108581762
+        }
+      }
+    },
+    {
+      "sources": 8000,
+      "points": 4096,
+      "directions": 2048,
+      "pairs_near": 32768000,
+      "array_near_field_ms": {
+        "median_ms": 6284.647604999918,
+        "minimum_ms": 6275.0049020000915,
+        "maximum_ms": 6306.707663999987,
+        "samples_ms": [
+          6275.0049020000915,
+          6284.647604999918,
+          6306.707663999987
+        ],
+        "repeats": 3
+      },
+      "array_far_field_ms": {
+        "median_ms": 338.5710550001022,
+        "minimum_ms": 338.529636000203,
+        "maximum_ms": 340.5661780002447,
+        "samples_ms": [
+          340.5661780002447,
+          338.529636000203,
+          338.5710550001022
+        ],
+        "repeats": 3
+      },
+      "array_radiated_power_w": 17.55623239296048,
+      "native_by_threads": {
+        "1": {
+          "threads": 1,
+          "near_field_ms": {
+            "median_ms": 1107.0648300001267,
+            "minimum_ms": 1106.7299970000022,
+            "maximum_ms": 1107.1798279999712,
+            "samples_ms": [
+              1106.7299970000022,
+              1107.0648300001267,
+              1107.1798279999712
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 219.15422600022794,
+            "minimum_ms": 218.95950299995093,
+            "maximum_ms": 219.24223499991058,
+            "samples_ms": [
+              218.95950299995093,
+              219.15422600022794,
+              219.24223499991058
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 5.676855984124434,
+          "far_speedup_vs_array": 1.5448985911855064,
+          "relative_error_magnetic": 3.5839130941557743e-16,
+          "relative_error_electric": 3.297458056206469e-16,
+          "relative_error_far_field": 3.0959909669373184e-15,
+          "radiated_power_w": 17.55623239296048
+        },
+        "4": {
+          "threads": 4,
+          "near_field_ms": {
+            "median_ms": 278.81838999974207,
+            "minimum_ms": 278.7917559999187,
+            "maximum_ms": 278.8271449999229,
+            "samples_ms": [
+              278.8271449999229,
+              278.81838999974207,
+              278.7917559999187
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 55.79116599983536,
+            "minimum_ms": 55.77526500019303,
+            "maximum_ms": 55.83496799999921,
+            "samples_ms": [
+              55.83496799999921,
+              55.77526500019303,
+              55.79116599983536
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 22.54029085027617,
+          "far_speedup_vs_array": 6.06854237463152,
+          "relative_error_magnetic": 3.5839130941557743e-16,
+          "relative_error_electric": 3.297458056206469e-16,
+          "relative_error_far_field": 3.0959909669373184e-15,
+          "radiated_power_w": 17.55623239296048
+        },
+        "8": {
+          "threads": 8,
+          "near_field_ms": {
+            "median_ms": 139.43781299985858,
+            "minimum_ms": 139.43101499990007,
+            "maximum_ms": 139.44500500019785,
+            "samples_ms": [
+              139.44500500019785,
+              139.43781299985858,
+              139.43101499990007
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 28.303024000251753,
+            "minimum_ms": 28.278728000259434,
+            "maximum_ms": 28.31924900010563,
+            "samples_ms": [
+              28.31924900010563,
+              28.278728000259434,
+              28.303024000251753
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 45.071329432040734,
+          "far_speedup_vs_array": 11.962363279524148,
+          "relative_error_magnetic": 3.5839130941557743e-16,
+          "relative_error_electric": 3.297458056206469e-16,
+          "relative_error_far_field": 3.0959909669373184e-15,
+          "radiated_power_w": 17.55623239296048
+        },
+        "16": {
+          "threads": 16,
+          "near_field_ms": {
+            "median_ms": 69.75180299968997,
+            "minimum_ms": 69.74481199995353,
+            "maximum_ms": 69.80250100014018,
+            "samples_ms": [
+              69.80250100014018,
+              69.75180299968997,
+              69.74481199995353
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 14.552843999808829,
+            "minimum_ms": 14.546538000104192,
+            "maximum_ms": 14.570790000107081,
+            "samples_ms": [
+              14.546538000104192,
+              14.570790000107081,
+              14.552843999808829
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 90.10014558373283,
+          "far_speedup_vs_array": 23.264940859982406,
+          "relative_error_magnetic": 3.5839130941557743e-16,
+          "relative_error_electric": 3.297458056206469e-16,
+          "relative_error_far_field": 3.0959909669373184e-15,
+          "radiated_power_w": 17.55623239296048
+        },
+        "32": {
+          "threads": 32,
+          "near_field_ms": {
+            "median_ms": 35.00027499967473,
+            "minimum_ms": 34.95066300001781,
+            "maximum_ms": 35.04778099977557,
+            "samples_ms": [
+              35.04778099977557,
+              34.95066300001781,
+              35.00027499967473
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 7.690695999826858,
+            "minimum_ms": 7.651210999938485,
+            "maximum_ms": 7.701557000018511,
+            "samples_ms": [
+              7.701557000018511,
+              7.651210999938485,
+              7.690695999826858
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 179.55994931635033,
+          "far_speedup_vs_array": 44.02346094654171,
+          "relative_error_magnetic": 3.5839130941557743e-16,
+          "relative_error_electric": 3.297458056206469e-16,
+          "relative_error_far_field": 3.0959909669373184e-15,
+          "radiated_power_w": 17.55623239296048
+        }
+      }
+    }
+  ],
+  "decision": {
+    "adopted": true,
+    "criteria": "near field at least 2x on every case and far field not slower at the decision thread count; all results within 1e-10 of the array path",
+    "minimum_near_speedup": 5.676855984124434,
+    "minimum_far_speedup": 1.5448985911855064,
+    "maximum_relative_error": 3.0959909669373184e-15
+  }
+}

@@ -234,6 +234,27 @@ loops do in NumPy. The benchmark's own criterion (at least 2× on every case
 at one thread) misses on the smallest case (1.6×) for the same reason; from
 four threads on every case gains at least 2.5×.
 
+On Google Axion (GCE `c4a-highcpu-32`: 32 Neoverse-V2 cores, no SMT, SVE2 with a
+128-bit vector length), Ubuntu 24.04, GCC 13.3.0 (`-O3 -mcpu=native`), NumPy 2.3.5,
+Python 3.12.3, no GPU, `OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`,
+`OMP_PLACES=cores`, runs sequential, source `6a9bf06`
+(`ELECTROTHERMAL_NATIVE_AXION_C4A_RESULTS.json`, `--threads 1,4,16,32`):
+
+| Electrical / thermal nodes | Portable | Native 1 / 4 / 16 / 32 threads | Coupling iterations | Temperature difference (of the rise) | Xeon portable / native 16 |
+|---:|---:|---:|---:|---:|---:|
+| 20,402 / 40,804 | 12.5 s | 13.9 (0.90×) / 8.0 (1.56×) / 6.4 (1.95×) / 6.2 s (2.03×) | 4 | 2.0e-11 | 12.3 / 4.2 s |
+| 80,802 / 161,604 | 35.5 s | 20.7 (1.72×) / 11.3 (3.14×) / 8.6 (4.14×) / 8.2 s (4.35×) | 4 | 1.1e-10 | 42.3 / 5.7 s |
+| 206,082 / 412,164 | 76.6 s | 34.5 (2.22×) / 17.1 (4.48×) / 11.7 (6.54×) / 10.9 s (7.06×) | 4 | 1.1e-10 | 118.0 / 8.0 s |
+
+The portable path is 1.2 to 1.5× faster than on the Xeon on the two larger
+boards, while the native path is 1.7 to 1.8× slower on one thread and about
+1.5× slower at sixteen. Going from 16 to 32 threads changes the run by 3 to
+7 %; as on the Xeon, the remainder is the eight preconditioner constructions
+with their dense coarse inverses and the NumPy FP64 residual work, which do
+not scale with `PCB_NATIVE_THREADS`. The benchmark's criterion misses at one thread on
+the smallest case (0.90×), as it did on the Xeon (1.6×). **Decision:**
+unchanged (opt-in).
+
 ### Kicad_PowerOpt system benchmark
 
 The consumer of this path is Kicad_PowerOpt's thermal coupling
