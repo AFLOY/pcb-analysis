@@ -84,6 +84,12 @@ def _cpu_model() -> str:
                 return line.split(":", 1)[1].strip()
     except OSError:
         pass
+    try:  # AArch64 /proc/cpuinfo has no model name; lscpu decodes the part
+        for line in subprocess.run(["lscpu"], capture_output=True, text=True, check=True).stdout.splitlines():
+            if line.startswith("Model name:"):
+                return f"{line.split(':', 1)[1].strip()} ({platform.machine()})"
+    except (OSError, subprocess.CalledProcessError):
+        pass
     return platform.processor()
 
 
