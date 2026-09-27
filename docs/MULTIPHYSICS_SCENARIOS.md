@@ -255,6 +255,27 @@ not scale with `PCB_NATIVE_THREADS`. The benchmark's criterion misses at one thr
 the smallest case (0.90×), as it did on the Xeon (1.6×). **Decision:**
 unchanged (opt-in).
 
+On an Intel Core i7-14700KF desktop (20 physical cores: 8 P-cores with two
+hyper-threads each and 12 E-cores, 28 logical CPUs; AVX2, no AVX-512), RHEL 10.2,
+GCC 14.3.1 (`-O3 -march=native -mprefer-vector-width=512`), NumPy 2.3.5,
+Python 3.12.12, `OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`,
+`OMP_PLACES=cores`, at most one thread per physical core (1 to 8 threads run
+on the P-cores, 16 on 8 P + 8 E, 20 on every core; no hyper-thread sibling is
+used), runs sequential, source `b65d700`
+(`ELECTROTHERMAL_NATIVE_I7_14700KF_RESULTS.json`, `--threads 1,4,16,20`):
+
+| Electrical / thermal nodes | Portable | Native 1 / 4 / 16 / 20 threads | Coupling iterations | Temperature difference (of the rise) | Xeon portable / native 16 |
+|---:|---:|---:|---:|---:|---:|
+| 20,402 / 40,804 | 8.7 s | 7.2 (1.21×) / 4.1 (2.11×) / 3.7 (2.39×) / 3.6 s (2.43×) | 4 | 2.1e-11 | 12.3 / 4.2 s |
+| 80,802 / 161,604 | 25.2 s | 10.4 (2.42×) / 5.7 (4.38×) / 5.0 (4.99×) / 4.9 s (5.17×) | 4 | 1.1e-10 | 42.3 / 5.7 s |
+| 206,082 / 412,164 | 64.4 s | 17.1 (3.76×) / 8.7 (7.37×) / 7.4 (8.70×) / 7.0 s (9.20×) | 4 | 1.1e-10 | 118.0 / 8.0 s |
+
+Both paths are faster than on the Xeon (portable 1.4 to 1.8×, native at 16
+threads 8 to 15 %). As on the other hosts, most of the threaded run is the
+preconditioner constructions and the NumPy FP64 residual work, so 4 to 20
+threads change it by 13 to 20 %. The criterion misses at one thread on the
+smallest case (1.21×). **Decision:** unchanged (opt-in).
+
 ### Kicad_PowerOpt system benchmark
 
 The consumer of this path is Kicad_PowerOpt's thermal coupling

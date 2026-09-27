@@ -1,0 +1,592 @@
+{
+  "schema": "electrothermal-native-benchmark/v1",
+  "measured_at": "2026-09-28T03:30:41+09:00",
+  "environment": {
+    "platform": "Linux-6.12.0-211.56.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.12",
+    "numpy": "2.3.5",
+    "cpu": "Intel(R) Core(TM) i7-14700KF",
+    "cpu_count": 28,
+    "compiler": "g++ (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)",
+    "thread_sweep": [
+      1,
+      4,
+      16,
+      20
+    ],
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_PROC_BIND": "close",
+    "device": "cpu",
+    "cpu_note": "hybrid: 8 P-cores (2 threads each) + 12 E-cores, 20 physical cores / 28 logical; OMP_PLACES=cores with OMP_PROC_BIND=close puts thread k on its own physical core (1-8: the P-cores, 9-20: add E-cores); no SMT sibling is used (checked with sched_getcpu)",
+    "host": "Intel Core i7-14700KF desktop (20 cores: 8 P + 12 E, 30 GB), AVX2 (no AVX-512), RHEL 10.2, intel_pstate powersave governor, turbo on; NVIDIA RTX 4060 present but not used by these benchmarks",
+    "native_build_flags": "-fopenmp -O3 -march=native -mprefer-vector-width=512 -fcx-limited-range -fno-math-errno",
+    "run_env": {
+      "OPENBLAS_NUM_THREADS": "1",
+      "OMP_PROC_BIND": "close",
+      "OMP_PLACES": "cores",
+      "runs_serialised": "one benchmark at a time, no other load"
+    },
+    "source_commit": "b65d700 (fix/native-aarch64; x86 flags unchanged from main)"
+  },
+  "definitions": {
+    "timing": "run_electro_thermal wall time: every DC and thermal solve including operator construction, the Joule-heat mapping and the Aitken fixed point",
+    "portable": "native=False for both solvers (NumPy actions, NumPy inner PCG, NumPy FP64 residual)",
+    "native": "native=True for both solvers: fused C++ float32 action and inner PCG, C++ float64 action for the outer residual and the coarse assembly",
+    "speedup": "portable median divided by native median",
+    "relative_temperature_error": "max |T_native - T_portable| over the max rise above ambient",
+    "decision_threads": "the first thread count in the sweep"
+  },
+  "config": {
+    "coupling_max_iterations": 20,
+    "temperature_tolerance_k": 0.001,
+    "relative_loss_tolerance": 1e-06,
+    "solver": {
+      "max_inner_iterations": 400,
+      "max_outer_iterations": 16,
+      "relative_tolerance": 1e-08
+    }
+  },
+  "cases": [
+    {
+      "elements": [
+        2,
+        100,
+        100
+      ],
+      "electrical_nodes": 20402,
+      "thermal_nodes": 40804,
+      "vias": 144,
+      "portable": {
+        "timing": {
+          "median_ms": 8748.126031000083,
+          "minimum_ms": 8733.868905999998,
+          "maximum_ms": 8924.192780999874,
+          "samples_ms": [
+            8924.192780999874,
+            8748.126031000083,
+            8733.868905999998
+          ],
+          "repeats": 3
+        },
+        "converged": true,
+        "coupling_iterations": 4,
+        "electrical_inner_iterations": [
+          45,
+          45,
+          31,
+          17
+        ],
+        "thermal_inner_iterations": [
+          950,
+          823,
+          528,
+          149
+        ],
+        "joule_loss_w": 0.04175890191794431,
+        "cold_joule_loss_w": 0.04086003519830237,
+        "max_temperature_rise_k": 0.6356377150134449
+      },
+      "native_by_threads": {
+        "1": {
+          "threads": 1,
+          "timing": {
+            "median_ms": 7249.047589999918,
+            "minimum_ms": 7242.851610999878,
+            "maximum_ms": 7252.833493000026,
+            "samples_ms": [
+              7252.833493000026,
+              7242.851610999878,
+              7249.047589999918
+            ],
+            "repeats": 3
+          },
+          "converged": true,
+          "coupling_iterations": 4,
+          "electrical_inner_iterations": [
+            45,
+            45,
+            31,
+            17
+          ],
+          "thermal_inner_iterations": [
+            1091,
+            964,
+            650,
+            148
+          ],
+          "joule_loss_w": 0.04175890191795707,
+          "cold_joule_loss_w": 0.04086003519865892,
+          "max_temperature_rise_k": 0.6356377150265757,
+          "speedup_vs_portable": 1.206796606366352,
+          "relative_temperature_error_vs_portable": 2.0657726007603104e-11,
+          "relative_loss_error_vs_portable": 3.055785785354187e-13
+        },
+        "4": {
+          "threads": 4,
+          "timing": {
+            "median_ms": 4138.446560000148,
+            "minimum_ms": 4131.444009000006,
+            "maximum_ms": 4142.268110000032,
+            "samples_ms": [
+              4138.446560000148,
+              4131.444009000006,
+              4142.268110000032
+            ],
+            "repeats": 3
+          },
+          "converged": true,
+          "coupling_iterations": 4,
+          "electrical_inner_iterations": [
+            45,
+            45,
+            31,
+            17
+          ],
+          "thermal_inner_iterations": [
+            1091,
+            964,
+            650,
+            148
+          ],
+          "joule_loss_w": 0.04175890191795707,
+          "cold_joule_loss_w": 0.04086003519865892,
+          "max_temperature_rise_k": 0.6356377150265757,
+          "speedup_vs_portable": 2.113867100654254,
+          "relative_temperature_error_vs_portable": 2.0657726007603104e-11,
+          "relative_loss_error_vs_portable": 3.055785785354187e-13
+        },
+        "16": {
+          "threads": 16,
+          "timing": {
+            "median_ms": 3663.3452680000573,
+            "minimum_ms": 3658.714603000135,
+            "maximum_ms": 3678.480640000089,
+            "samples_ms": [
+              3658.714603000135,
+              3678.480640000089,
+              3663.3452680000573
+            ],
+            "repeats": 3
+          },
+          "converged": true,
+          "coupling_iterations": 4,
+          "electrical_inner_iterations": [
+            45,
+            45,
+            31,
+            17
+          ],
+          "thermal_inner_iterations": [
+            1091,
+            964,
+            650,
+            148
+          ],
+          "joule_loss_w": 0.04175890191795707,
+          "cold_joule_loss_w": 0.04086003519865892,
+          "max_temperature_rise_k": 0.6356377150265757,
+          "speedup_vs_portable": 2.3880157045027803,
+          "relative_temperature_error_vs_portable": 2.0657726007603104e-11,
+          "relative_loss_error_vs_portable": 3.055785785354187e-13
+        },
+        "20": {
+          "threads": 20,
+          "timing": {
+            "median_ms": 3596.3007350001135,
+            "minimum_ms": 3594.668957000067,
+            "maximum_ms": 3600.1558119999117,
+            "samples_ms": [
+              3594.668957000067,
+              3596.3007350001135,
+              3600.1558119999117
+            ],
+            "repeats": 3
+          },
+          "converged": true,
+          "coupling_iterations": 4,
+          "electrical_inner_iterations": [
+            45,
+            45,
+            31,
+            17
+          ],
+          "thermal_inner_iterations": [
+            1091,
+            964,
+            650,
+            148
+          ],
+          "joule_loss_w": 0.04175890191795707,
+          "cold_joule_loss_w": 0.04086003519865892,
+          "max_temperature_rise_k": 0.6356377150265757,
+          "speedup_vs_portable": 2.4325346169915925,
+          "relative_temperature_error_vs_portable": 2.0657726007603104e-11,
+          "relative_loss_error_vs_portable": 3.055785785354187e-13
+        }
+      }
+    },
+    {
+      "elements": [
+        2,
+        200,
+        200
+      ],
+      "electrical_nodes": 80802,
+      "thermal_nodes": 161604,
+      "vias": 144,
+      "portable": {
+        "timing": {
+          "median_ms": 25153.449094999814,
+          "minimum_ms": 24638.861029000054,
+          "maximum_ms": 25507.022170000255,
+          "samples_ms": [
+            25507.022170000255,
+            25153.449094999814,
+            24638.861029000054
+          ],
+          "repeats": 3
+        },
+        "converged": true,
+        "coupling_iterations": 4,
+        "electrical_inner_iterations": [
+          71,
+          71,
+          49,
+          26
+        ],
+        "thermal_inner_iterations": [
+          1012,
+          887,
+          580,
+          166
+        ],
+        "joule_loss_w": 0.041890685379931424,
+        "cold_joule_loss_w": 0.040988713050671595,
+        "max_temperature_rise_k": 0.6357120919295767
+      },
+      "native_by_threads": {
+        "1": {
+          "threads": 1,
+          "timing": {
+            "median_ms": 10387.383892999878,
+            "minimum_ms": 10373.232068000107,
+            "maximum_ms": 10401.971074999892,
+            "samples_ms": [
+              10401.971074999892,
+              10373.232068000107,
+              10387.383892999878
+            ],
+            "repeats": 3
+          },
+          "converged": true,
+          "coupling_iterations": 4,
+          "electrical_inner_iterations": [
+            71,
+            71,
+            49,
+            26
+          ],
+          "thermal_inner_iterations": [
+            984,
+            881,
+            561,
+            166
+          ],
+          "joule_loss_w": 0.04189068537993959,
+          "cold_joule_loss_w": 0.04098871305125652,
+          "max_temperature_rise_k": 0.6357120918576129,
+          "speedup_vs_portable": 2.4215384117988434,
+          "relative_temperature_error_vs_portable": 1.1329124081632554e-10,
+          "relative_loss_error_vs_portable": 1.9496167348007657e-13
+        },
+        "4": {
+          "threads": 4,
+          "timing": {
+            "median_ms": 5739.084544999969,
+            "minimum_ms": 5733.579764000297,
+            "maximum_ms": 5743.57380399988,
+            "samples_ms": [
+              5743.57380399988,
+              5739.084544999969,
+              5733.579764000297
+            ],
+            "repeats": 3
+          },
+          "converged": true,
+          "coupling_iterations": 4,
+          "electrical_inner_iterations": [
+            71,
+            71,
+            49,
+            26
+          ],
+          "thermal_inner_iterations": [
+            984,
+            881,
+            561,
+            166
+          ],
+          "joule_loss_w": 0.04189068537993959,
+          "cold_joule_loss_w": 0.04098871305125652,
+          "max_temperature_rise_k": 0.6357120918576129,
+          "speedup_vs_portable": 4.3828329932713945,
+          "relative_temperature_error_vs_portable": 1.1329124081632554e-10,
+          "relative_loss_error_vs_portable": 1.9496167348007657e-13
+        },
+        "16": {
+          "threads": 16,
+          "timing": {
+            "median_ms": 5045.688113000324,
+            "minimum_ms": 5034.141820000059,
+            "maximum_ms": 5046.439274000022,
+            "samples_ms": [
+              5046.439274000022,
+              5045.688113000324,
+              5034.141820000059
+            ],
+            "repeats": 3
+          },
+          "converged": true,
+          "coupling_iterations": 4,
+          "electrical_inner_iterations": [
+            71,
+            71,
+            49,
+            26
+          ],
+          "thermal_inner_iterations": [
+            984,
+            881,
+            561,
+            166
+          ],
+          "joule_loss_w": 0.04189068537993959,
+          "cold_joule_loss_w": 0.04098871305125652,
+          "max_temperature_rise_k": 0.6357120918576129,
+          "speedup_vs_portable": 4.985137513789529,
+          "relative_temperature_error_vs_portable": 1.1329124081632554e-10,
+          "relative_loss_error_vs_portable": 1.9496167348007657e-13
+        },
+        "20": {
+          "threads": 20,
+          "timing": {
+            "median_ms": 4861.471554999753,
+            "minimum_ms": 4859.960301000228,
+            "maximum_ms": 4866.205591999915,
+            "samples_ms": [
+              4861.471554999753,
+              4859.960301000228,
+              4866.205591999915
+            ],
+            "repeats": 3
+          },
+          "converged": true,
+          "coupling_iterations": 4,
+          "electrical_inner_iterations": [
+            71,
+            71,
+            49,
+            26
+          ],
+          "thermal_inner_iterations": [
+            984,
+            881,
+            561,
+            166
+          ],
+          "joule_loss_w": 0.04189068537993959,
+          "cold_joule_loss_w": 0.04098871305125652,
+          "max_temperature_rise_k": 0.6357120918576129,
+          "speedup_vs_portable": 5.174040166733238,
+          "relative_temperature_error_vs_portable": 1.1329124081632554e-10,
+          "relative_loss_error_vs_portable": 1.9496167348007657e-13
+        }
+      }
+    },
+    {
+      "elements": [
+        2,
+        320,
+        320
+      ],
+      "electrical_nodes": 206082,
+      "thermal_nodes": 412164,
+      "vias": 120,
+      "portable": {
+        "timing": {
+          "median_ms": 64414.154478,
+          "minimum_ms": 64133.87149500022,
+          "maximum_ms": 64484.04450699991,
+          "samples_ms": [
+            64414.154478,
+            64133.87149500022,
+            64484.04450699991
+          ],
+          "repeats": 3
+        },
+        "converged": true,
+        "coupling_iterations": 4,
+        "electrical_inner_iterations": [
+          100,
+          100,
+          67,
+          36
+        ],
+        "thermal_inner_iterations": [
+          950,
+          815,
+          525,
+          161
+        ],
+        "joule_loss_w": 0.043257387119507704,
+        "cold_joule_loss_w": 0.042323145097708,
+        "max_temperature_rise_k": 0.6488295630029484
+      },
+      "native_by_threads": {
+        "1": {
+          "threads": 1,
+          "timing": {
+            "median_ms": 17120.297032000053,
+            "minimum_ms": 17055.0836059997,
+            "maximum_ms": 17174.294805000045,
+            "samples_ms": [
+              17174.294805000045,
+              17055.0836059997,
+              17120.297032000053
+            ],
+            "repeats": 3
+          },
+          "converged": true,
+          "coupling_iterations": 4,
+          "electrical_inner_iterations": [
+            100,
+            100,
+            67,
+            36
+          ],
+          "thermal_inner_iterations": [
+            926,
+            797,
+            515,
+            160
+          ],
+          "joule_loss_w": 0.043257387119473883,
+          "cold_joule_loss_w": 0.042323145097257805,
+          "max_temperature_rise_k": 0.6488295630736616,
+          "speedup_vs_portable": 3.7624437448486785,
+          "relative_temperature_error_vs_portable": 1.0968667963332034e-10,
+          "relative_loss_error_vs_portable": 7.818356849480632e-13
+        },
+        "4": {
+          "threads": 4,
+          "timing": {
+            "median_ms": 8736.738905000038,
+            "minimum_ms": 8716.397413999857,
+            "maximum_ms": 8815.063475999978,
+            "samples_ms": [
+              8736.738905000038,
+              8716.397413999857,
+              8815.063475999978
+            ],
+            "repeats": 3
+          },
+          "converged": true,
+          "coupling_iterations": 4,
+          "electrical_inner_iterations": [
+            100,
+            100,
+            67,
+            36
+          ],
+          "thermal_inner_iterations": [
+            926,
+            797,
+            515,
+            160
+          ],
+          "joule_loss_w": 0.043257387119473883,
+          "cold_joule_loss_w": 0.042323145097257805,
+          "max_temperature_rise_k": 0.6488295630736616,
+          "speedup_vs_portable": 7.372791516195563,
+          "relative_temperature_error_vs_portable": 1.0968667963332034e-10,
+          "relative_loss_error_vs_portable": 7.818356849480632e-13
+        },
+        "16": {
+          "threads": 16,
+          "timing": {
+            "median_ms": 7405.852379999942,
+            "minimum_ms": 7395.465526999942,
+            "maximum_ms": 7415.412293999907,
+            "samples_ms": [
+              7395.465526999942,
+              7415.412293999907,
+              7405.852379999942
+            ],
+            "repeats": 3
+          },
+          "converged": true,
+          "coupling_iterations": 4,
+          "electrical_inner_iterations": [
+            100,
+            100,
+            67,
+            36
+          ],
+          "thermal_inner_iterations": [
+            926,
+            797,
+            515,
+            160
+          ],
+          "joule_loss_w": 0.043257387119473883,
+          "cold_joule_loss_w": 0.042323145097257805,
+          "max_temperature_rise_k": 0.6488295630736616,
+          "speedup_vs_portable": 8.697736759100847,
+          "relative_temperature_error_vs_portable": 1.0968667963332034e-10,
+          "relative_loss_error_vs_portable": 7.818356849480632e-13
+        },
+        "20": {
+          "threads": 20,
+          "timing": {
+            "median_ms": 7003.585821999877,
+            "minimum_ms": 7001.027332999911,
+            "maximum_ms": 7012.533566000002,
+            "samples_ms": [
+              7012.533566000002,
+              7001.027332999911,
+              7003.585821999877
+            ],
+            "repeats": 3
+          },
+          "converged": true,
+          "coupling_iterations": 4,
+          "electrical_inner_iterations": [
+            100,
+            100,
+            67,
+            36
+          ],
+          "thermal_inner_iterations": [
+            926,
+            797,
+            515,
+            160
+          ],
+          "joule_loss_w": 0.043257387119473883,
+          "cold_joule_loss_w": 0.042323145097257805,
+          "max_temperature_rise_k": 0.6488295630736616,
+          "speedup_vs_portable": 9.197310651303836,
+          "relative_temperature_error_vs_portable": 1.0968667963332034e-10,
+          "relative_loss_error_vs_portable": 7.818356849480632e-13
+        }
+      }
+    }
+  ],
+  "decision": {
+    "adopted": false,
+    "criteria": "every case at least 2x faster end to end at the decision thread count, identical convergence outcome, temperatures and losses within 1e-6",
+    "minimum_speedup": 1.206796606366352,
+    "all_converged_alike": true,
+    "maximum_relative_error_converged_cases": 1.1329124081632554e-10
+  }
+}

@@ -383,6 +383,57 @@ thread). **Decision:** unchanged. The native cycle stays opt-in, float64 and
 one thread by default; on this host a caller sets `PCB_NATIVE_THREADS` to 16
 to 32.
 
+### Threaded inner GMRES on the Core i7-14700KF (hybrid x86)
+
+The same benchmark on an Intel Core i7-14700KF desktop (20 physical cores: 8 P-cores with two
+hyper-threads each and 12 E-cores, 28 logical CPUs; AVX2, no AVX-512), RHEL 10.2,
+GCC 14.3.1 (`-O3 -march=native -mprefer-vector-width=512`), NumPy 2.3.5,
+Python 3.12.12, `OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`,
+`OMP_PLACES=cores`, at most one thread per physical core (1 to 8 threads run
+on the P-cores, 16 on 8 P + 8 E, 20 on every core; no hyper-thread sibling is
+used), runs sequential, source `b65d700`
+(`MAXWELL_NATIVE_I7_14700KF_SPMD_T{1,2,4,8,16,20}_RESULTS.json`, five
+repeats each). Solve medians, NumPy ratio in brackets, Xeon 8581C in the last
+column:
+
+| Threads | 4,369 | 16,705 | 66,049 | Operator C++ 66,049 | Xeon 4,369 / 16,705 / 66,049 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 241 ms (3.56×) | 736 ms (3.00×) | 5,082 ms (2.39×) | 0.280 ms | 234 / 719 / 4,926 ms |
+| 2 | 192 ms (4.47×) | 446 ms (4.95×) | 2,630 ms (4.62×) | 0.143 ms | 147 / 409 / 2,520 ms |
+| 4 | 153 ms (5.62×) | 280 ms (7.94×) | 1,454 ms (8.31×) | 0.0753 ms | 114 / 242 / 1,450 ms |
+| 8 (P-cores) | 169 ms (5.08×) | 223 ms (9.79×) | 907 ms (13.46×) | 0.0422 ms | 104 / 176 / 852 ms |
+| 16 (8 P + 8 E) | 361 ms (2.36×) | 426 ms (5.18×) | 1,574 ms (7.78×) | 0.0741 ms | 132 / 180 / 659 ms |
+| 20 (8 P + 12 E) | 371 ms (2.32×) | 512 ms (4.32×) | 1,700 ms (7.14×) | 0.0602 ms | — |
+
+The portable NumPy solve takes 0.86 / 2.21 / 12.2 s. Inner iterations are
+3,299 / 2,900 / 4,792 at every thread count, as on the other hosts; the
+66,049-unknown case stops at the outer limit on both paths (residual 1.6e-6).
+On one thread a P-core is within 3 % of the Xeon despite AVX2 in place of
+AVX-512, and the criteria hold at every thread count (minimum 2.32×, at 20).
+Up to eight threads the solve scales as on the Xeon (907 ms against 852 ms at
+eight). Adding E-cores makes every case slower: the SPMD region splits the
+rows evenly and each barrier waits for the slower E-core share, so 16 threads
+take 1.7× the eight-thread time on 66,049 unknowns and 20 threads 1.9×, and the
+operator alone is 1.4 to 1.8× slower than on the eight P-cores.
+
+Float-accumulated dot products
+(`MAXWELL_NATIVE_I7_14700KF_FLOAT_DOTS_T{1,16,20}_RESULTS.json`):
+
+| Unknowns | float64 / float32 1 thread | float64 / float32 16 threads | float64 / float32 20 threads |
+|---:|---:|---:|---:|
+| 4,369 | 241 / 178 ms | 361 / 356 ms | 371 / 368 ms |
+| 16,705 | 736 / 597 ms | 426 / 393 ms | 512 / 858 ms |
+| 66,049 | 5,082 / 3,734 ms | 1,574 / 1,333 ms | 1,700 / 2,215 ms |
+
+Iteration counts equal the float64 runs. float32 accumulation gains 19 to
+27 % on one thread (minimum 3.25× over NumPy) and 1 to 15 % at 16 threads. At
+20 threads two cases are slower than float64, and their five repeats spread
+from 676 to 1,438 ms and 2,116 to 2,392 ms, where the float64 20-thread runs
+stay within 13 % and 1 %; the spread was not investigated. The criteria hold
+at all three counts (minimum 2.32×). **Decision:** unchanged. The native cycle
+stays opt-in, float64 and one thread by default; on this host a caller sets
+`PCB_NATIVE_THREADS` to 8 (the P-cores).
+
 ### CGS2 orthogonalisation (measured, not adopted)
 
 The restart-32 MGS cycle streams each basis vector twice per column (dot
@@ -549,6 +600,30 @@ dense float32 coarse product (1,352 to 1,800 square, SVE-vectorised through
 established. From four threads on every case gains at least 1.85× and at 32
 at least 9.67×. Solutions agree to 2.3e-13. **Decision:** unchanged
 (opt-in).
+
+The same benchmark on an Intel Core i7-14700KF desktop (20 physical cores: 8 P-cores with two
+hyper-threads each and 12 E-cores, 28 logical CPUs; AVX2, no AVX-512), RHEL 10.2,
+GCC 14.3.1 (`-O3 -march=native -mprefer-vector-width=512`), NumPy 2.3.5,
+Python 3.12.12, `OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`,
+`OMP_PLACES=cores`, at most one thread per physical core (1 to 8 threads run
+on the P-cores, 16 on 8 P + 8 E, 20 on every core; no hyper-thread sibling is
+used), runs sequential, source `b65d700`
+(`DC_NATIVE_I7_14700KF_RESULTS.json`, `--threads 1,4,16,20`):
+
+| Nodes | Portable solve | Native solve 1 / 4 / 16 / 20 threads | Native float32 action 1 / 20 threads | Inner iterations | Xeon native 1 / 16 threads |
+|---:|---:|---:|---:|---:|---:|
+| 20,402 | 31.3 ms | 47.0 (0.67×) / 12.9 (2.42×) / 8.1 (3.87×) / 7.4 ms (4.22×) | 0.039 / 0.016 ms | 60 / 60 | 45.3 / 4.9 ms |
+| 80,802 | 140.7 ms | 136.2 (1.03×) / 36.2 (3.89×) / 21.1 (6.68×) / 18.8 ms (7.47×) | 0.136 / 0.028 ms | 95 / 95 | 133.6 / 13.7 ms |
+| 206,082 | 499.6 ms | 293.5 (1.70×) / 76.8 (6.50×) / 43.4 (11.51×) / 36.6 ms (13.65×) | 0.328 / 0.053 ms | 134 / 134 | 317.9 / 28.6 ms |
+
+Construction is 233 to 235 / 425 to 429 / 520 to 530 ms native (NumPy 247 /
+460 / 617 ms). The native one-thread solve matches the Xeon (47.0 / 136.2 /
+293.5 against 45.3 / 133.6 / 317.9 ms), but the portable path is 1.7 to 1.8×
+faster than on the Xeon, so the one-thread criterion misses on the two
+smaller boards (0.67×, 1.03×); on the Xeon it missed only on the smallest (1.15×). With E-cores the solve still
+improves from 4 to 20 threads, less than on 16 Xeon cores (7.4 / 18.8 / 36.6 ms
+at 20 against 4.9 / 13.7 / 28.6 ms). Solutions agree to 1.7e-13.
+**Decision:** unchanged (opt-in).
 
 ## Tenstorrent Blackhole migration
 

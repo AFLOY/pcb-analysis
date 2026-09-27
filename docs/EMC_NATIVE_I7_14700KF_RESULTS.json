@@ -1,0 +1,419 @@
+{
+  "schema": "emc-native-benchmark/v1",
+  "measured_at": "2026-09-28T03:18:28+09:00",
+  "environment": {
+    "platform": "Linux-6.12.0-211.56.1.el10_2.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.12",
+    "numpy": "2.3.5",
+    "cpu": "Intel(R) Core(TM) i7-14700KF",
+    "cpu_count": 28,
+    "compiler": "g++ (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)",
+    "thread_sweep": [
+      1,
+      4,
+      8,
+      16,
+      20
+    ],
+    "OPENBLAS_NUM_THREADS": "1",
+    "device": "cpu",
+    "cpu_note": "hybrid: 8 P-cores (2 threads each) + 12 E-cores, 20 physical cores / 28 logical; OMP_PLACES=cores with OMP_PROC_BIND=close puts thread k on its own physical core (1-8: the P-cores, 9-20: add E-cores); no SMT sibling is used (checked with sched_getcpu)",
+    "host": "Intel Core i7-14700KF desktop (20 cores: 8 P + 12 E, 30 GB), AVX2 (no AVX-512), RHEL 10.2, intel_pstate powersave governor, turbo on; NVIDIA RTX 4060 present but not used by these benchmarks",
+    "native_build_flags": "-fopenmp -O3 -march=native -mprefer-vector-width=512 -fcx-limited-range -fno-math-errno",
+    "run_env": {
+      "OPENBLAS_NUM_THREADS": "1",
+      "OMP_PROC_BIND": "close",
+      "OMP_PLACES": "cores",
+      "runs_serialised": "one benchmark at a time, no other load"
+    },
+    "source_commit": "b65d700 (fix/native-aarch64; x86 flags unchanged from main)"
+  },
+  "definitions": {
+    "timing": "wall time of evaluate_fields (electric and magnetic) and far_field_pattern; complex128 on both paths",
+    "speedup": "array-path median divided by native median",
+    "frequency_hz": 300000000.0,
+    "native_path": "direct pairwise summation in C++, threads own disjoint observation points",
+    "decision_threads": "the first thread count in the sweep"
+  },
+  "cases": [
+    {
+      "sources": 2000,
+      "points": 1764,
+      "directions": 2048,
+      "pairs_near": 3528000,
+      "array_near_field_ms": {
+        "median_ms": 789.3382770000699,
+        "minimum_ms": 787.9521750001004,
+        "maximum_ms": 789.5769509998445,
+        "samples_ms": [
+          787.9521750001004,
+          789.3382770000699,
+          789.5769509998445
+        ],
+        "repeats": 3
+      },
+      "array_far_field_ms": {
+        "median_ms": 59.0924759999325,
+        "minimum_ms": 58.9545289999478,
+        "maximum_ms": 59.698444000105155,
+        "samples_ms": [
+          58.9545289999478,
+          59.698444000105155,
+          59.0924759999325
+        ],
+        "repeats": 3
+      },
+      "array_radiated_power_w": 2.528705210858177,
+      "native_by_threads": {
+        "1": {
+          "threads": 1,
+          "near_field_ms": {
+            "median_ms": 68.16313599983914,
+            "minimum_ms": 68.15491699990162,
+            "maximum_ms": 68.1957379999858,
+            "samples_ms": [
+              68.16313599983914,
+              68.15491699990162,
+              68.1957379999858
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 31.500368000024537,
+            "minimum_ms": 31.46698499995182,
+            "maximum_ms": 31.531473000086407,
+            "samples_ms": [
+              31.531473000086407,
+              31.500368000024537,
+              31.46698499995182
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 11.580134414618668,
+          "far_speedup_vs_array": 1.875929703420813,
+          "relative_error_magnetic": 2.8968063561128027e-16,
+          "relative_error_electric": 3.050913531405251e-16,
+          "relative_error_far_field": 2.0971586560429828e-15,
+          "radiated_power_w": 2.528705210858177
+        },
+        "4": {
+          "threads": 4,
+          "near_field_ms": {
+            "median_ms": 17.427581999982067,
+            "minimum_ms": 17.366177999974752,
+            "maximum_ms": 17.430869999998322,
+            "samples_ms": [
+              17.427581999982067,
+              17.430869999998322,
+              17.366177999974752
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 8.730245999913677,
+            "minimum_ms": 8.671532999869669,
+            "maximum_ms": 8.746971999926245,
+            "samples_ms": [
+              8.746971999926245,
+              8.730245999913677,
+              8.671532999869669
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 45.29247241532888,
+          "far_speedup_vs_array": 6.768706861240427,
+          "relative_error_magnetic": 2.8968063561128027e-16,
+          "relative_error_electric": 3.050913531405251e-16,
+          "relative_error_far_field": 2.0971586560429828e-15,
+          "radiated_power_w": 2.528705210858177
+        },
+        "8": {
+          "threads": 8,
+          "near_field_ms": {
+            "median_ms": 8.76600700007657,
+            "minimum_ms": 8.744516999968255,
+            "maximum_ms": 8.779494000009436,
+            "samples_ms": [
+              8.744516999968255,
+              8.779494000009436,
+              8.76600700007657
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 4.602579999982481,
+            "minimum_ms": 4.566179999983433,
+            "maximum_ms": 4.620379000016328,
+            "samples_ms": [
+              4.620379000016328,
+              4.566179999983433,
+              4.602579999982481
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 90.04536238599572,
+          "far_speedup_vs_array": 12.838989436393812,
+          "relative_error_magnetic": 2.8968063561128027e-16,
+          "relative_error_electric": 3.050913531405251e-16,
+          "relative_error_far_field": 2.0971586560429828e-15,
+          "radiated_power_w": 2.528705210858177
+        },
+        "16": {
+          "threads": 16,
+          "near_field_ms": {
+            "median_ms": 9.467784999969808,
+            "minimum_ms": 8.849017999864373,
+            "maximum_ms": 11.60393700001805,
+            "samples_ms": [
+              8.849017999864373,
+              9.467784999969808,
+              11.60393700001805
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 5.620085000145991,
+            "minimum_ms": 5.591368000068542,
+            "maximum_ms": 5.6424249999054155,
+            "samples_ms": [
+              5.6424249999054155,
+              5.620085000145991,
+              5.591368000068542
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 83.37095498076762,
+          "far_speedup_vs_array": 10.514516417171178,
+          "relative_error_magnetic": 2.8968063561128027e-16,
+          "relative_error_electric": 3.050913531405251e-16,
+          "relative_error_far_field": 2.0971586560429828e-15,
+          "radiated_power_w": 2.528705210858177
+        },
+        "20": {
+          "threads": 20,
+          "near_field_ms": {
+            "median_ms": 7.114393999927415,
+            "minimum_ms": 7.059603000016068,
+            "maximum_ms": 7.120868999891172,
+            "samples_ms": [
+              7.120868999891172,
+              7.059603000016068,
+              7.114393999927415
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 4.739248000078078,
+            "minimum_ms": 4.573281000148199,
+            "maximum_ms": 4.825068999934956,
+            "samples_ms": [
+              4.825068999934956,
+              4.573281000148199,
+              4.739248000078078
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 110.94947468584438,
+          "far_speedup_vs_array": 12.468745252191692,
+          "relative_error_magnetic": 2.8968063561128027e-16,
+          "relative_error_electric": 3.050913531405251e-16,
+          "relative_error_far_field": 2.0971586560429828e-15,
+          "radiated_power_w": 2.528705210858177
+        }
+      }
+    },
+    {
+      "sources": 8000,
+      "points": 4096,
+      "directions": 2048,
+      "pairs_near": 32768000,
+      "array_near_field_ms": {
+        "median_ms": 7322.96362000011,
+        "minimum_ms": 7319.993897999893,
+        "maximum_ms": 7326.344820000031,
+        "samples_ms": [
+          7322.96362000011,
+          7326.344820000031,
+          7319.993897999893
+        ],
+        "repeats": 3
+      },
+      "array_far_field_ms": {
+        "median_ms": 258.31103499990604,
+        "minimum_ms": 258.16562399995746,
+        "maximum_ms": 259.0680389998852,
+        "samples_ms": [
+          258.31103499990604,
+          258.16562399995746,
+          259.0680389998852
+        ],
+        "repeats": 3
+      },
+      "array_radiated_power_w": 17.556232392960485,
+      "native_by_threads": {
+        "1": {
+          "threads": 1,
+          "near_field_ms": {
+            "median_ms": 633.0611490000138,
+            "minimum_ms": 632.900458999984,
+            "maximum_ms": 633.1140910001523,
+            "samples_ms": [
+              633.1140910001523,
+              632.900458999984,
+              633.0611490000138
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 127.62324700020145,
+            "minimum_ms": 127.5792660001116,
+            "maximum_ms": 127.74727400005759,
+            "samples_ms": [
+              127.62324700020145,
+              127.74727400005759,
+              127.5792660001116
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 11.567545459972541,
+          "far_speedup_vs_array": 2.024012404256556,
+          "relative_error_magnetic": 3.606071355092258e-16,
+          "relative_error_electric": 3.368233844494038e-16,
+          "relative_error_far_field": 3.094623237320209e-15,
+          "radiated_power_w": 17.556232392960485
+        },
+        "4": {
+          "threads": 4,
+          "near_field_ms": {
+            "median_ms": 160.56679400003304,
+            "minimum_ms": 160.5562849999842,
+            "maximum_ms": 160.57444500006568,
+            "samples_ms": [
+              160.57444500006568,
+              160.5562849999842,
+              160.56679400003304
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 33.44602500010296,
+            "minimum_ms": 33.43645600011769,
+            "maximum_ms": 33.4544410000035,
+            "samples_ms": [
+              33.43645600011769,
+              33.4544410000035,
+              33.44602500010296
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 45.60696167352387,
+          "far_speedup_vs_array": 7.723220771350581,
+          "relative_error_magnetic": 3.606071355092258e-16,
+          "relative_error_electric": 3.368233844494038e-16,
+          "relative_error_far_field": 3.094623237320209e-15,
+          "radiated_power_w": 17.556232392960485
+        },
+        "8": {
+          "threads": 8,
+          "near_field_ms": {
+            "median_ms": 80.41733200002454,
+            "minimum_ms": 80.16295299989906,
+            "maximum_ms": 80.4525209998701,
+            "samples_ms": [
+              80.4525209998701,
+              80.41733200002454,
+              80.16295299989906
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 17.112191000023813,
+            "minimum_ms": 17.036176999909003,
+            "maximum_ms": 17.166230000157157,
+            "samples_ms": [
+              17.036176999909003,
+              17.166230000157157,
+              17.112191000023813
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 91.06200663307102,
+          "far_speedup_vs_array": 15.095146787430469,
+          "relative_error_magnetic": 3.606071355092258e-16,
+          "relative_error_electric": 3.368233844494038e-16,
+          "relative_error_far_field": 3.094623237320209e-15,
+          "radiated_power_w": 17.556232392960485
+        },
+        "16": {
+          "threads": 16,
+          "near_field_ms": {
+            "median_ms": 79.97551000016756,
+            "minimum_ms": 79.95403500012799,
+            "maximum_ms": 80.03147299996272,
+            "samples_ms": [
+              80.03147299996272,
+              79.95403500012799,
+              79.97551000016756
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 20.423574999995253,
+            "minimum_ms": 20.379624000042895,
+            "maximum_ms": 20.72573899999952,
+            "samples_ms": [
+              20.379624000042895,
+              20.72573899999952,
+              20.423574999995253
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 91.56507560858026,
+          "far_speedup_vs_array": 12.647689496083133,
+          "relative_error_magnetic": 3.606071355092258e-16,
+          "relative_error_electric": 3.368233844494038e-16,
+          "relative_error_far_field": 3.094623237320209e-15,
+          "radiated_power_w": 17.556232392960485
+        },
+        "20": {
+          "threads": 20,
+          "near_field_ms": {
+            "median_ms": 64.25781200005076,
+            "minimum_ms": 64.23577000009573,
+            "maximum_ms": 64.36127699998906,
+            "samples_ms": [
+              64.25781200005076,
+              64.23577000009573,
+              64.36127699998906
+            ],
+            "repeats": 3
+          },
+          "far_field_ms": {
+            "median_ms": 16.808736000029967,
+            "minimum_ms": 16.572537999991255,
+            "maximum_ms": 16.891675999886502,
+            "samples_ms": [
+              16.891675999886502,
+              16.572537999991255,
+              16.808736000029967
+            ],
+            "repeats": 3
+          },
+          "near_speedup_vs_array": 113.96223108241415,
+          "far_speedup_vs_array": 15.367665659062379,
+          "relative_error_magnetic": 3.606071355092258e-16,
+          "relative_error_electric": 3.368233844494038e-16,
+          "relative_error_far_field": 3.094623237320209e-15,
+          "radiated_power_w": 17.556232392960485
+        }
+      }
+    }
+  ],
+  "decision": {
+    "adopted": true,
+    "criteria": "near field at least 2x on every case and far field not slower at the decision thread count; all results within 1e-10 of the array path",
+    "minimum_near_speedup": 11.567545459972541,
+    "minimum_far_speedup": 1.875929703420813,
+    "maximum_relative_error": 3.094623237320209e-15
+  }
+}
