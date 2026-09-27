@@ -165,6 +165,24 @@ Decision recorded in the JSON: criteria met (near field at least 2× on every
 case, far field not slower, results within 1e-10).  The default stays the
 array path.
 
+On Google Axion (GCE `c4a-highcpu-32`: 32 Neoverse-V2 cores, no SMT, SVE2 with a
+128-bit vector length), Ubuntu 24.04, GCC 13.3.0 (`-O3 -mcpu=native`), NumPy 2.3.5,
+Python 3.12.3, no GPU, `OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`,
+`OMP_PLACES=cores`, runs sequential, source `6a9bf06`
+(`EMC_NATIVE_AXION_C4A_RESULTS.json`):
+
+| Sources | Points | Array near field | C++ 1 thread | 4 | 8 | 16 | 32 | Array far field | C++ 1 thread | 16 | 32 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2,000 | 1,764 | 706 ms | 119 ms (5.9×) | 30 ms | 15 ms | 7.6 ms | 3.8 ms (184×) | 84 ms | 54 ms (1.6×) | 4.1 ms | 2.5 ms (33.9×) |
+| 8,000 | 4,096 | 6,285 ms | 1,107 ms (5.7×) | 279 ms | 139 ms | 70 ms | 35 ms (180×) | 339 ms | 219 ms (1.5×) | 14.6 ms | 7.7 ms (44.0×) |
+
+Agreement 3.1e-15. The array near field is twice as fast as on the Xeon
+(it is memory bound), so the
+one-thread C++ ratio is lower (5.7 to 5.9× against 13.6 to 15.1×) while the
+C++ times per thread are within 20 % of the Xeon. The direct sum scales
+linearly to 32 cores. Criteria met. **Decision:** unchanged, the default stays
+the array path.
+
 ### Current elements from a sheet-PEEC solve (measured on `exp/cpp-multiphysics-dc-emc`)
 
 `dipoles_from_sheet_peec` assembled one Python tuple per branch. A plane at

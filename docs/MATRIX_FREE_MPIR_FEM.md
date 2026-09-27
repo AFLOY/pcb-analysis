@@ -337,6 +337,52 @@ ended level. The criteria hold for both settings (minimum ratio 4.23× on one
 thread, 10.51× on sixteen; converged solutions within 1.7e-8). The default
 stays `float64` and one thread, as recorded above.
 
+### Threaded inner GMRES on Google Axion (AArch64)
+
+The same benchmark on Google Axion (GCE `c4a-highcpu-32`: 32 Neoverse-V2 cores, no SMT, SVE2 with a
+128-bit vector length), Ubuntu 24.04, GCC 13.3.0 (`-O3 -mcpu=native`), NumPy 2.3.5,
+Python 3.12.3, no GPU, `OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`,
+`OMP_PLACES=cores`, runs sequential, source `6a9bf06`
+(`MAXWELL_NATIVE_AXION_C4A_SPMD_T{1,2,4,8,16,32}_RESULTS.json`, five repeats
+each). Solve medians, NumPy ratio in brackets, Xeon 8581C in the last columns:
+
+| Threads | 4,369 | 16,705 | 66,049 | Operator C++ 66,049 | Xeon 4,369 / 16,705 / 66,049 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 467 ms (2.49×) | 1,530 ms (2.04×) | 10,109 ms (1.94×) | 0.691 ms | 234 / 719 / 4,926 ms |
+| 2 | 274 ms (4.31×) | 810 ms (3.89×) | 5,153 ms (3.79×) | 0.343 ms | 147 / 409 / 2,520 ms |
+| 4 | 167 ms (7.07×) | 443 ms (7.08×) | 2,671 ms (7.34×) | 0.175 ms | 114 / 242 / 1,450 ms |
+| 8 | 122 ms (9.67×) | 268 ms (11.69×) | 1,482 ms (13.18×) | 0.0918 ms | 104 / 176 / 852 ms |
+| 16 | 121 ms (9.84×) | 199 ms (15.75×) | 901 ms (21.65×) | 0.0506 ms | 132 / 180 / 659 ms |
+| 32 | 127 ms (9.34×) | 231 ms (13.65×) | 694 ms (28.55×) | 0.0308 ms | 130 / 220 / 745 ms (hyper-threads) |
+
+The portable NumPy solve takes 1.16 / 3.12 / 19.6 s here. Inner iterations
+are 3,299 / 2,900 / 4,792 as on the x86 hosts (3,300 on 16,705 unknowns at 32
+threads, one more outer step); the 66,049-unknown case stops at the outer
+limit on both paths (residual 1.8e-6), as on the Xeon. On one thread the C++
+cycle is about 2× slower than on the Xeon: SVE2 is 128 bits wide on this
+core against 512-bit AVX-512, and the one-thread ratio to NumPy falls to 1.9
+to 2.5×, so the benchmark's own criterion misses on the non-converging
+66,049-unknown case at one thread (1.94×). From two threads on it holds on
+every case. The 32 physical cores keep scaling on the largest case, which reaches
+694 ms at 32 threads, within 6 % of the Xeon's best (659 ms at 16 cores);
+the small cases flatten from eight threads as on the Xeon.
+
+Float-accumulated dot products
+(`MAXWELL_NATIVE_AXION_C4A_FLOAT_DOTS_T{1,16,32}_RESULTS.json`):
+
+| Unknowns | float64 / float32 1 thread | float64 / float32 16 threads | float64 / float32 32 threads |
+|---:|---:|---:|---:|
+| 4,369 | 467 / 355 ms | 121 / 113 ms | 127 / 115 ms |
+| 16,705 | 1,530 / 1,156 ms | 199 / 173 ms | 231 / 216 ms |
+| 66,049 | 10,109 / 7,727 ms | 901 / 755 ms | 694 / 611 ms |
+
+Iteration counts equal the float64 runs at each thread count. float32
+accumulation gains 24 % on one thread (11 to 21 % on the Xeon) and 6 to
+16 % threaded; the criteria hold at all three counts (minimum 2.61× on one
+thread). **Decision:** unchanged. The native cycle stays opt-in, float64 and
+one thread by default; on this host a caller sets `PCB_NATIVE_THREADS` to 16
+to 32.
+
 ### CGS2 orthogonalisation (measured, not adopted)
 
 The restart-32 MGS cycle streams each basis vector twice per column (dot
@@ -481,6 +527,28 @@ and at sixteen at least 10.7×. Convergence outcomes are identical and the
 converged solutions agree to 3.3e-13. **Decision:** kept opt-in on the `exp/`
 branch as measured; the adoption question is the coupled solve below, which is
 what the operator is used for.
+
+The same benchmark on Google Axion (GCE `c4a-highcpu-32`: 32 Neoverse-V2 cores, no SMT, SVE2 with a
+128-bit vector length), Ubuntu 24.04, GCC 13.3.0 (`-O3 -mcpu=native`), NumPy 2.3.5,
+Python 3.12.3, no GPU, `OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`,
+`OMP_PLACES=cores`, runs sequential, source `6a9bf06`
+(`DC_NATIVE_AXION_C4A_RESULTS.json`):
+
+| Nodes | Portable solve | Native solve 1 / 4 / 16 / 32 threads | Native float32 action 1 / 32 threads | Inner iterations | Xeon native 1 / 16 threads |
+|---:|---:|---:|---:|---:|---:|
+| 20,402 | 40.9 ms | 85.6 (0.48×) / 22.1 (1.85×) / 6.3 (6.49×) / 4.2 ms (9.67×) | 0.087 / 0.010 ms | 60 / 60 | 45.3 / 4.9 ms |
+| 80,802 | 199.4 ms | 258.1 (0.77×) / 65.5 (3.04×) / 18.3 (10.92×) / 10.9 ms (18.32×) | 0.331 / 0.018 ms | 95 / 95 | 133.6 / 13.7 ms |
+| 206,082 | 633.6 ms | 591.0 (1.07×) / 144.5 (4.38×) / 39.2 (16.14×) / 23.0 ms (27.54×) | 0.846 / 0.034 ms | 134 / 134 | 317.9 / 28.6 ms |
+
+The native action is 3.5 to 3.9× the NumPy action on one thread, yet the
+one-thread solve is slower than the portable path on the two smaller boards.
+The action is a small part of that solve (60 to 134 inner iterations of 0.09
+to 0.85 ms); the rest of the one-thread native iteration, which includes the
+dense float32 coarse product (1,352 to 1,800 square, SVE-vectorised through
+`omp simd`), was not broken down on this host, so the cause is not
+established. From four threads on every case gains at least 1.85× and at 32
+at least 9.67×. Solutions agree to 2.3e-13. **Decision:** unchanged
+(opt-in).
 
 ## Tenstorrent Blackhole migration
 

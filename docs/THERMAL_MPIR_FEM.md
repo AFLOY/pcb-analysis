@@ -486,6 +486,30 @@ the same convergence outcome, and converged solutions within 2.7e-10 of the
 portable solve. **Decision:** adopted on the `exp/` branch. It remains opt-in
 through `native=True` / `PCB_NATIVE_THERMAL=1`.
 
+### Google Axion (AArch64)
+
+`experiments/thermal_native_benchmark.py --threads 1,2,4,8,16,32` on
+Google Axion (GCE `c4a-highcpu-32`: 32 Neoverse-V2 cores, no SMT, SVE2 with a
+128-bit vector length), Ubuntu 24.04, GCC 13.3.0 (`-O3 -mcpu=native`), NumPy 2.3.5,
+Python 3.12.3, no GPU, `OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`,
+`OMP_PLACES=cores`, runs sequential, source `6a9bf06`
+(`THERMAL_NATIVE_AXION_C4A_RESULTS.json`; the FP64 native action is in the
+measured path). Solve without construction, NumPy ratio in brackets:
+
+| Nodes | Portable | Native 1 / 4 / 16 / 32 threads | Native FP64 action 1 / 32 threads | Inner iterations portable / native (16) | Xeon native 1 / 16 threads |
+|---:|---:|---:|---:|---:|---:|
+| 13,005 | 616.4 ms | 407.6 (1.51×) / 110.8 (5.57×) / 33.2 (18.55×) / 23.0 ms (26.75×) | 0.288 / 0.020 ms | 588 / 584 | 216.5 / 26.6 ms |
+| 51,005 | 2,581.7 ms | 1,773.5 (1.46×) / 482.2 (5.35×) / 130.3 (19.81×) / 74.0 ms (34.91×) | 1.115 / 0.050 ms | 799 / 796 | 921.4 / 94.0 ms |
+| 202,005 | 13,352.0 ms | 5,721.5 (2.33×) / 1,570.5 (8.50×) / 402.6 (33.17×) / 218.4 ms (61.14×) | 4.664 / 0.181 ms | 1024 / 1016 | 2,724.9 / 239.7 ms |
+
+Construction is 147 to 158 / 572 to 610 / 1,093 to 1,224 ms (NumPy 191 / 748 /
+1,740 ms). Converged solutions agree with NumPy to 2.7e-10. As for DC, the
+one-thread native solve is about 2× the Xeon time and gains only 1.46 to
+2.33× over NumPy, so the benchmark's one-thread criterion misses on the two
+smaller cases; the one-thread iteration was not broken down on this host. Scaling continues to the 32 physical cores on every case,
+and at 32 threads the solve is faster than the Xeon at 16 (23.0 / 74.0 /
+218.4 ms against 26.6 / 94.0 / 239.7 ms). **Decision:** unchanged (opt-in).
+
 ## Electrothermal coupling
 
 `solve_pcb_dc` now reports `element_joule_loss_w` (the exact element
