@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from electrical.matrix_free_mpir_fem import CurrentTerminal, LayeredPCBMesh, PCBConductionProblem, ViaConnection
+from electrical.matrix_free_mpir_fem import LayeredPCBMesh, PCBConductionProblem, ViaConnection, VoltageTerminal
 from multiphysics.staggered_coupling import (
     BodyContact,
     CouplingConfig,
@@ -40,22 +40,26 @@ SINK_SLABS = (1.0e-3,) * 3
 SINK_K = 200.0
 TIM_K, TIM_T = 1.0e-2, 1.0e-6
 H = 12.0
-CURRENT = 6.0
+COLD_CURRENT = 6.0
 
 
-def _loop_board() -> PCBConductionProblem:
+def _loop_board(voltage_v: float | None = None) -> PCBConductionProblem:
+    """The loop held at the voltage that drives ``COLD_CURRENT`` through cold copper."""
+
     active = np.zeros((2, ROWS, COLS), dtype=bool)
     active[:, 1:5, :] = True
     mesh = LayeredPCBMesh(active, (35e-6, 35e-6), PITCH, PITCH)
     node_rows = tuple(range(1, 6))
     vias = tuple(ViaConnection((0, r, c), (1, r, c), 1.5e-3) for r in node_rows[1:-1] for c in (COLS - 1, COLS))
+    if voltage_v is None:
+        probe = solve_pcb_dc(_loop_board(1.0))
+        voltage_v = COLD_CURRENT / float(probe.voltage_terminal_current_a[0])
     return PCBConductionProblem(
         mesh,
-        (
-            CurrentTerminal(tuple((1, r, 0) for r in node_rows), CURRENT, "source"),
-            CurrentTerminal(tuple((0, r, 0) for r in node_rows), -CURRENT, "return"),
+        voltage_terminals=(
+            VoltageTerminal(tuple((1, r, 0) for r in node_rows), voltage_v, "source"),
+            VoltageTerminal(tuple((0, r, 0) for r in node_rows), 0.0, "return"),
         ),
-        reference_node=(0, 1, 0),
         vias=vias,
     )
 
@@ -166,8 +170,9 @@ def test_partitioned_sigma_t_matches_the_monolithic_electro_thermal_solution(rad
     sink_error = np.nanmax(np.abs(result.thermal.bodies[0].temperature_k - sink_reference))
     assert board_error < 3.0e-3 * rise
     assert sink_error < 3.0e-3 * rise
-    # The resistivity feedback is real and both routes agree on it.
-    assert result.loss_increase_ratio > 1.02
+    # The resistivity feedback is real and both routes agree on it; under
+    # voltage drive it lowers the loss.
+    assert result.loss_increase_ratio < 0.98
     assert result.loss_increase_ratio == pytest.approx(reference.loss_increase_ratio, rel=2.0e-3)
     np.testing.assert_allclose(result.element_temperature_k, reference.element_temperature_k, atol=3.0e-3 * rise)
     if radiating:

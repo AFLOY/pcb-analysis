@@ -12,9 +12,15 @@ partitioned (staggered) fixed point: electrical solve with the current
 conductivity field, thermal solve with the resulting Joule heat, update the
 conductivity from the element temperatures, repeat.  Each solve is warm-
 started from the previous iterate, so late iterations cost a fraction of a
-cold solve, and Aitken relaxation is available for the strongly coupled case
-where the plain iteration stalls or diverges (thermal runaway under constant
-current).
+cold solve, and Aitken relaxation rescales the step from two successive
+increments.
+
+Drive the electrical problem with voltage terminals.  Under a fixed voltage
+the loss ``V² / R(T)`` falls as the copper heats, a negative feedback with a
+unique steady state.  Current-driven coupling is deprecated: under a fixed
+current the loss ``I² R(T)`` rises with temperature, and the board runs away
+once the loop gain reaches one; :class:`ElectroThermalScenario` warns when it
+receives such a problem.
 
 Both meshes have to share the in-plane element grid; ``layer_slabs`` names the
 thermal slab that holds each electrical copper layer.
@@ -23,6 +29,7 @@ thermal slab that holds each electrical copper layer.
 from __future__ import annotations
 
 import dataclasses
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,10 +58,20 @@ from thermal.matrix_free_mpir_fem import (
 
 COPPER_TEMPERATURE_COEFFICIENT_PER_K = 3.93e-3
 
+CURRENT_DRIVEN_DEPRECATION = (
+    "current-driven electro-thermal coupling is deprecated: under a fixed current "
+    "the loss I^2 R(T) rises with temperature and the board can run away; drive "
+    "the problem with VoltageTerminal (PCBConductionProblem.voltage_terminals)"
+)
+
 
 @dataclass(frozen=True)
 class ElectroThermalScenario:
-    """One board, its electrical drive, its thermal environment, and ρ(T)."""
+    """One board, its electrical drive, its thermal environment, and ρ(T).
+
+    ``electrical`` should be voltage-driven; a current-driven problem still
+    runs but raises a :class:`DeprecationWarning`.
+    """
 
     electrical: PCBConductionProblem
     thermal_mesh: LayeredThermalMesh
@@ -97,6 +114,8 @@ class ElectroThermalScenario:
             element_heat_w=self.extra_element_heat_w,
             radiation=self.radiation,
         )
+        if not self.electrical.voltage_terminals:
+            warnings.warn(CURRENT_DRIVEN_DEPRECATION, DeprecationWarning, stacklevel=3)
 
 
 @dataclass(frozen=True)
@@ -267,8 +286,9 @@ def heated_electrical_problem(
 class TemperatureFixedPoint:
     """Relaxed fixed-point update on a temperature field with Aitken's Δ² rescaling.
 
-    A slowly contracting iteration (loss rising with temperature under
-    constant current) gets ω > 1, an oscillating one gets ω < 1.  The linear
+    A slowly contracting iteration (loss rising with temperature, as under
+    the deprecated constant-current drive) gets ω > 1, an oscillating one
+    (loss falling with temperature under constant voltage) gets ω < 1.  The linear
     resistivity model ``1 + α (T - T_ref)`` turns non-positive only far below
     the reference; an over-relaxed undershoot must not get there, so the
     plain step is taken when it would.

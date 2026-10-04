@@ -75,6 +75,13 @@ def _voltage_loop_board(voltage_v: float, rows: int = 6, cols: int = 24) -> PCBC
     )
 
 
+def _voltage_for_cold_current(current_a: float) -> float:
+    """The source voltage that drives ``current_a`` through the cold loop."""
+
+    probe = solve_pcb_dc(_voltage_loop_board(1.0))
+    return current_a / float(probe.voltage_terminal_current_a[0])
+
+
 def _thermal_mesh(problem: PCBConductionProblem) -> LayeredThermalMesh:
     active = problem.mesh.element_active
     _, rows, cols = active.shape
@@ -86,27 +93,42 @@ def _thermal_mesh(problem: PCBConductionProblem) -> LayeredThermalMesh:
     return LayeredThermalMesh((35e-6, 1.5e-3, 35e-6), PITCH, PITCH, k, through_plane_conductivity_w_per_m_k=kz)
 
 
-def _scenario(current_a: float = 2.0, **overrides) -> ElectroThermalScenario:
-    problem = _loop_board(current_a=current_a)
+def _options(**overrides) -> dict:
     options = dict(
         convection=(ConvectionBoundary("top", 10.0, AMBIENT), ConvectionBoundary("bottom", 10.0, AMBIENT)),
         conductivity_reference_temperature_k=293.15,
     )
     options.update(overrides)
-    return ElectroThermalScenario(problem, _thermal_mesh(problem), (0, 2), **options)
+    return options
 
 
-def test_isothermal_copper_reproduces_the_resistivity_law_exactly() -> None:
+def _scenario(cold_current_a: float = 2.0, **overrides) -> ElectroThermalScenario:
+    """The loop at the voltage that drives ``cold_current_a`` through cold copper."""
+
+    problem = _voltage_loop_board(_voltage_for_cold_current(cold_current_a))
+    return ElectroThermalScenario(problem, _thermal_mesh(problem), (0, 2), **_options(**overrides))
+
+
+def _current_driven_scenario(current_a: float = 2.0, **overrides) -> ElectroThermalScenario:
+    """The deprecated constant-current drive, kept for its runaway regression tests."""
+
+    problem = _loop_board(current_a=current_a)
+    with pytest.warns(DeprecationWarning, match="current-driven electro-thermal coupling is deprecated"):
+        return ElectroThermalScenario(problem, _thermal_mesh(problem), (0, 2), **_options(**overrides))
+
+
+def test_isothermal_current_drive_reproduces_the_resistivity_law_exactly() -> None:
     """With the whole copper held at T_hot the loop closes in one shot: loss = I² R(T_hot)."""
 
     problem = _loop_board()
     thermal = _thermal_mesh(problem)
     mask = np.ones(thermal.node_shape, dtype=bool)          # every node fixed
     hot = 353.15
-    scenario = ElectroThermalScenario(
-        problem, thermal, (0, 2), fixed_temperature_mask=mask, fixed_temperature_k=hot,
-        conductivity_reference_temperature_k=293.15,
-    )
+    with pytest.warns(DeprecationWarning, match="current-driven"):
+        scenario = ElectroThermalScenario(
+            problem, thermal, (0, 2), fixed_temperature_mask=mask, fixed_temperature_k=hot,
+            conductivity_reference_temperature_k=293.15,
+        )
     result = run_electro_thermal(scenario)
 
     cold = solve_pcb_dc(problem)
@@ -144,17 +166,9 @@ def test_voltage_driven_coupling_settles_below_the_cold_loss() -> None:
     """Heating raises the resistance, so under a fixed voltage the current and loss fall."""
 
     cold_current = 2.0
-    cold = solve_pcb_dc(_voltage_loop_board(1.0))
-    voltage = cold_current / float(cold.voltage_terminal_current_a[0])
-    problem = _voltage_loop_board(voltage)
-    thermal = _thermal_mesh(problem)
-    scenario = ElectroThermalScenario(
-        problem, thermal, (0, 2),
-        convection=(ConvectionBoundary("top", 10.0, AMBIENT), ConvectionBoundary("bottom", 10.0, AMBIENT)),
-        conductivity_reference_temperature_k=293.15,
-    )
-    result = run_electro_thermal(scenario)
-    current_driven = run_electro_thermal(_scenario(current_a=cold_current))
+    voltage = _voltage_for_cold_current(cold_current)
+    result = run_electro_thermal(_scenario(cold_current))
+    current_driven = run_electro_thermal(_current_driven_scenario(cold_current))
 
     assert result.converged
     # Same cold current; an equipotential pad spreads it slightly better than a
@@ -174,17 +188,17 @@ def test_zero_temperature_coefficient_needs_one_pass() -> None:
     result = run_electro_thermal(_scenario(temperature_coefficient_per_k=0.0))
     assert result.converged and result.iterations == 1
     assert result.loss_increase_ratio == 1.0
-    np.testing.assert_allclose(result.conductivity_s_per_m, _loop_board().mesh.conductivity_s_per_m)
+    np.testing.assert_allclose(result.conductivity_s_per_m, _voltage_loop_board(1e-3).mesh.conductivity_s_per_m)
 
 
 def test_coupled_state_is_self_consistent_and_aitken_saves_iterations() -> None:
-    scenario = _scenario()
+    scenario = _scenario(3.0)
     accelerated = run_electro_thermal(scenario)
     plain = run_electro_thermal(scenario, config=CouplingConfig(aitken=False))
 
     assert accelerated.converged and plain.converged
     assert accelerated.iterations < plain.iterations
-    assert accelerated.loss_increase_ratio > 1.05
+    assert accelerated.loss_increase_ratio < 0.9
     assert accelerated.thermal.max_temperature_k > AMBIENT + 10.0
     np.testing.assert_allclose(
         accelerated.electrical.joule_loss_w, plain.electrical.joule_loss_w, rtol=1e-6
@@ -206,13 +220,34 @@ def test_coupled_state_is_self_consistent_and_aitken_saves_iterations() -> None:
 
 
 def test_iteration_limit_reports_non_convergence_instead_of_raising() -> None:
-    result = run_electro_thermal(_scenario(current_a=6.0), config=CouplingConfig(max_iterations=3))
+    """Near runaway under the deprecated current drive: report, do not raise."""
+
+    result = run_electro_thermal(_current_driven_scenario(6.0), config=CouplingConfig(max_iterations=3))
     assert not result.converged and result.iterations == 3
     assert result.electrical.joule_loss_w > result.cold_joule_loss_w
 
 
+def test_voltage_drive_converges_where_current_drive_runs_away() -> None:
+    """At a cold current of 6 A the current-driven loop is near runaway; the
+    same cold operating point under voltage drive settles in a few steps."""
+
+    result = run_electro_thermal(_scenario(6.0))
+    assert result.converged and result.iterations <= 10
+    assert result.loss_increase_ratio < 1.0
+    assert float(result.electrical.voltage_terminal_current_a[0]) < 6.0
+
+
+def test_only_current_driven_scenarios_warn() -> None:
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        _scenario()
+    _current_driven_scenario()
+
+
 def test_scenario_validation() -> None:
-    problem = _loop_board()
+    problem = _voltage_loop_board(1e-3)
     thermal = _thermal_mesh(problem)
     with pytest.raises(ValueError, match="one thermal slab per electrical layer"):
         ElectroThermalScenario(problem, thermal, (0,), convection=(ConvectionBoundary("top", 5.0, AMBIENT),))
@@ -266,9 +301,16 @@ def test_run_scenario_dispatches_every_scenario_type() -> None:
     assert np.linalg.norm(emitted.emission.points[0].moments.electric_a_m) < 1e-9
 
     assert isinstance(chained, ElectroThermalEmissionResult)
-    # Hotter copper carries the same current: the loop moment and field barely move.
-    assert np.all(np.abs(chained.heating_shift_db) < 0.5)
-    np.testing.assert_allclose(chained.cold_emission.predicted_dbuv_per_m, field)
+    # Under voltage drive hotter copper carries less current; the loop field
+    # follows the supplied current, 20 log10(I_hot / I_cold).
+    hot_current = float(chained.electro_thermal.electrical.voltage_terminal_current_a[0])
+    cold_current = float(solve_pcb_dc(et.electrical).voltage_terminal_current_a[0])
+    expected_shift = 20.0 * np.log10(hot_current / cold_current)
+    assert expected_shift < 0.0
+    np.testing.assert_allclose(chained.heating_shift_db, expected_shift, atol=0.05)
+    # The cold emission of the voltage-driven loop at 2 A matches the
+    # current-driven 2 A electrical scenario to the pad equipotential effect.
+    np.testing.assert_allclose(chained.cold_emission.predicted_dbuv_per_m, field, atol=0.1)
 
     with pytest.raises(TypeError, match="unsupported scenario"):
         run_scenario(object())
