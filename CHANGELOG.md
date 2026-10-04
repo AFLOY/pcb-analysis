@@ -22,8 +22,10 @@ unchanged.
   instead of raising them.
 - Deprecated: current-driven electro-thermal coupling. `ElectroThermalScenario`
   (and through it `ElectroThermalEnclosureScenario`) raises a
-  `DeprecationWarning` for a problem without voltage terminals, because the
-  loss `I² R(T)` rises with temperature and the board can run away. Behaviour
+  `DeprecationWarning` for a problem with fewer than two voltage terminals,
+  because its copper currents are imposed, the loss `I² R(T)` rises with
+  temperature and the board can run away (one voltage terminal with current
+  loads included). Behaviour
   is unchanged. Migration: replace the pair of `CurrentTerminal`s and the
   `reference_node` with `VoltageTerminal`s on the same pad nodes. To keep a
   known cold operating current, solve once at 1 V and scale the voltage. Read

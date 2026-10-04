@@ -20,7 +20,8 @@ the loss ``V² / R(T)`` falls as the copper heats, a negative feedback with a
 unique steady state.  Current-driven coupling is deprecated: under a fixed
 current the loss ``I² R(T)`` rises with temperature, and the board runs away
 once the loop gain reaches one; :class:`ElectroThermalScenario` warns when it
-receives such a problem.
+receives such a problem.  A single voltage terminal with current loads is the
+same case: the loads fix every copper current.
 
 Both meshes have to share the in-plane element grid; ``layer_slabs`` names the
 thermal slab that holds each electrical copper layer.
@@ -59,9 +60,10 @@ from thermal.matrix_free_mpir_fem import (
 COPPER_TEMPERATURE_COEFFICIENT_PER_K = 3.93e-3
 
 CURRENT_DRIVEN_DEPRECATION = (
-    "current-driven electro-thermal coupling is deprecated: under a fixed current "
-    "the loss I^2 R(T) rises with temperature and the board can run away; drive "
-    "the problem with VoltageTerminal (PCBConductionProblem.voltage_terminals)"
+    "current-driven electro-thermal coupling is deprecated: with fewer than two "
+    "voltage terminals the current terminals fix every copper current, so the "
+    "loss I^2 R(T) rises with temperature and the board can run away; hold at "
+    "least two pads with VoltageTerminal (PCBConductionProblem.voltage_terminals)"
 )
 
 
@@ -69,8 +71,9 @@ CURRENT_DRIVEN_DEPRECATION = (
 class ElectroThermalScenario:
     """One board, its electrical drive, its thermal environment, and ρ(T).
 
-    ``electrical`` should be voltage-driven; a current-driven problem still
-    runs but raises a :class:`DeprecationWarning`.
+    ``electrical`` should be voltage-driven, with at least two voltage
+    terminals; a problem whose copper currents are all imposed (no or one
+    voltage terminal) still runs but raises a :class:`DeprecationWarning`.
     """
 
     electrical: PCBConductionProblem
@@ -114,7 +117,9 @@ class ElectroThermalScenario:
             element_heat_w=self.extra_element_heat_w,
             radiation=self.radiation,
         )
-        if not self.electrical.voltage_terminals:
+        # One voltage terminal only fixes the gauge and absorbs the current
+        # terminals' sum: every copper current is still imposed.
+        if len(self.electrical.voltage_terminals) < 2:
             warnings.warn(CURRENT_DRIVEN_DEPRECATION, DeprecationWarning, stacklevel=3)
 
 

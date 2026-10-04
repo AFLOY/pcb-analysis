@@ -244,6 +244,17 @@ def test_only_current_driven_scenarios_warn() -> None:
         warnings.simplefilter("error", DeprecationWarning)
         _scenario()
     _current_driven_scenario()
+    # One voltage terminal plus a current load still imposes every copper current.
+    board = _voltage_loop_board(1e-3)
+    source, sink = board.voltage_terminals
+    pinned = PCBConductionProblem(
+        board.mesh,
+        terminals=(CurrentTerminal(sink.nodes, -2.0, "load"),),
+        voltage_terminals=(source,),
+        vias=board.vias,
+    )
+    with pytest.warns(DeprecationWarning, match="fewer than two voltage terminals"):
+        ElectroThermalScenario(pinned, _thermal_mesh(pinned), (0, 2), **_options())
 
 
 def test_scenario_validation() -> None:

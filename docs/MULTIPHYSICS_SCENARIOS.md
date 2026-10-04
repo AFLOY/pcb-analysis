@@ -43,7 +43,11 @@ positive feedback with gain `s = α I² R₀ R_th`. For `s < 1` a steady state
 exists. For `s ≥ 1` the board runs away and no iteration converges. A real
 supply holds a voltage, not a current, through the copper, so the runaway is
 an artefact of the drive. `ElectroThermalScenario` still accepts a
-current-driven problem, but it raises a `DeprecationWarning`. The
+current-driven problem, but it raises a `DeprecationWarning`. The warning
+covers every problem with fewer than two voltage terminals. One voltage
+terminal plus current loads is the same case: that terminal only fixes the
+gauge and absorbs the loads' sum, so the loads still impose every copper
+current. The
 `ElectroThermalEnclosureScenario` loop goes through the same scenario and
 warns the same way.
 
