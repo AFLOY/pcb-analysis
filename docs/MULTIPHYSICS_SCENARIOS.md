@@ -29,6 +29,15 @@ rises with temperature, which raises the temperature: a positive feedback with
 gain `s = α I² R₀ R_th`. For `s < 1` a steady state exists; for `s ≥ 1` the
 board runs away and no iteration converges.
 
+Under constant voltage (`PCBConductionProblem.voltage_terminals`), the
+feedback is negative. A hotter conductor has more resistance, so it carries
+less current, `I = V / R(T)`, and dissipates less, `V² / R(T)`. The coupled
+state then has a lower loss than the cold solve (`loss_increase_ratio < 1`),
+and no runaway can occur. No change to the coupling loop is needed: the
+heated problem keeps its terminals, and the warm start keeps the Dirichlet
+values. `result.electrical.voltage_terminal_current_a` holds the supplied
+current at the coupled temperature.
+
 The iteration is partitioned (staggered):
 
 1. electrical solve with the current per-element conductivity and via
@@ -59,6 +68,13 @@ the cold loss, and a per-iteration history with the relaxation factor.
 - A board whose thermal nodes are all fixed at `T_hot` is isothermal, so the
   converged loss has to equal `I² R(T_hot)` exactly: the test checks
   `loss / loss_cold = 1 + α (T_hot − T_ref)` to `1e-9`, including the vias.
+- With every thermal node fixed at `T_hot` under voltage drive, the converged
+  loss is `V² / R(T_hot)`, so `loss / loss_cold = 1 / (1 + α (T_hot − T_ref))`.
+  The terminal currents scale by the same factor, to `1e-9`.
+- The convected loop is driven at the voltage that gives the current-driven
+  test's 2 A when cold. It converges with `loss_increase_ratio < 0.97`, while
+  the current-driven case gives `> 1.05`. The supplied current falls below
+  2 A, and the loss equals `V I` to `1e-8`.
 - `α = 0` completes in one pass with the reference conductivity untouched.
 - The converged conductivity equals the law evaluated at the converged
   temperature field to `1e-6`; the thermal heat input equals the electrical

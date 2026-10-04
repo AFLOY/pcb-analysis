@@ -11,6 +11,7 @@ from electrical.matrix_free_mpir_fem import (
     PCBConductionProblem,
     PCBConductionSolution,
     ViaConnection,
+    VoltageTerminal,
     solve_pcb_dc,
 )
 from emc.tiled_dipole_superposition import FCC_PART15_CLASS_B
@@ -61,6 +62,19 @@ def _loop_board(rows: int = 6, cols: int = 24, current_a: float = 2.0) -> PCBCon
     )
 
 
+def _voltage_loop_board(voltage_v: float, rows: int = 6, cols: int = 24) -> PCBConductionProblem:
+    current = _loop_board(rows, cols)
+    source, sink = current.terminals
+    return PCBConductionProblem(
+        current.mesh,
+        voltage_terminals=(
+            VoltageTerminal(source.nodes, voltage_v, "source"),
+            VoltageTerminal(sink.nodes, 0.0, "return"),
+        ),
+        vias=current.vias,
+    )
+
+
 def _thermal_mesh(problem: PCBConductionProblem) -> LayeredThermalMesh:
     active = problem.mesh.element_active
     _, rows, cols = active.shape
@@ -103,6 +117,57 @@ def test_isothermal_copper_reproduces_the_resistivity_law_exactly() -> None:
     assert result.loss_increase_ratio == pytest.approx(factor, rel=1e-9)
     np.testing.assert_allclose(result.element_temperature_k, hot)
     np.testing.assert_allclose(result.thermal.temperature_k, hot)
+
+
+def test_isothermal_voltage_drive_loses_in_inverse_proportion_to_resistance() -> None:
+    """At fixed voltage the hot copper carries I(T_hot) = V / R(T_hot): loss = V² / R(T_hot)."""
+
+    problem = _voltage_loop_board(20e-3)
+    thermal = _thermal_mesh(problem)
+    hot = 353.15
+    scenario = ElectroThermalScenario(
+        problem, thermal, (0, 2), fixed_temperature_mask=np.ones(thermal.node_shape, dtype=bool),
+        fixed_temperature_k=hot, conductivity_reference_temperature_k=293.15,
+    )
+    result = run_electro_thermal(scenario)
+
+    cold = solve_pcb_dc(problem)
+    factor = 1.0 + 3.93e-3 * (hot - 293.15)
+    assert result.converged
+    assert result.electrical.joule_loss_w == pytest.approx(cold.joule_loss_w / factor, rel=1e-9)
+    np.testing.assert_allclose(
+        result.electrical.voltage_terminal_current_a, cold.voltage_terminal_current_a / factor, rtol=1e-9
+    )
+
+
+def test_voltage_driven_coupling_settles_below_the_cold_loss() -> None:
+    """Heating raises the resistance, so under a fixed voltage the current and loss fall."""
+
+    cold_current = 2.0
+    cold = solve_pcb_dc(_voltage_loop_board(1.0))
+    voltage = cold_current / float(cold.voltage_terminal_current_a[0])
+    problem = _voltage_loop_board(voltage)
+    thermal = _thermal_mesh(problem)
+    scenario = ElectroThermalScenario(
+        problem, thermal, (0, 2),
+        convection=(ConvectionBoundary("top", 10.0, AMBIENT), ConvectionBoundary("bottom", 10.0, AMBIENT)),
+        conductivity_reference_temperature_k=293.15,
+    )
+    result = run_electro_thermal(scenario)
+    current_driven = run_electro_thermal(_scenario(current_a=cold_current))
+
+    assert result.converged
+    # Same cold current; an equipotential pad spreads it slightly better than a
+    # uniformly loaded one, hence the small difference in cold loss.
+    assert result.cold_joule_loss_w == pytest.approx(current_driven.cold_joule_loss_w, rel=1e-2)
+    assert result.loss_increase_ratio < 0.97
+    assert current_driven.loss_increase_ratio > 1.05
+    assert result.thermal.max_temperature_k > AMBIENT + 5.0
+    assert result.thermal.total_heat_input_w == pytest.approx(result.electrical.joule_loss_w, rel=1e-12)
+    supplied = float(result.electrical.voltage_terminal_current_a[0])
+    assert supplied < cold_current
+    assert float(np.sum(result.electrical.voltage_terminal_current_a)) == pytest.approx(0.0, abs=1e-9)
+    assert result.electrical.joule_loss_w == pytest.approx(voltage * supplied, rel=1e-8)
 
 
 def test_zero_temperature_coefficient_needs_one_pass() -> None:
