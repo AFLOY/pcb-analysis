@@ -4,10 +4,12 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
-## Unreleased
+## 0.9.2
 
-Voltage-driven DC conduction. Additive; existing current-driven calls are
-unchanged.
+Voltage-driven DC conduction, the N-port reduction of a conductor, and the
+electro-thermal loop driven by an external circuit. Additive; existing
+current-driven calls are unchanged apart from a deprecation warning in the
+coupled scenario.
 
 - `electrical.matrix_free_mpir_fem`: new `VoltageTerminal(nodes, voltage_v,
   name)`. `PCBConductionProblem` takes `voltage_terminals=`, and
