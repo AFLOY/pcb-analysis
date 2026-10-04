@@ -24,19 +24,37 @@ The `backend` argument reaches every solver (`"cpu"`, `"cuda"`, `"auto"`).
 ## Electro-thermal coupling
 
 Copper resistivity rises with temperature, `σ(T) = σ_ref / (1 + α (T − T_ref))`
-with `α = 3.93e-3 /K` by default. Under constant current the loss therefore
-rises with temperature, which raises the temperature: a positive feedback with
-gain `s = α I² R₀ R_th`. For `s < 1` a steady state exists; for `s ≥ 1` the
-board runs away and no iteration converges.
+with `α = 3.93e-3 /K` by default.
 
-Under constant voltage (`PCBConductionProblem.voltage_terminals`), the
-feedback is negative. A hotter conductor has more resistance, so it carries
-less current, `I = V / R(T)`, and dissipates less, `V² / R(T)`. The coupled
-state then has a lower loss than the cold solve (`loss_increase_ratio < 1`),
-and no runaway can occur. No change to the coupling loop is needed: the
-heated problem keeps its terminals, and the warm start keeps the Dirichlet
-values. `result.electrical.voltage_terminal_current_a` holds the supplied
-current at the coupled temperature.
+The electrical problem of a coupled scenario is driven by voltage
+(`PCBConductionProblem.voltage_terminals`). The feedback is then negative. A
+hotter conductor has more resistance, so it carries less current,
+`I = V / R(T)`, and dissipates less, `V² / R(T)`. The coupled state has a
+lower loss than the cold solve (`loss_increase_ratio < 1`), and no runaway
+can occur. The heated problem keeps its terminals, and the warm start keeps
+the Dirichlet values. `result.electrical.voltage_terminal_current_a` holds
+the supplied current at the coupled temperature. To start from a known cold
+operating current, solve the cold problem once at 1 V and scale the voltage,
+since the cold problem is linear in `V`.
+
+**Current drive is deprecated.** Under constant current the loss `I² R(T)`
+rises with temperature, which raises the temperature further. This is a
+positive feedback with gain `s = α I² R₀ R_th`. For `s < 1` a steady state
+exists. For `s ≥ 1` the board runs away and no iteration converges. A real
+supply holds a voltage, not a current, through the copper, so the runaway is
+an artefact of the drive. `ElectroThermalScenario` still accepts a
+current-driven problem, but it raises a `DeprecationWarning`. The
+`ElectroThermalEnclosureScenario` loop goes through the same scenario and
+warns the same way.
+
+On the test loop of `tests/test_staggered_coupling.py`, the cold current is
+set to 2, 3 and 6 A, first by voltage and then by current:
+
+| Cold current | Voltage drive: iterations Aitken / plain, loss ratio | Current drive: iterations Aitken / plain, loss ratio |
+|---:|---|---|
+| 2 A | 6 / 8, 0.881 | 5 / 8, 1.174 |
+| 3 A | 6 / 10, 0.797 | 5 / 13, 1.447 |
+| 6 A | 7 / 17, 0.585 | not converged after 40 (runaway) |
 
 The iteration is partitioned (staggered):
 
@@ -51,13 +69,16 @@ The iteration is partitioned (staggered):
 5. stop when the relaxed temperature change and the relative loss change are
    below tolerance and both inner solves converged.
 
-Aitken over-relaxes a slowly contracting iteration: for a linear feedback with
-gain `s` the plain iteration converges as `sⁿ`, Aitken jumps to the fixed point
-in one step. On the test loop (2 A, `s ≈ 0.1`) the accelerated run converges in
-5 iterations against 9 for the plain one; on a near-runaway case (`s ≈ 0.84`)
-the plain iteration is still 35 K from the fixed point after 20 steps while the
-accelerated one is within 0.2 K after 13. Over-relaxation is refused when it
-would push a node below the temperature where the linear model breaks down.
+For a linear feedback with gain `s`, the plain iteration converges as `sⁿ`,
+and Aitken jumps to the fixed point in one step. Under voltage drive, `s` is
+negative. The plain iteration then oscillates, and Aitken damps it with
+`ω < 1` (the table above). Under the deprecated current drive, `s` is
+positive. Aitken then over-relaxes the slow contraction with `ω > 1`. On a
+near-runaway current-driven case (`s ≈ 0.84`), the plain iteration was still
+35 K from the fixed point after 20 steps, while the accelerated one was
+within 0.2 K after 13. Aitken cannot rescue `s ≥ 1`. Over-relaxation is
+refused when it would push a node below the temperature where the linear
+model breaks down.
 
 The result carries both solutions, the conductivity and via resistances the
 final electrical solve used, the element temperatures of each copper layer,
@@ -65,9 +86,11 @@ the cold loss, and a per-iteration history with the relaxation factor.
 
 ### Verification
 
-- A board whose thermal nodes are all fixed at `T_hot` is isothermal, so the
-  converged loss has to equal `I² R(T_hot)` exactly: the test checks
+- A board whose thermal nodes are all fixed at `T_hot` is isothermal, so a
+  current-driven loss has to equal `I² R(T_hot)` exactly. The test checks
   `loss / loss_cold = 1 + α (T_hot − T_ref)` to `1e-9`, including the vias.
+  This test is kept as a regression test of the deprecated drive and
+  asserts the warning.
 - With every thermal node fixed at `T_hot` under voltage drive, the converged
   loss is `V² / R(T_hot)`, so `loss / loss_cold = 1 / (1 + α (T_hot − T_ref))`.
   The terminal currents scale by the same factor, to `1e-9`.
@@ -75,11 +98,18 @@ the cold loss, and a per-iteration history with the relaxation factor.
   test's 2 A when cold. It converges with `loss_increase_ratio < 0.97`, while
   the current-driven case gives `> 1.05`. The supplied current falls below
   2 A, and the loss equals `V I` to `1e-8`.
+- At a cold 6 A, the voltage-driven loop converges in at most 10 iterations
+  with a lower loss and current. The current-driven loop stops at the
+  iteration cap with `converged=False` and a rising loss. Neither raises.
+- Only a problem without voltage terminals warns.
 - `α = 0` completes in one pass with the reference conductivity untouched.
 - The converged conductivity equals the law evaluated at the converged
   temperature field to `1e-6`; the thermal heat input equals the electrical
   loss to `1e-12`; the accelerated and plain iterations agree to `1e-6`.
 - An iteration cap reports `converged=False` and keeps the last iterate.
+- The README walkthrough (`src/multiphysics/README.md`) runs on the
+  `power_module` STEP export at 0.25 mm. With 5 A cold between J1 and Q1, it
+  converges in 5 iterations, falling to 4.861 A and a loss ratio of 0.972.
 
 ## Board and separately meshed bodies
 
@@ -159,7 +189,12 @@ loop (0.5 mm grid, 35 µm copper) with a 6 × 2 × 3 mm aluminium block on a
 (`ElectroThermalScenario`, the reference) and once through the contact map,
 with and without `ε = 0.9` radiation from the board top, the board edges and
 the block. Adopted measurement `ELECTROTHERMAL_ENCLOSURE_RESULTS.json`
-(Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz):
+(Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz). The measurement and its script
+are current-driven at 6 A, recorded before current drive was deprecated. It
+still compares the partitioned and monolithic routes on the same drive. The
+test now holds the loop at the voltage that gives 6 A cold. Both routes
+agree to the same tolerances, with loss ratios of 0.747 (no radiation) and
+0.797 (radiation).
 
 | Radiation | Rise (K) | Outer iterations ref / part | Interface iterations per outer step | Loss ratio ref / part | Board diff (K) | Sink diff (K) | Wall ref / part (ms) |
 |---|---|---|---|---|---|---|---|
@@ -180,9 +215,9 @@ interface sliver, which the contact model omits.
 the sweep (quasi-static), with the terminals closed through the component by
 default. `ElectroThermalEmissionScenario` runs the electro-thermal iteration
 first, evaluates the emission of the `σ(T)`-converged current, and also of the
-cold current; `heating_shift_db` is the difference. For a loop carrying a fixed
-current the heating redistributes the current only slightly, and the test
-requires the shift to stay below 0.5 dB. `SheetPeecEmissionScenario` solves the
+cold current; `heating_shift_db` is the difference. Under voltage drive,
+heating lowers the loop current, and the shift follows
+`20 log10(I_hot / I_cold)`. The test checks this to 0.05 dB. `SheetPeecEmissionScenario` solves the
 sheet-PEEC case at each frequency, so the current distribution itself is
 frequency-resolved.
 
@@ -232,7 +267,9 @@ opt-in C++ path; the DC operator did not (see `MATRIX_FREE_MPIR_FEM.md`).
 2.3.5, `OPENBLAS_NUM_THREADS=1`, `OMP_PROC_BIND=close`, `OMP_PLACES=cores`;
 `ELECTROTHERMAL_NATIVE_XEON_8581C_RESULTS.json`). The board of the DC
 benchmark on a three-slab thermal stack (35 µm copper, 1.5 mm laminate,
-35 µm copper), 10 W/m²/K on both faces, ρ(T) copper, 10 A. One whole
+35 µm copper), 10 W/m²/K on both faces, ρ(T) copper, 10 A of current drive.
+The drive is now deprecated, but the timings measure the solvers, which do
+not depend on it. One whole
 `run_electro_thermal`, every solve and every operator construction included,
 both solvers portable against both native:
 
@@ -302,7 +339,8 @@ adopted pipeline was run twice on the same host and the same inputs
 board's settings plus `thermal_coupling.enabled`, `geometry_interface.
 authoritative = "grid"` (the STEP default needs `kicad-cli`, absent here),
 `sheet_peec` current field, one bootstrap order, 03 skipped, physics and
-contour workers in parallel, `OPENBLAS_NUM_THREADS=1`.
+contour workers in parallel, `OPENBLAS_NUM_THREADS=1`. Kicad_PowerOpt's
+adapter was current-driven at the time.
 
 | pcb-analysis | Native flags | Wall | User CPU | Thermal coupling, 9 cases standalone |
 |---|---|---:|---:|---:|
@@ -332,6 +370,10 @@ step.
 
 - The thermal feedback is through copper resistivity only. Laminate
   conductivity, film coefficients, and component power are held fixed.
+- Voltage terminals are ideal sources. A load is either a pad held at a
+  voltage or a fixed current terminal. A load whose current depends on its
+  voltage (a resistor or a constant-power converter), and a source with
+  internal resistance, are not modelled.
 - The electrical solve is DC; the emission sweep therefore assumes the
   current pattern is frequency-independent. Use `SheetPeecEmissionScenario`
   where skin and proximity effects matter, at the cost of one sheet solve

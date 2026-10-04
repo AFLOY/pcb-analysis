@@ -20,6 +20,17 @@ unchanged.
 - `multiphysics.staggered_coupling`: `run_electro_thermal` accepts a
   voltage-driven problem as is. Heating lowers the current and the loss
   instead of raising them.
+- Deprecated: current-driven electro-thermal coupling. `ElectroThermalScenario`
+  (and through it `ElectroThermalEnclosureScenario`) raises a
+  `DeprecationWarning` for a problem without voltage terminals, because the
+  loss `I² R(T)` rises with temperature and the board can run away. Behaviour
+  is unchanged. Migration: replace the pair of `CurrentTerminal`s and the
+  `reference_node` with `VoltageTerminal`s on the same pad nodes. To keep a
+  known cold operating current, solve once at 1 V and scale the voltage. Read
+  the supplied current from `electrical.voltage_terminal_current_a`. The
+  coupled demo, the multiphysics README and the coupling tests now use
+  voltage drive. The archived current-driven measurements are labelled as
+  such.
 - `emc.tiled_dipole_superposition`: `terminal_closure_dipoles` takes
   `voltage_terminal_current_a=`, and `dipoles_from_pcb_dc(close_terminals=True)`
   supplies it from the solution.

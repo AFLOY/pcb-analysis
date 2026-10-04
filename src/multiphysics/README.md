@@ -2,9 +2,16 @@
 
 `multiphysics.staggered_coupling` chains the electrical, thermal and EMC
 solvers into one analysis. Its central case is the electro-thermal fixed
-point: copper conductivity falls as the board heats, which raises the loss,
-which heats the board. It owns no solver; a scenario dataclass says what is
-coupled, and `run_scenario` runs it.
+point: copper conductivity falls as the board heats, the current through
+the copper changes, and the loss changes the heating. It owns no solver; a
+scenario dataclass says what is coupled, and `run_scenario` runs it.
+
+Drive the coupled electrical problem by voltage (`VoltageTerminal`). With a
+fixed voltage, hotter copper carries less current and loses less
+(`V² / R(T)`), so the iteration settles. A fixed current does the opposite:
+the loss `I² R(T)` rises with temperature, and the board runs away once the
+loop gain reaches one. Current-driven coupling is therefore deprecated, and
+`ElectroThermalScenario` raises a `DeprecationWarning` for it.
 
 ## Walkthrough: from a KiCad board to a self-consistent hot board
 
@@ -32,17 +39,20 @@ resolved = resolve_bodies(load_step("power_module.step"), body_map)
 raster = rasterize_board(resolved, body_map.board, pitch_mm=0.25, y_down=True)
 ```
 
-### 3. The electrical side: terminals on pads, one DC current case
+### 3. The electrical side: voltage terminals on pads
 
 The coupled loop uses the matrix-free DC solver. Every copper cell is an
 element, and a terminal is the nodes at the corners of a pad's cells. Here
-5 A enter at J1 pad 3 and leave at Q1 pad 3. Each pad's centre is read
-from the KiCad board (in mm), and the nodes of the copper cells under it
-become the terminal.
+J1 pad 3 is held at the source voltage and Q1 pad 3 at 0 V. Each pad's
+centre is read from the KiCad board (in mm), and the nodes of the copper
+cells under it become the terminal. A voltage terminal holds all of its
+nodes at one potential, as a soldered lead would.
 The [electrical README](../electrical/README.md) explains each piece.
 
 ```python
-from electrical.matrix_free_mpir_fem import CurrentTerminal, LayeredPCBMesh, PCBConductionProblem, ViaConnection
+from electrical.matrix_free_mpir_fem import (
+    LayeredPCBMesh, PCBConductionProblem, ViaConnection, VoltageTerminal, solve_pcb_dc,
+)
 
 def pad_nodes(layer, x_mm, y_mm, half_width_mm=0.5):
     row, col = raster.cell_of(x_mm * 1e-3, -y_mm * 1e-3)   # the STEP export negates KiCad's y
@@ -60,9 +70,17 @@ mesh = LayeredPCBMesh(
 vias = tuple(ViaConnection((0, y, x), (1, y, x), 1.68e-8 * b.height_m / b.wall_area_m2)
              for (y, x), b in board_barrels(resolved, raster).items())
 source, sink = pad_nodes("F.Cu", 129.0, 97.58), pad_nodes("F.Cu", 149.26, 95.675)
-pcb_problem = PCBConductionProblem(
-    mesh, (CurrentTerminal(source, 5.0, "VIN"), CurrentTerminal(sink, -5.0, "SRC")), reference_node=sink[0], vias=vias,
-)
+
+def pad_to_pad(voltage_v):
+    return PCBConductionProblem(
+        mesh,
+        voltage_terminals=(VoltageTerminal(source, voltage_v, "VIN"), VoltageTerminal(sink, 0.0, "SRC")),
+        vias=vias,
+    )
+
+# The cold problem is linear in V; pick the drop that carries 5 A through cold copper.
+probe = solve_pcb_dc(pad_to_pad(1.0))
+pcb_problem = pad_to_pad(5.0 / probe.voltage_terminal_current_a[0])
 ```
 
 ### 4. The thermal side: mesh and boundaries
@@ -93,7 +111,8 @@ coupled = run_scenario(coupled_scenario)
 ```python
 print(f"converged {coupled.converged} in {coupled.iterations} iterations; "
       f"loss {coupled.cold_joule_loss_w:.3f} W cold -> {coupled.electrical.joule_loss_w:.3f} W hot "
-      f"(x{coupled.loss_increase_ratio:.3f}); peak {coupled.thermal.max_temperature_k - ambient_k:.2f} K above ambient")
+      f"(x{coupled.loss_increase_ratio:.3f}); peak {coupled.thermal.max_temperature_k - ambient_k:.2f} K above ambient; "
+      f"current 5 A cold -> {coupled.electrical.voltage_terminal_current_a[0]:.3f} A hot")
 ```
 
 ### 7. Add radiated emission of the hot board
@@ -116,7 +135,7 @@ print(f"worst CISPR 32 class B margin {chained.emission.worst_margin_db:+.1f} dB
 | Scenario | What it couples |
 |---|---|
 | `ElectricalScenario`, `ThermalScenario`, `ThermalTransientScenario` | one solver, same entry point |
-| `ElectroThermalScenario` | DC conduction and heat conduction, with σ(T) copper and via R(T) |
+| `ElectroThermalScenario` | DC conduction and heat conduction, with σ(T) copper and via R(T); voltage-driven |
 | `ElectroThermalEnclosureScenario` | the same loop across the contact with separately meshed heat sinks or enclosures |
 | `ElectroEmissionScenario` | emission of the cold DC current |
 | `ElectroThermalEmissionScenario` | emission of the heated and the cold current |
