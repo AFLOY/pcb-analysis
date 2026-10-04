@@ -183,6 +183,22 @@ circuit, not the terminals, decides how the currents respond to `R(T)`.
   or returns a wrong-sized correlation, Thevenin ports that do not match the
   copper ports, and an all-open conductor are rejected.
 
+### Cost against the voltage-driven loop (measured, `PORT_BASIS_RESULTS.json`)
+
+The same benchmark runs one whole `run_electro_thermal` with two voltage
+terminals and one whole `run_circuit_coupled` with the same pads as ideal
+Thevenin ports, 10 A cold, 10 W/m²/K on both faces
+(AMD Ryzen 7 9700X 8-Core Processor, 16 logical CPUs, Python 3.12.14, NumPy 2.3.5, DC native extension on, thermal native not built, `OPENBLAS_NUM_THREADS=1`, source `94f87b0`, 2026-10-04):
+
+| Elements / nodes | Voltage-driven loop (wall / iterations) | Circuit-coupled loop | Wall ratio | Loss difference (relative) | Temperature difference (K) | Rise (K) |
+|---|---:|---:|---:|---:|---:|---:|
+| 100² / 20,402 | 6.5 s / 4 | 6.5 s / 4 | 1.00 | 7.8e-14 | 1.4e-12 | 0.61 |
+| 200² / 80,802 | 18.4 s / 4 | 18.7 s / 4 | 1.01 | 3.3e-14 | 1.3e-12 | 0.61 |
+
+The two loops take the same iterations and reach the same state; the
+N-port route adds no measurable cost for two ports. **Decision:**
+adopted.
+
 ## Board and separately meshed bodies
 
 A heat sink, enclosure or component body keeps its own `LayeredThermalMesh`

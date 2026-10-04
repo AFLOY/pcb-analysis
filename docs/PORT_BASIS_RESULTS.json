@@ -1,0 +1,228 @@
+{
+  "benchmark": "port_basis_benchmark",
+  "source": "94f87b0",
+  "timestamp_utc": "2026-10-04T11:15:33.000067+00:00",
+  "environment": {
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+    "cpu_count": 16,
+    "compiler": "g++ (Ubuntu 12.5.0-9ubuntu1) 12.5.0",
+    "device": "cpu",
+    "dc_native_available": true,
+    "dc_native_requested": true,
+    "thermal_native_available": false,
+    "openblas_num_threads": "1",
+    "pcb_native_threads": null
+  },
+  "settings": {
+    "sizes": [
+      100,
+      200
+    ],
+    "repeats": 3,
+    "cold_current_a": 10.0,
+    "solver": {
+      "relative_tolerance": 1e-08,
+      "max_inner_iterations": 400,
+      "max_outer_iterations": 16
+    },
+    "coupling": {
+      "max_iterations": 20,
+      "temperature_tolerance_k": 0.001,
+      "relative_loss_tolerance": 1e-06
+    }
+  },
+  "cases": [
+    {
+      "elements": 100,
+      "nodes": 20402,
+      "vias": 144,
+      "single_voltage_solve": {
+        "converged": true,
+        "inner_iterations": 39,
+        "median_ms": 227.2260479949182,
+        "minimum_ms": 226.43187201174442,
+        "maximum_ms": 228.32369100069627,
+        "samples_ms": [
+          226.43187201174442,
+          227.2260479949182,
+          228.32369100069627
+        ],
+        "repeats": 3
+      },
+      "bases": [
+        {
+          "ports": 2,
+          "converged": true,
+          "inner_iterations": 39,
+          "over_unit_solves": 0.977709364553983,
+          "median_ms": 222.16103499522433,
+          "minimum_ms": 220.71686999697704,
+          "maximum_ms": 223.09711000707466,
+          "samples_ms": [
+            223.09711000707466,
+            220.71686999697704,
+            222.16103499522433
+          ],
+          "repeats": 3
+        },
+        {
+          "ports": 3,
+          "converged": true,
+          "inner_iterations": 80,
+          "over_unit_solves": 0.5730503243422377,
+          "median_ms": 260.42392100498546,
+          "minimum_ms": 259.0256640105508,
+          "maximum_ms": 262.38710700999945,
+          "samples_ms": [
+            260.42392100498546,
+            259.0256640105508,
+            262.38710700999945
+          ],
+          "repeats": 3
+        },
+        {
+          "ports": 5,
+          "converged": true,
+          "inner_iterations": 162,
+          "over_unit_solves": 0.36909084804682396,
+          "median_ms": 335.4682190110907,
+          "minimum_ms": 333.91632899292745,
+          "maximum_ms": 336.67912999226246,
+          "samples_ms": [
+            336.67912999226246,
+            333.91632899292745,
+            335.4682190110907
+          ],
+          "repeats": 3,
+          "mean_loss_w_ms": 1.217062002979219,
+          "rms_current_density_ms": 1.437793005607091
+        }
+      ],
+      "coupled": {
+        "source_voltage_v": 0.004083284457666556,
+        "voltage_driven": {
+          "wall_s": 6.464399691991275,
+          "iterations": 4,
+          "converged": true,
+          "joule_loss_w": 0.03995786448850202,
+          "loss_increase_ratio": 0.978571662001828,
+          "max_temperature_rise_k": 0.6104386450429047,
+          "hot_current_a": 9.785716551419688
+        },
+        "circuit_coupled": {
+          "wall_s": 6.484526419008034,
+          "iterations": 4,
+          "converged": true,
+          "joule_loss_w": 0.03995786448850513,
+          "loss_increase_ratio": 0.9785716620019043,
+          "max_temperature_rise_k": 0.6104386450430184,
+          "hot_current_a": 9.78571655142934
+        },
+        "wall_ratio": 1.0031134719348642,
+        "relative_loss_difference": 7.779756272623011e-14,
+        "max_temperature_difference_k": 1.3642420526593924e-12
+      }
+    },
+    {
+      "elements": 200,
+      "nodes": 80802,
+      "vias": 144,
+      "single_voltage_solve": {
+        "converged": true,
+        "inner_iterations": 56,
+        "median_ms": 440.38144098885823,
+        "minimum_ms": 439.9967770004878,
+        "maximum_ms": 440.54468200192787,
+        "samples_ms": [
+          440.38144098885823,
+          440.54468200192787,
+          439.9967770004878
+        ],
+        "repeats": 3
+      },
+      "bases": [
+        {
+          "ports": 2,
+          "converged": true,
+          "inner_iterations": 56,
+          "over_unit_solves": 0.990117651241309,
+          "median_ms": 436.02943800215144,
+          "minimum_ms": 434.2425189970527,
+          "maximum_ms": 436.3973100116709,
+          "samples_ms": [
+            436.02943800215144,
+            436.3973100116709,
+            434.2425189970527
+          ],
+          "repeats": 3
+        },
+        {
+          "ports": 3,
+          "converged": true,
+          "inner_iterations": 120,
+          "over_unit_solves": 0.6549276403510648,
+          "median_ms": 576.8359560024692,
+          "minimum_ms": 573.7930610048352,
+          "maximum_ms": 581.8662230012706,
+          "samples_ms": [
+            581.8662230012706,
+            576.8359560024692,
+            573.7930610048352
+          ],
+          "repeats": 3
+        },
+        {
+          "ports": 5,
+          "converged": true,
+          "inner_iterations": 247,
+          "over_unit_solves": 0.4252061674761439,
+          "median_ms": 749.0116190019762,
+          "minimum_ms": 748.1909439957235,
+          "maximum_ms": 773.3285410067765,
+          "samples_ms": [
+            749.0116190019762,
+            773.3285410067765,
+            748.1909439957235
+          ],
+          "repeats": 3,
+          "mean_loss_w_ms": 4.335270990850404,
+          "rms_current_density_ms": 5.588280997471884
+        }
+      ],
+      "coupled": {
+        "source_voltage_v": 0.0040973426969799715,
+        "voltage_driven": {
+          "wall_s": 18.412928043006104,
+          "iterations": 4,
+          "converged": true,
+          "joule_loss_w": 0.04009516063397661,
+          "loss_increase_ratio": 0.9785649002939195,
+          "max_temperature_rise_k": 0.611971253705633,
+          "hot_current_a": 9.785649726617718
+        },
+        "circuit_coupled": {
+          "wall_s": 18.680053529998986,
+          "iterations": 4,
+          "converged": true,
+          "joule_loss_w": 0.04009516063397795,
+          "loss_increase_ratio": 0.9785649002939524,
+          "max_temperature_rise_k": 0.6119712537043824,
+          "hot_current_a": 9.785649726600473
+        },
+        "wall_ratio": 1.0145074963834633,
+        "relative_loss_difference": 3.340070228623183e-14,
+        "max_temperature_difference_k": 1.2505552149377763e-12
+      }
+    }
+  ],
+  "decision": {
+    "adopted": true,
+    "criteria": "every N-port basis within 1.3x of (n-1) unit solves and converged; circuit-coupled loop equals the voltage-driven loop (loss 1e-06 relative, temperature 0.001 K) within 1.5x of its wall time",
+    "basis_within_limit": true,
+    "coupled_parity": true,
+    "coupled_within_limit": true
+  }
+}

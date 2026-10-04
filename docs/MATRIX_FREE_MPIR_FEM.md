@@ -164,6 +164,25 @@ Tests (`tests/test_dc_ports.py`, `tests/test_native_dc.py`):
   fewer inner iterations and gives the same `G` to `1e-7`.
 - The fused C++ path matches the NumPy path to `1e-8`.
 
+### Cost of the reduction (measured, `PORT_BASIS_RESULTS.json`)
+
+`experiments/port_basis_benchmark.py --sizes 100,200 --repeats 3` on the
+board of `dc_native_benchmark.py` (60 mm square, two layers, a slot, a via
+bank), AMD Ryzen 7 9700X 8-Core Processor, 16 logical CPUs, Python 3.12.14, NumPy 2.3.5, DC native extension on, thermal native not built, `OPENBLAS_NUM_THREADS=1`, source `94f87b0`, 2026-10-04. Medians of 3 runs; the single
+solve is one voltage-driven `solve_pcb_dc` between the edge pads, the bases
+add interior taps:
+
+| Elements / nodes | Single voltage solve (ms) | 2 ports (× (n−1) solves) | 3 ports | 5 ports | `mean_loss_w`, 5 ports (ms) |
+|---|---:|---:|---:|---:|---:|
+| 100² / 20,402 | 227 | 222 (0.98×) | 260 (0.57×) | 335 (0.37×) | 1.2 |
+| 200² / 80,802 | 440 | 436 (0.99×) | 577 (0.65×) | 749 (0.43×) | 4.3 |
+
+A basis of `n` ports costs less than `n − 1` single solves because the
+operator and its two-level preconditioner are built once and shared by
+every unit solve; the loss reconstruction from a correlation matrix is
+milliseconds. **Decision:** adopted
+(every N-port basis within 1.3x of (n-1) unit solves and converged; circuit-coupled loop equals the voltage-driven loop (loss 1e-06 relative, temperature 0.001 K) within 1.5x of its wall time).
+
 ## Software boundary
 
 The package is divided into three parts:
