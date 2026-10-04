@@ -32,7 +32,7 @@ from __future__ import annotations
 import dataclasses
 import warnings
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -41,6 +41,7 @@ from electrical.matrix_free_mpir_fem import (
     PCBConductionProblem,
     PCBConductionSolution,
     RuntimeBackend,
+    ViaConnection,
     solve_pcb_dc,
 )
 from thermal.matrix_free_mpir_fem import (
@@ -205,12 +206,23 @@ def via_node_temperature_k(
     layer_slabs: tuple[int, ...],
     problem: PCBConductionProblem,
 ) -> np.ndarray:
+    """Mean temperature over the two endpoints of every via of ``problem``."""
+
+    return via_temperature_k(temperature_k, thermal_mesh, layer_slabs, problem.vias)
+
+
+def via_temperature_k(
+    temperature_k: np.ndarray,
+    thermal_mesh: LayeredThermalMesh,
+    layer_slabs: tuple[int, ...],
+    vias: Sequence[ViaConnection],
+) -> np.ndarray:
     """Mean temperature over the two endpoints of every via, each endpoint being
     the average of the thermal node faces bounding its copper slab."""
 
     grid = np.asarray(temperature_k, dtype=np.float64).reshape(thermal_mesh.node_shape)
     values = []
-    for via in problem.vias:
+    for via in vias:
         endpoint_temperatures = []
         for layer, row, col in (via.lower, via.upper):
             slab = layer_slabs[layer]

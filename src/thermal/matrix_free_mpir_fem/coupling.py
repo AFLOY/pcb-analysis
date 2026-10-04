@@ -14,6 +14,7 @@ from typing import Sequence
 import numpy as np
 
 from electrical.matrix_free_mpir_fem.pcb import (
+    ViaConnection,
     PCBConductionProblem,
     PCBConductionSolution,
 )
@@ -35,6 +36,27 @@ def _check_layer_slabs(
     return slabs
 
 
+def element_heat_from_losses(
+    element_loss_w: np.ndarray,
+    thermal_mesh: LayeredThermalMesh,
+    layer_slabs: Sequence[int],
+) -> np.ndarray:
+    """Place a per-element copper loss array ``(layers, rows, cols)`` into the
+    thermal element grid ``(slabs, rows, cols)``."""
+
+    element_loss = np.asarray(element_loss_w, dtype=np.float64)
+    slabs, rows, cols = thermal_mesh.element_grid_shape
+    if element_loss.ndim != 3 or element_loss.shape[1:] != (rows, cols):
+        raise ValueError(
+            "the electrical element grid must match the thermal (rows, cols) footprint"
+        )
+    mapping = _check_layer_slabs(layer_slabs, element_loss.shape[0], slabs)
+    heat = np.zeros((slabs, rows, cols), dtype=np.float64)
+    for layer, slab in enumerate(mapping):
+        heat[slab] += element_loss[layer]
+    return heat
+
+
 def element_joule_heat_w(
     solution: PCBConductionSolution,
     thermal_mesh: LayeredThermalMesh,
@@ -48,26 +70,17 @@ def element_joule_heat_w(
     :func:`via_joule_heat_sources` because vias sit between element slabs.
     """
 
-    element_loss = np.asarray(solution.element_joule_loss_w, dtype=np.float64)
-    slabs, rows, cols = thermal_mesh.element_grid_shape
-    if element_loss.ndim != 3 or element_loss.shape[1:] != (rows, cols):
-        raise ValueError(
-            "the electrical element grid must match the thermal (rows, cols) footprint"
-        )
-    mapping = _check_layer_slabs(layer_slabs, element_loss.shape[0], slabs)
-    heat = np.zeros((slabs, rows, cols), dtype=np.float64)
-    for layer, slab in enumerate(mapping):
-        heat[slab] += element_loss[layer]
-    return heat
+    return element_heat_from_losses(solution.element_joule_loss_w, thermal_mesh, layer_slabs)
 
 
-def via_joule_heat_sources(
-    problem: PCBConductionProblem,
-    solution: PCBConductionSolution,
+def via_heat_sources(
+    vias: Sequence[ViaConnection],
+    via_loss_w: np.ndarray,
+    layer_count: int,
     thermal_mesh: LayeredThermalMesh,
     layer_slabs: Sequence[int],
 ) -> tuple[HeatSource, ...]:
-    """Turn each via's Joule loss into nodal heat at its two endpoints.
+    """Turn each via's loss into nodal heat at its two endpoints.
 
     Half of a via's loss goes to each endpoint.  An endpoint on electrical
     layer ``L`` lands on the two thermal node faces bounding slab
@@ -76,14 +89,13 @@ def via_joule_heat_sources(
     """
 
     slabs, rows, cols = thermal_mesh.element_grid_shape
-    layer_count = problem.mesh.node_shape[0]
     mapping = _check_layer_slabs(layer_slabs, layer_count, slabs)
-    losses = np.asarray(solution.via_joule_loss_w, dtype=np.float64)
-    if losses.shape != (len(problem.vias),):
-        raise ValueError("solution.via_joule_loss_w must hold one value per via")
+    losses = np.asarray(via_loss_w, dtype=np.float64)
+    if losses.shape != (len(vias),):
+        raise ValueError("via_loss_w must hold one value per via")
 
     sources: list[HeatSource] = []
-    for index, (via, loss) in enumerate(zip(problem.vias, losses)):
+    for index, (via, loss) in enumerate(zip(vias, losses)):
         for end, node in (("lower", via.lower), ("upper", via.upper)):
             layer, row, col = node
             if row > rows or col > cols:
@@ -97,3 +109,21 @@ def via_joule_heat_sources(
                 )
             )
     return tuple(sources)
+
+
+def via_joule_heat_sources(
+    problem: PCBConductionProblem,
+    solution: PCBConductionSolution,
+    thermal_mesh: LayeredThermalMesh,
+    layer_slabs: Sequence[int],
+) -> tuple[HeatSource, ...]:
+    """Nodal heat of every via of a current- or voltage-driven solve; see
+    :func:`via_heat_sources`."""
+
+    return via_heat_sources(
+        problem.vias,
+        solution.via_joule_loss_w,
+        problem.mesh.node_shape[0],
+        thermal_mesh,
+        layer_slabs,
+    )

@@ -115,6 +115,74 @@ the cold loss, and a per-iteration history with the relaxation factor.
   `power_module` STEP export at 0.25 mm. With 5 A cold between J1 and Q1, it
   converges in 5 iterations, falling to 4.861 A and a loss ratio of 0.972.
 
+## Circuit-coupled electro-thermal analysis
+
+`CircuitCoupledScenario` replaces the terminals of the electro-thermal loop
+by an external circuit. Each conductor role (`CoupledConductor`: its copper,
+its pads as a `PortSet`, its vias, its thermal slabs) is reduced to an
+N-port at every coupling iteration (`dc_port_basis`, see
+[MATRIX_FREE_MPIR_FEM.md](MATRIX_FREE_MPIR_FEM.md)); the circuit
+(`PortCircuit.excite`) receives every conductor's conductance matrix at the
+current temperature and returns every conductor's excitation
+(`PortExcitation`): the second moments `C = ⟨I Iᵀ⟩` of its port currents over
+the averaging window. The loss of every element and via follows from `C`
+and the unit fields without another field solve, heats the board, and the
+loop continues as in `run_electro_thermal` (warm starts, Aitken, the same
+`CouplingConfig`). The result carries, per conductor, the final basis, the
+excitation, the element and via losses, the RMS current density and the
+element temperatures.
+
+Why the second moments: temperature follows the time-averaged loss
+(the thermal time constant of a board is of the order of 100 s against
+switching periods of microseconds), and the copper is linear, so the
+instantaneous current distribution is the superposition of the unit fields
+and its average loss needs only `⟨I_k I_l⟩`. Averaging the currents first
+would drop the ripple and the cross terms between pads that share copper;
+a per-pad path resistance would drop the cross terms too. For an
+interleaved multi-phase converter, the window must be the period common to
+all phases, so that the cancellation of the ripples on shared copper and
+the full current of each phase on its own feed both appear.
+
+Two implementations of the circuit exist or are planned:
+
+- `LinearTheveninCircuit`: every pad behind a resistance to a fixed
+  potential (`TheveninPort`; `0 Ω` is an ideal voltage, `inf` an open pad).
+  It solves `(G + diag(1/r)) V = v / r` in closed form and returns
+  `C = I Iᵀ`. This is the path for a board without a circuit model; a
+  source with internal resistance and a resistive load are expressed
+  directly.
+- A circuit-simulator adapter (Kicad_PowerOpt's ngspice adapter, planned)
+  that inserts the N-port into its deck, runs the transient and returns the
+  second moments of the measured pad currents over the switching window.
+  Nothing in this package changes for it.
+
+Current drive is the limit `r → ∞` with `v = I r`, and voltage drive the
+limit `r = 0`; the scenario raises no deprecation warning, because the
+circuit, not the terminals, decides how the currents respond to `R(T)`.
+
+### Verification
+
+`tests/test_circuit_coupled.py`:
+
+- With both pads ideal (`r = 0`), the result equals the voltage-driven
+  `run_electro_thermal` loop: loss to `1e-6`, cold loss to `1e-8`, peak
+  temperature to `1e-4 K`, element losses to `1e-5`.
+- A stiff source (`r = 1 kΩ`, `v = I r`) reproduces the loss-increase ratio
+  of the deprecated current-driven loop to `1e-3` (the pads differ:
+  equipotential against uniform current).
+- With `α = 0`, a source behind `20 mΩ` into a `50 mΩ` load carries
+  `V / (r_s + R_cu + r_L)` with `R_cu` read from the basis, loses `I² R_cu`,
+  and reports the pad voltages, all to `1e-9`.
+- Two 180°-interleaved triangular-ripple phases into one shared neck, as a
+  synthetic circuit returning the window's second moments: the same mean
+  currents with ripple lose more and run hotter than without; the loss
+  gain is largest on the per-phase feeds and smaller, but above one, on the
+  shared neck where the interleaved ripples partly cancel; the heat input
+  equals the loss to `1e-12`; the circuit is called once per iteration.
+- `run_scenario` dispatches the scenario; a circuit that omits a conductor
+  or returns a wrong-sized correlation, Thevenin ports that do not match the
+  copper ports, and an all-open conductor are rejected.
+
 ## Board and separately meshed bodies
 
 A heat sink, enclosure or component body keeps its own `LayeredThermalMesh`

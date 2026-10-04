@@ -6,6 +6,19 @@ The emission chains hand a converged current distribution to the dipole
 superposition.  ``run_scenario`` dispatches on the scenario dataclass.
 """
 
+from .circuit_coupled import (
+    CircuitCoupledResult,
+    CircuitCoupledScenario,
+    CircuitCoupledStep,
+    ConductorState,
+    CoupledConductor,
+    LinearTheveninCircuit,
+    PortCircuit,
+    PortExcitation,
+    PortNetwork,
+    TheveninPort,
+    run_circuit_coupled,
+)
 from .board_enclosure import (
     BoardEnclosureThermalResult,
     BoardEnclosureThermalScenario,
@@ -28,6 +41,7 @@ from .electro_thermal import (
     slab_element_temperature_k,
     thermal_problem_with_joule_heat,
     via_node_temperature_k,
+    via_temperature_k,
 )
 from .electro_thermal_enclosure import (
     ElectroThermalEnclosureResult,
@@ -59,6 +73,18 @@ from .scenarios import (
 )
 
 __all__ = [
+    "CircuitCoupledResult",
+    "CircuitCoupledScenario",
+    "CircuitCoupledStep",
+    "ConductorState",
+    "CoupledConductor",
+    "LinearTheveninCircuit",
+    "PortCircuit",
+    "PortExcitation",
+    "PortNetwork",
+    "TheveninPort",
+    "run_circuit_coupled",
+    "via_temperature_k",
     "BoardEnclosureThermalResult",
     "BoardEnclosureThermalScenario",
     "BodyContact",

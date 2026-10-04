@@ -62,6 +62,7 @@ from .emission import (
     run_pcb_dc_emission,
     run_sheet_peec_emission,
 )
+from .circuit_coupled import CircuitCoupledResult, CircuitCoupledScenario, run_circuit_coupled
 
 
 @dataclass(frozen=True)
@@ -259,6 +260,11 @@ def _(scenario: SheetPeecEmissionScenario, *, backend: str | None = None, device
         **(scenario.solve_options or {}),
     )
     return SheetPeecEmissionResult(solutions=solutions, emission=emission)
+
+
+@run_scenario.register
+def _(scenario: CircuitCoupledScenario, *, backend: str | None = None, device_id: int = 0) -> CircuitCoupledResult:
+    return run_circuit_coupled(scenario, backend=backend, device_id=device_id)
 
 
 def run_scenarios(

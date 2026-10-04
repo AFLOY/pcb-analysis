@@ -20,6 +20,19 @@ unchanged.
 - `multiphysics.staggered_coupling`: `run_electro_thermal` accepts a
   voltage-driven problem as is. Heating lowers the current and the loss
   instead of raising them.
+- `electrical.matrix_free_mpir_fem`: `PortSet`, `dc_port_basis` and
+  `DCPortBasis` reduce one conductor to an N-port at its pads with `n − 1`
+  unit voltage solves (conductance matrix, unit fields) and turn the second
+  moments `⟨I Iᵀ⟩` of any port-current waveform into the time-averaged loss
+  of every element and via and the RMS current density.
+- `multiphysics.staggered_coupling`: `CircuitCoupledScenario` and
+  `run_circuit_coupled` iterate the N-port of every conductor role, an
+  external circuit (`PortCircuit` protocol; `LinearTheveninCircuit` built in)
+  and the thermal solve to a self-consistent ρ(T) state. `via_temperature_k`
+  takes a via sequence. `run_scenario` dispatches the new scenario.
+- `thermal.matrix_free_mpir_fem`: `element_heat_from_losses` and
+  `via_heat_sources` map loss arrays onto the thermal stack; the solution-
+  based `element_joule_heat_w` and `via_joule_heat_sources` delegate to them.
 - Deprecated: current-driven electro-thermal coupling. `ElectroThermalScenario`
   (and through it `ElectroThermalEnclosureScenario`) raises a
   `DeprecationWarning` for a problem with fewer than two voltage terminals,

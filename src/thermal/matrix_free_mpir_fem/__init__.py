@@ -28,7 +28,12 @@ from .radiation import (
 from .solve import ThermalConductionSolution, solve_thermal_conduction
 from .transient import TimeSchedule, TransientStep, TransientThermalSolution, solve_thermal_transient
 from .contact import ContactMap, planar_contact_map
-from .coupling import element_joule_heat_w, via_joule_heat_sources
+from .coupling import (
+    element_heat_from_losses,
+    element_joule_heat_w,
+    via_heat_sources,
+    via_joule_heat_sources,
+)
 from .two_level import AggregationCoarseCorrection, choose_block_size
 from .voxel import VoxelMaterial, VoxelSolidModel, VoxelThermalMesh
 
@@ -56,6 +61,8 @@ __all__ = [
     "VoxelSolidModel",
     "VoxelThermalMesh",
     "choose_block_size",
+    "element_heat_from_losses",
+    "element_heat_from_losses",
     "element_joule_heat_w",
     "element_temperature_k",
     "face_temperature_k",
@@ -64,5 +71,7 @@ __all__ = [
     "planar_contact_map",
     "solve_thermal_conduction",
     "solve_thermal_transient",
+    "via_heat_sources",
+    "via_heat_sources",
     "via_joule_heat_sources",
 ]
