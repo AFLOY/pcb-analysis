@@ -4,7 +4,12 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
-## Unreleased
+## 0.9.3
+
+Memory of the sheet-PEEC solve and threads for the N-port basis. Additive;
+the default preconditioner of `solve_sheet_case` changes from `near` to
+`auto`, which is `near` below 60,000 saddle-point unknowns and `block` above
+and gives the same solution to 1e-9.
 
 - `electrical.matrix_free_mpir_fem.dc_port_basis(workers=)` runs the `n − 1`
   unit solves of an N-port basis on a thread pool (`PCB_PORT_BASIS_WORKERS`
