@@ -4,6 +4,17 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
+## Unreleased
+
+- `electrical.sheet_peec.solve_sheet_case(preconditioner="block")`: the near-field
+  impedance applied by block elimination (`Z_near` LU and the diagonal variant's
+  nodal admittance for the Schur complement) instead of one LU of the whole
+  saddle-point matrix; about 1/4 of the memory from 64k branches on and faster
+  there, the same solution to 1e-9. `"auto"` picks `near` below 60,000
+  saddle-point unknowns and `block` above (`AUTO_BLOCK_FROM_UNKNOWNS`,
+  `choose_preconditioner`). The default stays `near`. Measurements in
+  `docs/SHEET_PRECONDITIONER_RESULTS.json`.
+
 ## 0.9.2
 
 Voltage-driven DC conduction, the N-port reduction of a conductor, and the

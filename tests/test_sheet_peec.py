@@ -239,6 +239,37 @@ class AlternatingCurrentTests(unittest.TestCase):
         for smaller, larger in zip(departures, departures[1:]):
             self.assertAlmostEqual(larger / smaller, 10.0, places=3)
 
+    def test_the_block_preconditioner_reaches_the_near_preconditioner_solution(self):
+        # Block elimination with Z_near factored alone and the Schur complement
+        # approximated by the diagonal variant's nodal admittance: the same
+        # fixed point as the saddle LU, at a fraction of its memory.
+        near = solve_sheet_case(
+            self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="near"
+        )
+        block = solve_sheet_case(
+            self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="block"
+        )
+        self.assertTrue(near.converged and block.converged)
+        scale = float(np.abs(near.node_voltage).max())
+        self.assertLess(float(np.abs(block.node_voltage - near.node_voltage).max()) / scale, 1e-7)
+        self.assertLess(
+            float(np.abs(block.branch_current - near.branch_current).max())
+            / float(np.abs(near.branch_current).max()),
+            1e-7,
+        )
+        self.assertLessEqual(block.iterations, 10 * max(near.iterations, 1))
+        with self.assertRaises(ValueError):
+            solve_sheet_case(self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="exact")
+        # auto: the small fixture takes the near path and reproduces it exactly.
+        auto = solve_sheet_case(
+            self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="auto"
+        )
+        self.assertEqual(auto.iterations, near.iterations)
+        np.testing.assert_allclose(auto.node_voltage, near.node_voltage, rtol=0.0, atol=1e-12 * scale)
+        from electrical.sheet_peec.sheet_peec import AUTO_BLOCK_FROM_UNKNOWNS, choose_preconditioner
+        self.assertEqual(choose_preconditioner(AUTO_BLOCK_FROM_UNKNOWNS - 1), "near")
+        self.assertEqual(choose_preconditioner(AUTO_BLOCK_FROM_UNKNOWNS), "block")
+
     def test_the_two_span_definitions_are_named(self):
         direct = solve_sheet_case(
             self.mesh, self.operator, self.terminals, frequency_hz=0.0

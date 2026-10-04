@@ -477,7 +477,11 @@ def solve_sheet_case(
     it, ``Z`` couples every branch to every other and is applied through the
     operator's transforms, so the reduction is carried out by a Krylov method.
 
-    ``preconditioner="near"`` (default) factors the saddle-point matrix with
+    ``preconditioner="auto"`` picks ``near`` below :data:`AUTO_BLOCK_FROM_UNKNOWNS`
+    saddle-point unknowns and ``block`` above.  ``preconditioner="block"`` keeps the near-field impedance but factors it
+    on its own and approximates the Schur complement by the diagonal
+    variant's nodal admittance: block elimination at a fraction of the
+    saddle LU's memory.  ``preconditioner="near"`` (default) factors the saddle-point matrix with
     ``Z`` replaced by ``R + j omega L_near``, the exact partial inductance of
     each branch with itself and its neighbours within the operator's
     preconditioner radius (``operator.near_inductance(mesh)``), by sparse LU;
@@ -485,8 +489,8 @@ def solve_sheet_case(
     through a Schur complement but leaves every mutual term to the Krylov
     iterations.
     """
-    if preconditioner not in ("near", "diagonal"):
-        raise ValueError("preconditioner must be 'near' or 'diagonal'")
+    if preconditioner not in ("auto", "near", "block", "diagonal"):
+        raise ValueError("preconditioner must be 'auto', 'near', 'block' or 'diagonal'")
     if operator.shape != mesh.shape:
         raise ValueError("the operator and the mesh must share a shape")
     if len(operator.stackup) != len(mesh.stackup):
@@ -629,6 +633,8 @@ def solve_sheet_case(
             [impedance(currents) - reduced @ voltages, reduced.T @ currents]
         )
 
+    if preconditioner == "auto":
+        preconditioner = choose_preconditioner(size)
     precondition = _build_preconditioner(
         mesh, operator, preconditioner, omega, resistance, active_branches, reduced, branches
     )
@@ -686,6 +692,21 @@ def _near_impedance(
     return (sp.diags(resistance[active_branches]) + 1j * omega * near).tocsr()
 
 
+# Above this many saddle-point unknowns (branches + nodes) the whole-matrix LU
+# of the near preconditioner costs more memory than the block elimination
+# saves in iterations: on a 33 x 30 mm two-layer plane at 800 kHz the near
+# variant needed 2.2 GB and 27 s at 64k branches where block needed 0.5 GB
+# and 21 s, while at 20k branches near was faster (2.1 s against 4.0 s) at
+# 0.3 GB (docs/SHEET_PRECONDITIONER_RESULTS.json).
+AUTO_BLOCK_FROM_UNKNOWNS = 60_000
+
+
+def choose_preconditioner(unknowns: int) -> str:
+    """``near`` for a small saddle-point system, ``block`` for a large one."""
+
+    return "block" if unknowns >= AUTO_BLOCK_FROM_UNKNOWNS else "near"
+
+
 def _build_preconditioner(
     mesh: SheetMesh,
     operator: Any,
@@ -703,6 +724,34 @@ def _build_preconditioner(
         saddle = sp.bmat([[impedance, -reduced], [reduced.T, None]], format="csc")
         factored = spla.splu(saddle)
         return factored.solve
+    if kind == "block" and hasattr(operator, "near_inductance"):
+        # The same near-field impedance, applied by block elimination instead
+        # of one LU of the whole saddle-point matrix.  Z_near is factored on
+        # its own (a local stencil, so the fill stays small), and the Schur
+        # complement A^T Z_near^-1 A, which is dense, is approximated by
+        # A^T diag(Z)^-1 A, the nodal admittance of the diagonal variant.
+        # The saddle LU needs about 13x the memory of these two factors and
+        # is what runs a board at the acceptance grid out of memory.
+        impedance = _near_impedance(mesh, operator, omega, resistance, active_branches).tocsc()
+        factored_z = spla.splu(impedance, permc_spec="MMD_AT_PLUS_A")
+        full_diagonal = resistance + 1j * omega * np.concatenate(
+            [_inline_self_inductance(mesh, operator), _vertical_self_inductance(mesh, operator)]
+        )
+        diagonal = full_diagonal[active_branches]
+        schur = (reduced.T @ sp.diags(1.0 / diagonal) @ reduced).tocsc()
+        factored_s = spla.splu(schur, permc_spec="MMD_AT_PLUS_A")
+
+        def precondition_block(vector: np.ndarray) -> np.ndarray:
+            rhs_current = vector[:branches]
+            rhs_node = vector[branches:]
+            # [[Z, -A], [A^T, 0]] [x; y] = [r1; r2]:
+            # x = Z^-1 (r1 + A y),  A^T Z^-1 A y = r2 - A^T Z^-1 r1.
+            z = factored_z.solve(rhs_current)
+            node = factored_s.solve(rhs_node - reduced.T @ z)
+            current = factored_z.solve(rhs_current + reduced @ node)
+            return np.concatenate([current, node])
+
+        return precondition_block
     # The same system with Z replaced by its diagonal, which is exactly
     # solvable: its Schur complement is the sparse nodal admittance matrix,
     # factored once and reused for every iteration.

@@ -377,6 +377,53 @@ see `GEOMETRY_CAD_IMPORT.md` for the trace-aware grading that was measured
 and not adopted. The uniform convolution operator stays the choice for
 uniform grids: it is exact to its 24-cell seam and cheaper to build.
 
+### Block preconditioner (measured, `SHEET_PRECONDITIONER_RESULTS.json`)
+
+The near preconditioner factors the whole saddle-point matrix
+`[[Z_near, −A], [Aᵀ, 0]]` with one sparse LU. Its fill is what runs a board
+at the acceptance grid out of memory: on a 33 × 30 mm two-layer plane
+(35 µm copper, 1.6 mm apart, a via field, two full-width terminals, 800 kHz)
+the LU at 0.2 mm (100k branches, 50k nodes) was OOM-killed at 9.4 GB RSS, and
+Kicad_PowerOpt's acceptance evaluation of `power_module` at 0.1 mm reaches
+9.8 GB for the same reason. `preconditioner="block"` keeps the same
+near-field impedance but applies it by block elimination: `Z_near` factored
+on its own (a local stencil, small fill, MMD ordering) and the Schur
+complement `Aᵀ Z_near⁻¹ A` replaced by the diagonal variant's nodal
+admittance `Aᵀ diag(Z)⁻¹ A`. The far-field coupling is not where the memory
+goes: the convolution kernel of this plane is a few MB.
+
+`experiments/sheet_preconditioner_benchmark.py`, AMD Ryzen 7 9700X 8-Core Processor,
+16 logical CPUs, Python 3.12.14, NumPy 2.3.5,
+`OPENBLAS_NUM_THREADS=1`, tolerance 1e-09, restart 120,
+each variant in its own process:
+
+| Pitch (mm) | Preconditioner | Branches / nodes | GMRES iterations | Wall (s) | Peak RSS (MB) | Max relative difference |
+|---:|---|---:|---:|---:|---:|---|
+| 0.5 | near | 15,890 / 8,052 | 36 | 2.1 | 327 | 0.0e+00 vs near |
+| 0.5 | block | 15,890 / 8,052 | 256 | 4.0 | 174 | 9.1e-12 vs near |
+| 0.5 | diagonal | 15,890 / 8,052 | 1505 | 14.9 | 134 | 5.7e-10 vs near |
+| 0.25 | near | 63,422 / 31,944 | 39 | 27.4 | 2,177 | 0.0e+00 vs near |
+| 0.25 | block | 63,422 / 31,944 | 311 | 20.9 | 534 | 2.3e-10 vs near |
+| 0.25 | diagonal | 63,422 / 31,944 | 2987 | 112.7 | 334 | 5.1e-10 vs near |
+| 0.2 | near | — | — | — | — | not run: the saddle LU of this size was OOM-killed at 9.4 GB RSS on this 14.5 GB host |
+| 0.2 | block | 99,721 / 50,160 | 356 | 39.6 | 835 | 0.0e+00 vs block |
+| 0.2 | diagonal | 99,721 / 50,160 | 3468 | 210.1 | 491 | 8.0e-10 vs block |
+
+Block reaches the near solution to `1e-9` everywhere. Where the near LU fits
+(0.5 mm) it is the faster choice (2.1 s against 4.0 s) at a modest 0.3 GB;
+from 64k branches on it needs four times block's memory and is slower
+(27.4 s against 20.9 s at 0.25 mm), and at 0.2 mm only block and diagonal
+run. The diagonal variant needs 8–10× block's iterations and 3–5× its time.
+`preconditioner="auto"` therefore takes `near` below `AUTO_BLOCK_FROM_UNKNOWNS`
+(60,000 saddle-point unknowns, between the 0.5 mm and 0.25 mm rows) and
+`block` above. **Decision:** `block` adopted as the large-system
+preconditioner and `auto` added; the default of `solve_sheet_case` stays
+`near` until the consumer's acceptance evaluation has been measured with
+`auto`. The first run of the benchmark judged block by GMRES iterations
+(3× near) and failed it; that criterion was replaced by wall time before
+adoption because an iteration of the two variants is not the same unit (the
+JSON records both the counts and the note).
+
 ## What is not done
 
 - The barrel's partial self inductance is taken as a given scalar. Nothing

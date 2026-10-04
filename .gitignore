@@ -40,3 +40,5 @@ experiments/*
 !experiments/dc_native_benchmark.py
 !experiments/electrothermal_native_benchmark.py
 !experiments/port_basis_benchmark.py
+!experiments/sheet_preconditioner_memory.py
+!experiments/sheet_preconditioner_benchmark.py
