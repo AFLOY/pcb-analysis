@@ -4,6 +4,26 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
+## Unreleased
+
+Voltage-driven DC conduction. Additive; existing current-driven calls are
+unchanged.
+
+- `electrical.matrix_free_mpir_fem`: new `VoltageTerminal(nodes, voltage_v,
+  name)`. `PCBConductionProblem` takes `voltage_terminals=`, and
+  `reference_node` now defaults to `None` (it is required only for a purely
+  current-driven problem). `MatrixFreePCBOperator` takes `dirichlet_nodes=`,
+  and `build_rhs` takes the voltage terminals and lifts their potentials.
+  `PCBConductionSolution.voltage_terminal_current_a` reports the current each
+  voltage terminal supplies. Verified on the NumPy and fused C++ paths; the
+  CUDA runtime shares the same free-node mask but has not been run with it yet.
+- `multiphysics.staggered_coupling`: `run_electro_thermal` accepts a
+  voltage-driven problem as is. Heating lowers the current and the loss
+  instead of raising them.
+- `emc.tiled_dipole_superposition`: `terminal_closure_dipoles` takes
+  `voltage_terminal_current_a=`, and `dipoles_from_pcb_dc(close_terminals=True)`
+  supplies it from the solution.
+
 ## 0.9.1
 
 Fused C++ host paths for the electro-thermal coupling, opt-in and result
