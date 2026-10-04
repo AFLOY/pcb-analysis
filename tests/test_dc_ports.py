@@ -227,3 +227,27 @@ def test_invalid_ports_and_correlations_are_rejected() -> None:
         basis.mean_loss_w(-np.array([[2.0, -1.0, -1.0], [-1.0, 2.0, -1.0], [-1.0, -1.0, 2.0]]))
     with pytest.raises(ValueError, match="share the ports"):
         dc_port_basis(mesh, PortSet(pads=ports.pads, reference=0), vias=vias, initial=basis)
+
+
+def test_threaded_unit_solves_give_the_serial_basis(monkeypatch: pytest.MonkeyPatch) -> None:
+    mesh, ports, vias = _three_port_board()
+    serial = dc_port_basis(mesh, ports, vias=vias, config=TIGHT, workers=1)
+    threaded = dc_port_basis(mesh, ports, vias=vias, config=TIGHT, workers=4)
+    assert serial.workers == 1
+    assert threaded.workers == 2  # capped at n - 1 unit solves
+    assert threaded.converged
+    np.testing.assert_array_equal(threaded.conductance_s, serial.conductance_s)
+    np.testing.assert_array_equal(threaded.unit_voltage_potential_v, serial.unit_voltage_potential_v)
+    np.testing.assert_array_equal(threaded.unit_current_potential_v, serial.unit_current_potential_v)
+    assert [r.inner_iterations for r in threaded.solves] == [r.inner_iterations for r in serial.solves]
+
+    # The default comes from the environment; the warm start works on the pool too.
+    monkeypatch.setenv("PCB_PORT_BASIS_WORKERS", "3")
+    from electrical.matrix_free_mpir_fem import port_basis_workers
+
+    assert port_basis_workers() == 3
+    warm = dc_port_basis(mesh, ports, vias=vias, config=TIGHT, initial=serial)
+    assert warm.workers == 2
+    np.testing.assert_allclose(warm.conductance_s, serial.conductance_s, rtol=1.0e-9)
+    monkeypatch.delenv("PCB_PORT_BASIS_WORKERS")
+    assert port_basis_workers() == 1

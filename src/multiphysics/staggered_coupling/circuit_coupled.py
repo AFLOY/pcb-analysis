@@ -360,8 +360,14 @@ def run_circuit_coupled(
     device_id: int = 0,
     native: bool | None = None,
     native_threads: int | None = None,
+    port_basis_workers: int | None = None,
 ) -> CircuitCoupledResult:
-    """Iterate N-port, circuit and thermal solves to a self-consistent ρ(T) state."""
+    """Iterate N-port, circuit and thermal solves to a self-consistent ρ(T) state.
+
+    ``port_basis_workers`` threads run the unit solves of every N-port basis
+    concurrently (see :func:`electrical.matrix_free_mpir_fem.dc_port_basis`);
+    ``None`` reads ``PCB_PORT_BASIS_WORKERS``.
+    """
 
     config = config or CouplingConfig()
     fixed_point = TemperatureFixedPoint(scenario, config)
@@ -393,6 +399,7 @@ def run_circuit_coupled(
                 native=native,
                 native_threads=native_threads,
                 initial=bases[conductor.name],
+                workers=port_basis_workers,
             )
             bases[conductor.name] = basis
             heated[conductor.name] = (mesh, vias)

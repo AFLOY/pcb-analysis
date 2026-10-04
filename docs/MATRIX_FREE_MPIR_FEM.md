@@ -132,7 +132,13 @@ electro-thermal analysis in [MULTIPHYSICS_SCENARIOS.md](MULTIPHYSICS_SCENARIOS.m
   reduced inverse `G_rr⁻¹` is the pad-to-pad resistance matrix an external
   circuit carries. `initial=` warm-starts every unit solve from an earlier
   basis of the same ports, as a coupled iteration does after a conductivity
-  update.
+  update. `workers=` (default `PCB_PORT_BASIS_WORKERS`, else 1) runs the
+  unit solves on a thread pool: the operator is read-only once built, every
+  solve owns its vectors and the native kernels release the GIL, so the
+  fields are the serial ones bit for bit (`DCPortBasis.workers` reports the
+  count used; a CUDA runtime solves serially). The threads multiply with the
+  OpenMP team of `PCB_NATIVE_THREADS`; `run_circuit_coupled` passes
+  `port_basis_workers=` through.
 - `potential_v(I)` and `port_voltage_v(I)` are linear in the port currents
   `I` (positive into the copper, summing to zero).
 - `mean_loss_w(C)` returns the time-averaged loss of every element and via

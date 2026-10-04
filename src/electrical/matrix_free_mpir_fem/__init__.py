@@ -17,7 +17,7 @@ from .pcb import (
     VoltageTerminal,
     solve_pcb_dc,
 )
-from .ports import DCPortBasis, PortSet, dc_port_basis
+from .ports import DCPortBasis, PortSet, dc_port_basis, port_basis_workers
 from .frequency_domain import (
     EPSILON_0_F_PER_M,
     MU_0_H_PER_M,
@@ -80,6 +80,7 @@ __all__ = [
     "refined_grid",
     "cuda_available",
     "dc_port_basis",
+    "port_basis_workers",
     "graded_edges",
     "make_complex64_runtime",
     "make_float32_runtime",

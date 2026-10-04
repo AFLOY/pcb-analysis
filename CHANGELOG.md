@@ -6,6 +6,12 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
+- `electrical.matrix_free_mpir_fem.dc_port_basis(workers=)` runs the `n − 1`
+  unit solves of an N-port basis on a thread pool (`PCB_PORT_BASIS_WORKERS`
+  sets the default, which stays 1); `DCPortBasis.workers` reports the count
+  used, `port_basis_workers()` is exported, and
+  `multiphysics.staggered_coupling.run_circuit_coupled(port_basis_workers=)`
+  passes it through. The result is the serial one bit for bit.
 - `electrical.sheet_peec.solve_sheet_case(preconditioner="block")`: the near-field
   impedance applied by block elimination (`Z_near` LU and the diagonal variant's
   nodal admittance for the Schur complement) instead of one LU of the whole

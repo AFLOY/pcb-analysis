@@ -28,10 +28,18 @@ The reduction is evaluated by diagonalising ``C`` restricted to the
 non-reference ports: ``C_rr = Σ_m λ_m u_m u_mᵀ`` gives ``<P_e> = Σ_m λ_m
 P_e(ψ_m)`` with ``ψ_m = Σ_k u_mk φ_k``, so the loss of every element and via
 comes from the exact element quadratic forms of :class:`.pcb.MatrixFreePCBOperator`.
+
+The ``n - 1`` unit solves are independent and share one read-only operator,
+so :func:`dc_port_basis` can run them on a thread pool (``workers=``, or
+``PCB_PORT_BASIS_WORKERS``).  Threads multiply with the OpenMP team of the
+native kernels (``PCB_NATIVE_THREADS``); their product is the core budget.
+A CUDA runtime solves serially, since its stream is shared.
 """
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -47,6 +55,15 @@ from .pcb import (
 )
 from .runtime import LowPrecisionRuntime, RuntimeBackend
 from .solver import MPIRConfig, MPIRResult, solve_mpir
+
+
+def port_basis_workers() -> int:
+    """Threads for the unit solves of a basis; ``PCB_PORT_BASIS_WORKERS`` overrides (default 1)."""
+
+    value = os.environ.get("PCB_PORT_BASIS_WORKERS")
+    if value:
+        return max(1, int(value))
+    return 1
 
 
 @dataclass(frozen=True)
@@ -111,6 +128,7 @@ class DCPortBasis:
     port ``k`` is held at 1 V and every other port at 0 V.
     ``unit_current_potential_v[m]`` is the potential field (``mesh.node_shape``)
     for 1 A into port ``ports.driven[m]`` and out of the reference port.
+    ``workers`` is the number of threads the unit solves actually ran on.
     """
 
     mesh: LayeredPCBMesh
@@ -120,6 +138,7 @@ class DCPortBasis:
     unit_voltage_potential_v: np.ndarray
     unit_current_potential_v: np.ndarray
     solves: tuple[MPIRResult, ...]
+    workers: int = 1
 
     @property
     def converged(self) -> bool:
@@ -228,13 +247,17 @@ def dc_port_basis(
     native: bool | None = None,
     native_threads: int | None = None,
     initial: DCPortBasis | None = None,
+    workers: int | None = None,
 ) -> DCPortBasis:
     """Measure the N-port of ``mesh`` at ``ports`` with ``n - 1`` unit voltage solves.
 
     One operator with every port node fixed serves all solves.  ``initial``
     warm-starts each unit solve from the same port's field of an earlier
     basis (for example the previous iterate of a coupled analysis on the
-    same mesh with other conductivities).
+    same mesh with other conductivities).  ``workers`` threads run the unit
+    solves concurrently (``None``: :func:`port_basis_workers`); the operator
+    is read-only once built and every solve owns its vectors, so the result
+    does not depend on the thread count.  A CUDA runtime solves serially.
     """
 
     operator = MatrixFreePCBOperator(
@@ -256,8 +279,8 @@ def dc_port_basis(
     n = ports.count
     conductance = np.zeros((n, n), dtype=np.float64)
     unit_voltage = np.zeros((n - 1,) + mesh.node_shape, dtype=np.float64)
-    solves = []
-    for column, port in enumerate(ports.driven):
+
+    def unit_solve(column: int, port: int) -> tuple[np.ndarray, np.ndarray, MPIRResult]:
         excitation = np.zeros(n)
         excitation[port] = 1.0
         terminals = ports.voltage_terminals(excitation)
@@ -268,8 +291,22 @@ def dc_port_basis(
             guess = np.where(operator.free_nodes.reshape(-1), previous, guess)
         result = solve_mpir(operator, rhs, config=config, initial_guess=guess)
         potential = result.solution.reshape(mesh.node_shape)
+        return potential, operator.terminal_currents(potential, terminals), result
+
+    threads = port_basis_workers() if workers is None else max(1, int(workers))
+    threads = min(threads, n - 1)
+    if getattr(operator.runtime, "is_cuda", False):
+        threads = 1
+    if threads > 1:
+        with ThreadPoolExecutor(max_workers=threads, thread_name_prefix="port-basis") as pool:
+            outcomes = list(pool.map(unit_solve, range(n - 1), ports.driven))
+    else:
+        outcomes = [unit_solve(column, port) for column, port in enumerate(ports.driven)]
+    solves = []
+    for column, port in enumerate(ports.driven):
+        potential, currents, result = outcomes[column]
         unit_voltage[column] = potential
-        conductance[:, port] = operator.terminal_currents(potential, terminals)
+        conductance[:, port] = currents
         solves.append(result)
     # The driven block is what the solves measured; it is symmetrised against
     # solver round-off.  The reference row and column follow from KCL exactly
@@ -295,4 +332,5 @@ def dc_port_basis(
         unit_voltage_potential_v=unit_voltage,
         unit_current_potential_v=unit_current,
         solves=tuple(solves),
+        workers=threads,
     )
