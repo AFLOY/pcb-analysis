@@ -116,6 +116,54 @@ A node belongs to at most one terminal. Tests check the following:
 
 The CUDA runtime has not yet been run with voltage terminals.
 
+## Port reduction: the copper as an N-port
+
+`ports.py` measures one conductor role as an N-port at its pads
+(`PortSet`: one node set per port, one of them the reference) and keeps the
+unit solutions (`DCPortBasis`), so that a port excitation returned by an
+external circuit becomes a potential field and a loss field without another
+field solve. This is the electrical side of the circuit-coupled
+electro-thermal analysis in [MULTIPHYSICS_SCENARIOS.md](MULTIPHYSICS_SCENARIOS.md).
+
+- `dc_port_basis` builds one operator with every port node fixed and runs
+  `n − 1` unit voltage solves. The terminal currents of each solve are one
+  column of the conductance matrix `G` (`n × n`, symmetric, positive
+  semi-definite, zero row sums); the reference column closes KCL. The
+  reduced inverse `G_rr⁻¹` is the pad-to-pad resistance matrix an external
+  circuit carries. `initial=` warm-starts every unit solve from an earlier
+  basis of the same ports, as a coupled iteration does after a conductivity
+  update.
+- `potential_v(I)` and `port_voltage_v(I)` are linear in the port currents
+  `I` (positive into the copper, summing to zero).
+- `mean_loss_w(C)` returns the time-averaged loss of every element and via
+  for the second moments `C = ⟨I Iᵀ⟩` of any current waveform, and
+  `rms_current_density_a_per_m2(C)` the RMS density. `C` restricted to the
+  driven ports is diagonalised, `C_rr = Σ λ_m u_m u_mᵀ`, and the loss is
+  `Σ λ_m P(ψ_m)` with the exact element quadratic forms of the operator on
+  the modes `ψ_m = Σ_k u_mk φ_k`. For a constant current `C = I Iᵀ` and the
+  result is that current's loss.
+
+Averaging a current and squaring afterwards drops the ripple and every
+cross term between ports that share copper; a per-port path resistance
+cannot see the shared copper either: two phases feeding one neck lose
+`R (I_1 + I_2)²`, not `R I_1² + R I_2²`. The second-moment form keeps both.
+
+Tests (`tests/test_dc_ports.py`, `tests/test_native_dc.py`):
+
+- A strip gives `G = [[1, −1], [−1, 1]] / R` from the closed form, a linear
+  unit potential, loss `I² R` and density `I / (w t)`, all to `1e-9`.
+- An arbitrary port voltage pattern on a graded two-layer board with a slot
+  and two vias: the superposition of unit fields equals the direct Dirichlet
+  solve to `1e-9`, and `G V` equals its reported terminal currents to `1e-8`.
+- Two 180°-interleaved triangular-ripple phases into one shared pad, 240
+  samples: the loss from `C` equals the brute-force average of the
+  instantaneous element and via losses to `1e-10`; the averaged-current loss
+  and the sum of per-phase losses are both lower; the ripple
+  cross-correlation is negative.
+- Warm start from a basis on the same mesh at another conductivity needs
+  fewer inner iterations and gives the same `G` to `1e-7`.
+- The fused C++ path matches the NumPy path to `1e-8`.
+
 ## Software boundary
 
 The package is divided into three parts:
@@ -125,6 +173,7 @@ The package is divided into three parts:
 | `solver.py` | Backend-independent outer MPIR plus inner PCG/GMRES control flow |
 | `runtime.py` | float32/complex64 vector primitives for NumPy or CuPy |
 | `pcb.py` | Q1 PCB mesh, matrix-free element/via action, physical outputs |
+| `ports.py` | N-port reduction of a conductor at its pads: conductance matrix, unit fields, second-moment loss |
 | `grid.py` | `TensorGrid`, graded grid-line generation (`graded_edges`, `refined_grid`), cell overlap fractions |
 | `two_level.py` | Jacobi plus patch-constant aggregation coarse correction on a layered node grid (used by the DC and the thermal operators) |
 | `frequency_domain.py` | Scalar full-wave Q1 operator, fields, currents, and losses |

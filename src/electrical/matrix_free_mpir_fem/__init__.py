@@ -17,6 +17,7 @@ from .pcb import (
     VoltageTerminal,
     solve_pcb_dc,
 )
+from .ports import DCPortBasis, PortSet, dc_port_basis
 from .frequency_domain import (
     EPSILON_0_F_PER_M,
     MU_0_H_PER_M,
@@ -52,6 +53,7 @@ __all__ = [
     "CupyComplex64Runtime",
     "CupyFloat32Runtime",
     "CurrentTerminal",
+    "DCPortBasis",
     "EPSILON_0_F_PER_M",
     "LayeredPCBMesh",
     "LowPrecisionRuntime",
@@ -66,6 +68,7 @@ __all__ = [
     "NumpyFloat32Runtime",
     "PCBConductionProblem",
     "PCBConductionSolution",
+    "PortSet",
     "ScalarMaxwellMesh2D",
     "ScalarMaxwellProblem",
     "ScalarMaxwellSolution",
@@ -76,6 +79,7 @@ __all__ = [
     "propagation_constant_per_m",
     "refined_grid",
     "cuda_available",
+    "dc_port_basis",
     "graded_edges",
     "make_complex64_runtime",
     "make_float32_runtime",

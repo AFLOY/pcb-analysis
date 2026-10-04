@@ -11,8 +11,10 @@ from electrical.matrix_free_mpir_fem import (
     MatrixFreePCBOperator,
     MPIRConfig,
     PCBConductionProblem,
+    PortSet,
     ViaConnection,
     VoltageTerminal,
+    dc_port_basis,
     solve_mpir,
     solve_pcb_dc,
 )
@@ -175,6 +177,23 @@ def test_native_voltage_driven_solve_matches_portable() -> None:
     np.testing.assert_allclose(
         np.nan_to_num(native.potential_v), np.nan_to_num(portable.potential_v), rtol=1e-8, atol=1e-12
     )
+
+
+def test_native_port_basis_matches_portable() -> None:
+    current = _board(10, 16, graded=True)
+    source, sink = current.terminals
+    mid = tuple((1, r, 8) for r in range(3, 7))
+    ports = PortSet(pads=(source.nodes, mid, sink.nodes), names=("source", "tap", "sink"), reference=2)
+    portable = dc_port_basis(current.mesh, ports, vias=current.vias)
+    native = dc_port_basis(current.mesh, ports, vias=current.vias, native=True, native_threads=2)
+    assert native.converged and portable.converged
+    np.testing.assert_allclose(native.conductance_s, portable.conductance_s, rtol=1e-8)
+    np.testing.assert_allclose(
+        native.unit_current_potential_v, portable.unit_current_potential_v, rtol=1e-8, atol=1e-12
+    )
+    correlation = np.array([[4.0, 1.0, -5.0], [1.0, 2.0, -3.0], [-5.0, -3.0, 8.0]])
+    for a, b in zip(native.mean_loss_w(correlation), portable.mean_loss_w(correlation)):
+        np.testing.assert_allclose(a, b, rtol=1e-8, atol=1e-18)
 
 
 def test_native_rejects_wrong_sizes_and_cuda_runtime() -> None:
