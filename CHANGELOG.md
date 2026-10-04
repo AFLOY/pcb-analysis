@@ -11,7 +11,9 @@ Versions before 0.7.0 were not tagged; see the Git history.
   sets the default, which stays 1); `DCPortBasis.workers` reports the count
   used, `port_basis_workers()` is exported, and
   `multiphysics.staggered_coupling.run_circuit_coupled(port_basis_workers=)`
-  passes it through. The result is the serial one bit for bit.
+  passes it through. The result is the serial one bit for bit; four threads
+  give 1.7 to 2.1× on an 8-core desktop, two pool threads over an OpenMP team
+  of four up to 2.6× (`docs/PORT_BASIS_WORKERS_RESULTS.json`).
 - `electrical.sheet_peec.solve_sheet_case(preconditioner="block")`: the near-field
   impedance applied by block elimination (`Z_near` LU and the diagonal variant's
   nodal admittance for the Schur complement) instead of one LU of the whole

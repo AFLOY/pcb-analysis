@@ -1,0 +1,917 @@
+{
+  "benchmark": "port_basis_workers_benchmark",
+  "timestamp_utc": "2026-10-04T22:56:15.435353+00:00",
+  "environment": {
+    "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+    "cpu_count": 16,
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "compiler": "g++ (Ubuntu 12.5.0-9ubuntu1) 12.5.0",
+    "openblas_num_threads": "1",
+    "pcb_native_q1": "1"
+  },
+  "settings": {
+    "sizes": "100,200,300",
+    "ports": "5,9",
+    "repeats": 2,
+    "workers": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "openmp_team": 4,
+    "solver": {
+      "max_inner_iterations": 400,
+      "max_outer_iterations": 16,
+      "relative_tolerance": 1e-08
+    }
+  },
+  "cases": [
+    {
+      "elements": 100,
+      "ports": 5,
+      "results": [
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 5,
+          "workers": 1,
+          "workers_used": 1,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 162,
+          "wall_s": 0.335,
+          "samples_s": [
+            0.337,
+            0.333
+          ],
+          "peak_rss_mb": 211,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.0
+        },
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 5,
+          "workers": 2,
+          "workers_used": 2,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 162,
+          "wall_s": 0.268,
+          "samples_s": [
+            0.27,
+            0.266
+          ],
+          "peak_rss_mb": 215,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.25
+        },
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 5,
+          "workers": 4,
+          "workers_used": 4,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 162,
+          "wall_s": 0.233,
+          "samples_s": [
+            0.236,
+            0.231
+          ],
+          "peak_rss_mb": 218,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.44
+        },
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 5,
+          "workers": 8,
+          "workers_used": 4,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 162,
+          "wall_s": 0.234,
+          "samples_s": [
+            0.236,
+            0.232
+          ],
+          "peak_rss_mb": 219,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.43
+        },
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 5,
+          "workers": 1,
+          "workers_used": 1,
+          "native_threads": 4,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 162,
+          "wall_s": 0.235,
+          "samples_s": [
+            0.239,
+            0.232
+          ],
+          "peak_rss_mb": 211,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.43
+        },
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 5,
+          "workers": 2,
+          "workers_used": 2,
+          "native_threads": 4,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 162,
+          "wall_s": 0.218,
+          "samples_s": [
+            0.219,
+            0.217
+          ],
+          "peak_rss_mb": 215,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.54
+        },
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 5,
+          "workers": 4,
+          "workers_used": 4,
+          "native_threads": 2,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 162,
+          "wall_s": 0.218,
+          "samples_s": [
+            0.223,
+            0.213
+          ],
+          "peak_rss_mb": 218,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.54
+        }
+      ]
+    },
+    {
+      "elements": 100,
+      "ports": 9,
+      "results": [
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 9,
+          "workers": 1,
+          "workers_used": 1,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 321,
+          "wall_s": 0.48,
+          "samples_s": [
+            0.482,
+            0.477
+          ],
+          "peak_rss_mb": 211,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.0
+        },
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 9,
+          "workers": 2,
+          "workers_used": 2,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 321,
+          "wall_s": 0.342,
+          "samples_s": [
+            0.344,
+            0.339
+          ],
+          "peak_rss_mb": 217,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.4
+        },
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 9,
+          "workers": 4,
+          "workers_used": 4,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 321,
+          "wall_s": 0.275,
+          "samples_s": [
+            0.278,
+            0.271
+          ],
+          "peak_rss_mb": 219,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.75
+        },
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 9,
+          "workers": 8,
+          "workers_used": 8,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 321,
+          "wall_s": 0.243,
+          "samples_s": [
+            0.246,
+            0.24
+          ],
+          "peak_rss_mb": 226,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.98
+        },
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 9,
+          "workers": 1,
+          "workers_used": 1,
+          "native_threads": 4,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 321,
+          "wall_s": 0.279,
+          "samples_s": [
+            0.281,
+            0.276
+          ],
+          "peak_rss_mb": 211,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.72
+        },
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 9,
+          "workers": 2,
+          "workers_used": 2,
+          "native_threads": 4,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 321,
+          "wall_s": 0.248,
+          "samples_s": [
+            0.254,
+            0.241
+          ],
+          "peak_rss_mb": 216,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.94
+        },
+        {
+          "elements": 100,
+          "nodes": 20402,
+          "ports": 9,
+          "workers": 4,
+          "workers_used": 4,
+          "native_threads": 2,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 321,
+          "wall_s": 0.242,
+          "samples_s": [
+            0.245,
+            0.239
+          ],
+          "peak_rss_mb": 220,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.98
+        }
+      ]
+    },
+    {
+      "elements": 200,
+      "ports": 5,
+      "results": [
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 5,
+          "workers": 1,
+          "workers_used": 1,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 247,
+          "wall_s": 0.747,
+          "samples_s": [
+            0.747,
+            0.747
+          ],
+          "peak_rss_mb": 316,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.0
+        },
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 5,
+          "workers": 2,
+          "workers_used": 2,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 247,
+          "wall_s": 0.553,
+          "samples_s": [
+            0.56,
+            0.547
+          ],
+          "peak_rss_mb": 331,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.35
+        },
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 5,
+          "workers": 4,
+          "workers_used": 4,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 247,
+          "wall_s": 0.462,
+          "samples_s": [
+            0.463,
+            0.461
+          ],
+          "peak_rss_mb": 342,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.62
+        },
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 5,
+          "workers": 8,
+          "workers_used": 4,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 247,
+          "wall_s": 0.457,
+          "samples_s": [
+            0.461,
+            0.453
+          ],
+          "peak_rss_mb": 344,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.63
+        },
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 5,
+          "workers": 1,
+          "workers_used": 1,
+          "native_threads": 4,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 247,
+          "wall_s": 0.466,
+          "samples_s": [
+            0.469,
+            0.464
+          ],
+          "peak_rss_mb": 316,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.6
+        },
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 5,
+          "workers": 2,
+          "workers_used": 2,
+          "native_threads": 4,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 247,
+          "wall_s": 0.415,
+          "samples_s": [
+            0.417,
+            0.413
+          ],
+          "peak_rss_mb": 331,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.8
+        },
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 5,
+          "workers": 4,
+          "workers_used": 4,
+          "native_threads": 2,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 247,
+          "wall_s": 0.421,
+          "samples_s": [
+            0.427,
+            0.416
+          ],
+          "peak_rss_mb": 345,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.77
+        }
+      ]
+    },
+    {
+      "elements": 200,
+      "ports": 9,
+      "results": [
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 9,
+          "workers": 1,
+          "workers_used": 1,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 483,
+          "wall_s": 1.123,
+          "samples_s": [
+            1.127,
+            1.12
+          ],
+          "peak_rss_mb": 315,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.0
+        },
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 9,
+          "workers": 2,
+          "workers_used": 2,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 483,
+          "wall_s": 0.749,
+          "samples_s": [
+            0.752,
+            0.746
+          ],
+          "peak_rss_mb": 335,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.5
+        },
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 9,
+          "workers": 4,
+          "workers_used": 4,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 483,
+          "wall_s": 0.564,
+          "samples_s": [
+            0.568,
+            0.561
+          ],
+          "peak_rss_mb": 346,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.99
+        },
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 9,
+          "workers": 8,
+          "workers_used": 8,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 483,
+          "wall_s": 0.48,
+          "samples_s": [
+            0.483,
+            0.478
+          ],
+          "peak_rss_mb": 374,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 2.34
+        },
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 9,
+          "workers": 1,
+          "workers_used": 1,
+          "native_threads": 4,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 483,
+          "wall_s": 0.583,
+          "samples_s": [
+            0.587,
+            0.58
+          ],
+          "peak_rss_mb": 316,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.93
+        },
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 9,
+          "workers": 2,
+          "workers_used": 2,
+          "native_threads": 4,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 483,
+          "wall_s": 0.483,
+          "samples_s": [
+            0.485,
+            0.481
+          ],
+          "peak_rss_mb": 333,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 2.33
+        },
+        {
+          "elements": 200,
+          "nodes": 80802,
+          "ports": 9,
+          "workers": 4,
+          "workers_used": 4,
+          "native_threads": 2,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 483,
+          "wall_s": 0.477,
+          "samples_s": [
+            0.482,
+            0.472
+          ],
+          "peak_rss_mb": 345,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 2.35
+        }
+      ]
+    },
+    {
+      "elements": 300,
+      "ports": 5,
+      "results": [
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 5,
+          "workers": 1,
+          "workers_used": 1,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 334,
+          "wall_s": 1.306,
+          "samples_s": [
+            1.299,
+            1.313
+          ],
+          "peak_rss_mb": 401,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.0
+        },
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 5,
+          "workers": 2,
+          "workers_used": 2,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 334,
+          "wall_s": 0.973,
+          "samples_s": [
+            0.933,
+            1.012
+          ],
+          "peak_rss_mb": 436,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.34
+        },
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 5,
+          "workers": 4,
+          "workers_used": 4,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 334,
+          "wall_s": 0.751,
+          "samples_s": [
+            0.735,
+            0.766
+          ],
+          "peak_rss_mb": 462,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.74
+        },
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 5,
+          "workers": 8,
+          "workers_used": 4,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 334,
+          "wall_s": 0.761,
+          "samples_s": [
+            0.736,
+            0.786
+          ],
+          "peak_rss_mb": 464,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.72
+        },
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 5,
+          "workers": 1,
+          "workers_used": 1,
+          "native_threads": 4,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 334,
+          "wall_s": 0.788,
+          "samples_s": [
+            0.743,
+            0.833
+          ],
+          "peak_rss_mb": 399,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.66
+        },
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 5,
+          "workers": 2,
+          "workers_used": 2,
+          "native_threads": 4,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 334,
+          "wall_s": 0.649,
+          "samples_s": [
+            0.636,
+            0.663
+          ],
+          "peak_rss_mb": 435,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 2.01
+        },
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 5,
+          "workers": 4,
+          "workers_used": 4,
+          "native_threads": 2,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 334,
+          "wall_s": 0.691,
+          "samples_s": [
+            0.642,
+            0.739
+          ],
+          "peak_rss_mb": 465,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.89
+        }
+      ]
+    },
+    {
+      "elements": 300,
+      "ports": 9,
+      "results": [
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 9,
+          "workers": 1,
+          "workers_used": 1,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 663,
+          "wall_s": 2.095,
+          "samples_s": [
+            2.099,
+            2.091
+          ],
+          "peak_rss_mb": 410,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.0
+        },
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 9,
+          "workers": 2,
+          "workers_used": 2,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 663,
+          "wall_s": 1.346,
+          "samples_s": [
+            1.321,
+            1.37
+          ],
+          "peak_rss_mb": 440,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 1.56
+        },
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 9,
+          "workers": 4,
+          "workers_used": 4,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 663,
+          "wall_s": 0.981,
+          "samples_s": [
+            0.96,
+            1.001
+          ],
+          "peak_rss_mb": 468,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 2.14
+        },
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 9,
+          "workers": 8,
+          "workers_used": 8,
+          "native_threads": 1,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 663,
+          "wall_s": 0.887,
+          "samples_s": [
+            0.877,
+            0.898
+          ],
+          "peak_rss_mb": 530,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 2.36
+        },
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 9,
+          "workers": 1,
+          "workers_used": 1,
+          "native_threads": 4,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 663,
+          "wall_s": 0.992,
+          "samples_s": [
+            0.975,
+            1.009
+          ],
+          "peak_rss_mb": 409,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 2.11
+        },
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 9,
+          "workers": 2,
+          "workers_used": 2,
+          "native_threads": 4,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 663,
+          "wall_s": 0.81,
+          "samples_s": [
+            0.78,
+            0.84
+          ],
+          "peak_rss_mb": 440,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 2.59
+        },
+        {
+          "elements": 300,
+          "nodes": 181202,
+          "ports": 9,
+          "workers": 4,
+          "workers_used": 4,
+          "native_threads": 2,
+          "native": true,
+          "low_operator_backend": "cpp-fused-node-gather-layered-dc-q1",
+          "converged": true,
+          "inner_iterations": 663,
+          "wall_s": 0.821,
+          "samples_s": [
+            0.79,
+            0.851
+          ],
+          "peak_rss_mb": 470,
+          "max_abs_difference_vs_serial_v": 0.0,
+          "speedup_vs_serial": 2.55
+        }
+      ]
+    }
+  ],
+  "decision": {
+    "adopted": true,
+    "criteria": "at the largest size, 4 workers converge, give the serial fields bit for bit, run at least 1.5x faster than one worker, and need at most 2x its peak RSS; the pcb-analysis default stays one worker either way (the consumer sets the thread budget)",
+    "verdicts_per_port_count_at_largest_size": [
+      true,
+      true
+    ]
+  }
+}

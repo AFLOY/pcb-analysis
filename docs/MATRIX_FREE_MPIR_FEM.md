@@ -189,6 +189,38 @@ every unit solve; the loss reconstruction from a correlation matrix is
 milliseconds. **Decision:** adopted
 (every N-port basis within 1.3x of (n-1) unit solves and converged; circuit-coupled loop equals the voltage-driven loop (loss 1e-06 relative, temperature 0.001 K) within 1.5x of its wall time).
 
+### Threaded unit solves (measured, `PORT_BASIS_WORKERS_RESULTS.json`)
+
+`experiments/port_basis_workers_benchmark.py --sizes 100,200,300 --ports 5,9
+--repeats 2` on the same board, AMD Ryzen 7 9700X 8-Core Processor, 16 logical
+CPUs (8 cores), Python 3.12.14, NumPy 2.3.5, DC native extension on
+(`PCB_NATIVE_Q1=1`), `OPENBLAS_NUM_THREADS=1`, 2026-10-04. Each variant in its
+own subprocess, median of 2; "w" is the thread pool of `dc_port_basis(workers=)`,
+"omp" the OpenMP team of the fused kernels (`PCB_NATIVE_THREADS`). Wall time in s
+(speed-up over one thread); peak RSS for 1 / 4 / 8 workers:
+
+| Elements / nodes | Ports | 1 thread | w2 | w4 | w8 | omp4 | w2·omp4 | w4·omp2 | Peak RSS MB (w1 / w4 / w8) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100² / 20,402 | 5 | 0.34 | 0.27 (1.25×) | 0.23 (1.44×) | 0.23 (1.43×) | 0.23 (1.43×) | 0.22 (1.54×) | 0.22 (1.54×) | 211 / 218 / 219 |
+| 100² / 20,402 | 9 | 0.48 | 0.34 (1.40×) | 0.28 (1.75×) | 0.24 (1.98×) | 0.28 (1.72×) | 0.25 (1.94×) | 0.24 (1.98×) | 211 / 219 / 226 |
+| 200² / 80,802 | 5 | 0.75 | 0.55 (1.35×) | 0.46 (1.62×) | 0.46 (1.63×) | 0.47 (1.60×) | 0.41 (1.80×) | 0.42 (1.77×) | 316 / 342 / 344 |
+| 200² / 80,802 | 9 | 1.12 | 0.75 (1.50×) | 0.56 (1.99×) | 0.48 (2.34×) | 0.58 (1.93×) | 0.48 (2.33×) | 0.48 (2.35×) | 315 / 346 / 374 |
+| 300² / 181,202 | 5 | 1.31 | 0.97 (1.34×) | 0.75 (1.74×) | 0.76 (1.72×) | 0.79 (1.66×) | 0.65 (2.01×) | 0.69 (1.89×) | 401 / 462 / 464 |
+| 300² / 181,202 | 9 | 2.10 | 1.35 (1.56×) | 0.98 (2.14×) | 0.89 (2.36×) | 0.99 (2.11×) | 0.81 (2.59×) | 0.82 (2.55×) | 410 / 468 / 530 |
+
+Every variant gives the one-thread fields with a maximum difference of
+0 V and the same inner iteration counts: the unit solves
+are independent, so neither the pool nor the team changes a single operation.
+Both kinds of threads saturate near 2× on this 8-core desktop, where the
+bandwidth-bound Q1 action is the limit (the single-solve native benchmark on
+the 16-core Xeon 8581C scaled further). Four pool threads cost up to about
+60 MB over one thread at 300², eight up to 120 MB (one set of PCG vectors per
+thread); the OpenMP team costs nothing. Combining them (2·4 or 4·2) is the
+fastest at every size. The pool
+also applies where the team does not: the portable NumPy path, and the
+Python-side part of each solve. **Decision:** adopted as an
+option, default one thread (at the largest size, 4 workers converge, give the serial fields bit for bit, run at least 1.5x faster than one worker, and need at most 2x its peak RSS; the pcb-analysis default stays one worker either way (the consumer sets the thread budget)).
+
 ## Software boundary
 
 The package is divided into three parts:

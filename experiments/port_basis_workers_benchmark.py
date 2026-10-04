@@ -5,7 +5,7 @@ bank) with the two edge pads plus interior taps as ports.  For every size and
 port count, ``dc_port_basis`` runs with 1, 2, 4 and 8 worker threads
 (``PCB_NATIVE_THREADS=1``), and once more with one worker and an OpenMP team
 of 4 on the native path, so the two kinds of CPU parallelism are compared at
-the same core count.  Every variant runs in its own subprocess so that its
+the same core count, and with both combined on 8 cores (2 x 4 and 4 x 2).  Every variant runs in its own subprocess so that its
 peak RSS and its thread environment are its own; the fields of every variant
 are compared with the one-worker result.  Writes a JSON with ``environment``
 and ``decision``.
@@ -37,6 +37,7 @@ from dc_native_benchmark import _compiler, _cpu_model, board  # noqa: E402
 
 WORKERS = (1, 2, 4, 8)
 OPENMP_TEAM = 4
+COMBINED = ((2, 4), (4, 2))   # (workers, OpenMP team): both kinds together on 8 cores
 SPEEDUP_REQUIRED = 1.5      # 4 workers against 1, at the largest size
 MEMORY_LIMIT_RATIO = 2.0    # peak RSS of 4 workers at most this many times the serial one
 IDENTITY_TOLERANCE = 0.0    # the unit solves are independent; the fields must agree bit for bit
@@ -104,7 +105,7 @@ def main() -> None:
     cases: list[dict[str, Any]] = []
     for elements in (int(v) for v in args.sizes.split(",") if v):
         for count in (int(v) for v in args.ports.split(",") if v):
-            variants = [(w, 1) for w in WORKERS] + [(1, OPENMP_TEAM)]
+            variants = [(w, 1) for w in WORKERS] + [(1, OPENMP_TEAM)] + list(COMBINED)
             results: list[dict[str, Any]] = []
             for workers, team in variants:
                 out = scratch / f"{elements}_{count}_{workers}_{team}.npy"
