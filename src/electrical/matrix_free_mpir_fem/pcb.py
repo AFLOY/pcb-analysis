@@ -5,10 +5,17 @@ copper layer is discretised by bilinear quadrilateral elements, and plated
 vertical connections are conductance links between layer nodes.  Element
 stiffness contributions are evaluated directly; no global sparse matrix is
 assembled.
+
+A problem is driven by current terminals (a fixed total current spread over a
+pad's nodes), by voltage terminals (a pad's nodes held at a fixed potential),
+or by both.  Current terminals alone need a reference node for the gauge and
+must balance; once a voltage terminal fixes the potential, the currents
+through the voltage terminals follow from the solve and are reported.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Any, Literal, Sequence
 
@@ -70,6 +77,25 @@ class CurrentTerminal:
             raise ValueError("terminal nodes must be unique")
         if not np.isfinite(self.current_a):
             raise ValueError("terminal current must be finite")
+        object.__setattr__(self, "nodes", nodes)
+
+
+@dataclass(frozen=True)
+class VoltageTerminal:
+    """A set of FEM nodes held at one fixed potential (an ideal voltage source)."""
+
+    nodes: tuple[Node, ...]
+    voltage_v: float
+    name: str = "terminal"
+
+    def __post_init__(self) -> None:
+        nodes = tuple(tuple(int(index) for index in node) for node in self.nodes)
+        if not nodes:
+            raise ValueError("a voltage terminal needs at least one node")
+        if len(set(nodes)) != len(nodes):
+            raise ValueError("terminal nodes must be unique")
+        if not np.isfinite(self.voltage_v):
+            raise ValueError("terminal voltage must be finite")
         object.__setattr__(self, "nodes", nodes)
 
 
@@ -159,24 +185,59 @@ class LayeredPCBMesh:
 
 @dataclass(frozen=True)
 class PCBConductionProblem:
+    """One conductor role and its drive.
+
+    Current-driven: ``terminals`` only, balanced, with ``reference_node``
+    fixing the gauge.  Voltage-driven: one or more ``voltage_terminals`` fix
+    the potential, ``reference_node`` stays ``None``, and any current
+    terminals need not balance; the remainder flows through the voltage
+    terminals.  A node belongs to at most one terminal of either kind.
+    """
+
     mesh: LayeredPCBMesh
-    terminals: tuple[CurrentTerminal, ...]
-    reference_node: Node
+    terminals: tuple[CurrentTerminal, ...] = ()
+    reference_node: Node | None = None
     vias: tuple[ViaConnection, ...] = ()
+    voltage_terminals: tuple[VoltageTerminal, ...] = ()
 
     def __post_init__(self) -> None:
         terminals = tuple(self.terminals)
-        if not terminals:
-            raise ValueError("a PCB conduction problem needs current terminals")
-        total = float(sum(terminal.current_a for terminal in terminals))
-        magnitude = float(sum(abs(terminal.current_a) for terminal in terminals))
-        if abs(total) > 1.0e-12 * max(1.0, magnitude):
-            raise ValueError(f"terminal currents must sum to zero, got {total:.6g} A")
+        voltage_terminals = tuple(self.voltage_terminals)
+        if voltage_terminals:
+            if self.reference_node is not None:
+                raise ValueError(
+                    "voltage terminals fix the potential; reference_node must be None"
+                )
+        else:
+            if not terminals:
+                raise ValueError(
+                    "a PCB conduction problem needs current or voltage terminals"
+                )
+            if self.reference_node is None:
+                raise ValueError("a current-driven problem needs a reference_node")
+            total = float(sum(terminal.current_a for terminal in terminals))
+            magnitude = float(sum(abs(terminal.current_a) for terminal in terminals))
+            if abs(total) > 1.0e-12 * max(1.0, magnitude):
+                raise ValueError(f"terminal currents must sum to zero, got {total:.6g} A")
+        owner: dict[Node, str] = {}
+        for terminal in (*terminals, *voltage_terminals):
+            for node in terminal.nodes:
+                if node in owner:
+                    raise ValueError(
+                        f"node {node!r} belongs to terminals {owner[node]!r} and {terminal.name!r}"
+                    )
+                owner[node] = terminal.name
         object.__setattr__(self, "terminals", terminals)
+        object.__setattr__(self, "voltage_terminals", voltage_terminals)
         object.__setattr__(self, "vias", tuple(self.vias))
-        object.__setattr__(
-            self, "reference_node", tuple(int(value) for value in self.reference_node)
-        )
+        if self.reference_node is not None:
+            object.__setattr__(
+                self, "reference_node", tuple(int(value) for value in self.reference_node)
+            )
+
+    @property
+    def voltage_driven(self) -> bool:
+        return bool(self.voltage_terminals)
 
 
 _STIFFNESS_1D = np.array([[1.0, -1.0], [-1.0, 1.0]])
@@ -221,13 +282,20 @@ class MatrixFreePCBOperator:
     action in the optional C++ extension (CPU runtime only, ``native_threads``
     OpenMP threads); ``None`` follows ``PCB_NATIVE_Q1``.  The results are the
     same either way; only the speed differs.
+
+    Fixed nodes are the inactive nodes, the ``reference_node`` and every
+    ``dirichlet_nodes`` entry; at least one of the last two must be given.
+    The operator is the identity on fixed rows and ignores fixed columns, so
+    it stays symmetric positive definite; :meth:`build_rhs` lifts the fixed
+    potentials into the free rows.
     """
 
     def __init__(
         self,
         mesh: LayeredPCBMesh,
         *,
-        reference_node: Node,
+        reference_node: Node | None = None,
+        dirichlet_nodes: Sequence[Node] = (),
         vias: Sequence[ViaConnection] = (),
         runtime: LowPrecisionRuntime | None = None,
         backend: RuntimeBackend | None = None,
@@ -273,14 +341,23 @@ class MatrixFreePCBOperator:
             active_nodes.flat[first] = True
             active_nodes.flat[second] = True
 
-        reference_index = _flat_index(reference_node, mesh.node_shape)
-        if not active_nodes.flat[reference_index]:
-            raise ValueError("reference_node must lie on active copper or a via endpoint")
+        if reference_node is None and not dirichlet_nodes:
+            raise ValueError("pass a reference_node or dirichlet_nodes to fix the potential")
         fixed = ~active_nodes
-        fixed.flat[reference_index] = True
+        if reference_node is not None:
+            reference_index = _flat_index(reference_node, mesh.node_shape)
+            if not active_nodes.flat[reference_index]:
+                raise ValueError("reference_node must lie on active copper or a via endpoint")
+            fixed.flat[reference_index] = True
+        dirichlet_index = np.asarray(
+            [_flat_index(node, mesh.node_shape) for node in dirichlet_nodes], dtype=np.int64
+        )
+        if dirichlet_index.size and not np.all(active_nodes.flat[dirichlet_index]):
+            raise ValueError("dirichlet_nodes must lie on active copper or via endpoints")
+        fixed.flat[dirichlet_index] = True
         self.active_nodes = active_nodes
         self.free_nodes = ~fixed
-        self.reference_node = tuple(reference_node)
+        self.reference_node = None if reference_node is None else tuple(reference_node)
         self._via_a_high = np.asarray(via_a, dtype=np.int64)
         self._via_b_high = np.asarray(via_b, dtype=np.int64)
         self._via_g_high = np.asarray(via_g, dtype=np.float64)
@@ -474,7 +551,65 @@ class MatrixFreePCBOperator:
             return self.runtime.divide(vector, self._diagonal_low)
         return self.coarse_correction(vector)
 
-    def build_rhs(self, terminals: Sequence[CurrentTerminal]) -> np.ndarray:
+    def apply_full_high(self, vector: np.ndarray) -> np.ndarray:
+        """FP64 action of the unconstrained conductance matrix, ``K v``.
+
+        Entry ``n`` is the current that leaves node ``n`` into the copper and
+        vias for potentials ``v``; fixed nodes are not masked out.
+        """
+
+        vector = np.asarray(vector, dtype=np.float64).reshape(-1)
+        return self._apply_impl(
+            vector,
+            np,
+            self._coefficients_high,
+            self._unit_high,
+            np.ones(self.mesh.node_shape, dtype=bool),
+            self._via_a_high,
+            self._via_b_high,
+            self._via_g_high,
+        )
+
+    def dirichlet_potential(
+        self, voltage_terminals: Sequence[VoltageTerminal] = ()
+    ) -> np.ndarray:
+        """Potential vector holding each voltage terminal's value, zero elsewhere."""
+
+        potential = np.zeros(self.size, dtype=np.float64)
+        for terminal in voltage_terminals:
+            for node in terminal.nodes:
+                index = _flat_index(node, self.mesh.node_shape)
+                if self.free_nodes.flat[index] or not self.active_nodes.flat[index]:
+                    raise ValueError(
+                        f"voltage terminal {terminal.name!r} node {node!r} is not a "
+                        "Dirichlet node of this operator"
+                    )
+                potential[index] = float(terminal.voltage_v)
+        return potential
+
+    def terminal_currents(
+        self, potential_v: np.ndarray, voltage_terminals: Sequence[VoltageTerminal]
+    ) -> np.ndarray:
+        """Current each voltage terminal drives into the copper, in A."""
+
+        injected = self.apply_full_high(np.nan_to_num(np.asarray(potential_v, dtype=np.float64), nan=0.0))
+        return np.asarray(
+            [
+                float(
+                    np.sum(
+                        injected[[_flat_index(node, self.mesh.node_shape) for node in terminal.nodes]]
+                    )
+                )
+                for terminal in voltage_terminals
+            ],
+            dtype=np.float64,
+        )
+
+    def build_rhs(
+        self,
+        terminals: Sequence[CurrentTerminal],
+        voltage_terminals: Sequence[VoltageTerminal] = (),
+    ) -> np.ndarray:
         rhs = np.zeros(self.mesh.node_shape, dtype=np.float64)
         for terminal in terminals:
             share = float(terminal.current_a) / len(terminal.nodes)
@@ -488,7 +623,14 @@ class MatrixFreePCBOperator:
         # The reference equation is redundant in the balanced Neumann system.
         # Replacing it by the gauge equation V_ref = 0 preserves the solution.
         rhs[~self.free_nodes] = 0.0
-        return rhs.reshape(-1)
+        rhs = rhs.reshape(-1)
+        if voltage_terminals:
+            # Lifting: free rows see f - K g, fixed rows read V = g directly.
+            fixed = self.dirichlet_potential(voltage_terminals)
+            lifted = self.apply_full_high(fixed)
+            free = self.free_nodes.reshape(-1)
+            rhs = np.where(free, rhs - lifted, fixed)
+        return rhs
 
     def element_electric_field(self, potential_v: np.ndarray) -> np.ndarray:
         """Return the electric field at each Q1 element centre, in V/m."""
@@ -549,6 +691,10 @@ class PCBConductionSolution:
     via_joule_loss_w: np.ndarray
     max_current_density_a_per_m2: float
     solve: MPIRResult
+    voltage_terminal_current_a: np.ndarray = dataclasses.field(
+        default_factory=lambda: np.zeros(0, dtype=np.float64)
+    )
+    """Current each of ``problem.voltage_terminals`` drives into the copper."""
 
 
 def solve_pcb_dc(
@@ -577,6 +723,9 @@ def solve_pcb_dc(
     operator = MatrixFreePCBOperator(
         problem.mesh,
         reference_node=problem.reference_node,
+        dirichlet_nodes=tuple(
+            node for terminal in problem.voltage_terminals for node in terminal.nodes
+        ),
         vias=problem.vias,
         runtime=runtime,
         backend=backend,
@@ -586,7 +735,8 @@ def solve_pcb_dc(
         native=native,
         native_threads=native_threads,
     )
-    rhs = operator.build_rhs(problem.terminals)
+    rhs = operator.build_rhs(problem.terminals, problem.voltage_terminals)
+    fixed = operator.dirichlet_potential(problem.voltage_terminals)
     initial = None
     if initial_potential_v is not None:
         initial = np.nan_to_num(
@@ -594,7 +744,9 @@ def solve_pcb_dc(
         )
         if initial.size != operator.size:
             raise ValueError("initial_potential_v must hold one value per node")
-        initial = np.where(operator.free_nodes.reshape(-1), initial, 0.0)
+        initial = np.where(operator.free_nodes.reshape(-1), initial, fixed)
+    elif problem.voltage_terminals:
+        initial = fixed
     result = solve_mpir(operator, rhs, config=config, initial_guess=initial)
     potential = result.solution.reshape(problem.mesh.node_shape)
     field = operator.element_electric_field(potential)
@@ -613,4 +765,7 @@ def solve_pcb_dc(
         via_joule_loss_w=operator.via_joule_loss(potential),
         max_current_density_a_per_m2=maximum,
         solve=result,
+        voltage_terminal_current_a=operator.terminal_currents(
+            potential, problem.voltage_terminals
+        ),
     )

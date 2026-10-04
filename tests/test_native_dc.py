@@ -12,6 +12,7 @@ from electrical.matrix_free_mpir_fem import (
     MPIRConfig,
     PCBConductionProblem,
     ViaConnection,
+    VoltageTerminal,
     solve_mpir,
     solve_pcb_dc,
 )
@@ -154,6 +155,26 @@ def test_native_solve_pcb_dc_matches_the_portable_currents_and_losses() -> None:
         np.nan_to_num(native.potential_v), np.nan_to_num(portable.potential_v), rtol=1e-8, atol=1e-12
     )
     assert abs(float(np.sum(native.via_current_a))) == pytest.approx(2.0, rel=1e-8)
+
+
+def test_native_voltage_driven_solve_matches_portable() -> None:
+    current = _board(10, 16, graded=True)
+    source, sink = current.terminals
+    problem = PCBConductionProblem(
+        mesh=current.mesh,
+        voltage_terminals=(VoltageTerminal(source.nodes, 3.0e-3, "source"), VoltageTerminal(sink.nodes, 0.0, "sink")),
+        vias=current.vias,
+    )
+    portable = solve_pcb_dc(problem)
+    native = solve_pcb_dc(problem, native=True, native_threads=2)
+    assert native.solve.converged and portable.solve.converged
+    np.testing.assert_allclose(
+        native.voltage_terminal_current_a, portable.voltage_terminal_current_a, rtol=1e-8
+    )
+    assert native.joule_loss_w == pytest.approx(portable.joule_loss_w, rel=1e-8)
+    np.testing.assert_allclose(
+        np.nan_to_num(native.potential_v), np.nan_to_num(portable.potential_v), rtol=1e-8, atol=1e-12
+    )
 
 
 def test_native_rejects_wrong_sizes_and_cuda_runtime() -> None:

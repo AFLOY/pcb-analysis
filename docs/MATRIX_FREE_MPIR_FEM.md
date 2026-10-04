@@ -74,6 +74,48 @@ called once per outer refinement step. This deliberately avoids spending the
 majority of execution on CUDA FP64 arithmetic while still making final
 convergence a high-precision statement.
 
+## Current and voltage drive
+
+A `PCBConductionProblem` is driven by `CurrentTerminal`s, by
+`VoltageTerminal`s, or by both.
+
+- Current drive: each terminal spreads a fixed total current evenly over its
+  nodes. The currents must balance, and `reference_node` fixes the gauge
+  (`V_ref = 0`). The pure Neumann system is singular, so the reference row is
+  replaced by the gauge equation.
+- Voltage drive: each `VoltageTerminal` holds all of its nodes at
+  `voltage_v`, so the pad is an equipotential, like an ideal source or a
+  ground connection. `reference_node` must be `None`, because the Dirichlet
+  nodes already fix the potential. Current terminals may be added, for
+  example a load drawing a fixed current between a source pad and a ground
+  pad. These currents need not balance, because the voltage terminals carry
+  the remainder.
+
+The Dirichlet nodes join the fixed set of `MatrixFreePCBOperator`
+(`dirichlet_nodes=`). The operator stays the identity on fixed rows and ignores
+fixed columns, so it is still SPD. The two-level preconditioner, the fused C++
+host path and the CUDA runtime all read the same free-node mask unchanged.
+`build_rhs` lifts the fixed potentials `g`: free rows get `f − K g` and fixed
+rows get `g`. A solve without a warm start begins from `g`. After the solve,
+`apply_full_high` (the unconstrained `K v`) gives the current that each
+voltage terminal drives into the copper. It is reported as
+`PCBConductionSolution.voltage_terminal_current_a`, in the order of
+`problem.voltage_terminals`. A positive value means the terminal sources
+current, the same sign as `CurrentTerminal.current_a`.
+
+A node belongs to at most one terminal. Tests check the following:
+
+- A strip held at `V` and `0` carries `V / R` from the closed form and loses
+  `V² / R`. Its potential is linear, to `2e-10`.
+- A graded two-layer board with a via and a mixed drive (two voltage
+  terminals and one current load) matches the dense lifted system
+  `K_ff v_f = f_f − K_fd g` to `1e-10`. Kirchhoff's current law and the power
+  balance `Σ V_t I_t − V_load I_load = loss` hold to `1e-9`.
+- The fused C++ path reproduces the NumPy potentials and terminal currents to
+  `1e-8`.
+
+The CUDA runtime has not yet been run with voltage terminals.
+
 ## Software boundary
 
 The package is divided into three parts:
@@ -700,8 +742,12 @@ is in `THERMAL_MPIR_FEM.md`.
   refines its whole row and column strips.
 - Conductivity is scalar and isotropic within an element.
 - Field and current density are reported at element centres.
-- One reference node supplies the voltage gauge. Disconnected conductive
-  components should be solved separately or explicitly connected.
+- Under current drive, one reference node supplies the voltage gauge. Under
+  voltage drive, every conductive component must touch a voltage terminal.
+  In either case, solve disconnected components separately or connect them
+  explicitly.
+- A voltage terminal is an ideal source with no internal resistance. A
+  Thevenin source or a resistive load between two pads is not represented.
 - The full-wave front end is the 2D scalar `E_z` reduction. Arbitrary 3D vector
   fields require curl-conforming Nédélec edge elements.
 - Ports, PML/open radiation boundaries, S-parameters, dispersive material

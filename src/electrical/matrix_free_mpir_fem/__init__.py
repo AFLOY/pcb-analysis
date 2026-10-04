@@ -14,6 +14,7 @@ from .pcb import (
     PCBConductionProblem,
     PCBConductionSolution,
     ViaConnection,
+    VoltageTerminal,
     solve_pcb_dc,
 )
 from .frequency_domain import (
@@ -71,6 +72,7 @@ __all__ = [
     "RuntimeBackend",
     "TensorGrid",
     "ViaConnection",
+    "VoltageTerminal",
     "propagation_constant_per_m",
     "refined_grid",
     "cuda_available",
