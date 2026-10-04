@@ -466,7 +466,7 @@ def solve_sheet_case(
     tolerance: float = 1e-10,
     max_iterations: int = 400,
     restart: int = 60,
-    preconditioner: str = "near",
+    preconditioner: str = "auto",
 ) -> SheetSolution:
     """Solve one excitation of the mesh.
 
@@ -477,11 +477,11 @@ def solve_sheet_case(
     it, ``Z`` couples every branch to every other and is applied through the
     operator's transforms, so the reduction is carried out by a Krylov method.
 
-    ``preconditioner="auto"`` picks ``near`` below :data:`AUTO_BLOCK_FROM_UNKNOWNS`
+    ``preconditioner="auto"`` (default) picks ``near`` below :data:`AUTO_BLOCK_FROM_UNKNOWNS`
     saddle-point unknowns and ``block`` above.  ``preconditioner="block"`` keeps the near-field impedance but factors it
     on its own and approximates the Schur complement by the diagonal
     variant's nodal admittance: block elimination at a fraction of the
-    saddle LU's memory.  ``preconditioner="near"`` (default) factors the saddle-point matrix with
+    saddle LU's memory.  ``preconditioner="near"`` factors the saddle-point matrix with
     ``Z`` replaced by ``R + j omega L_near``, the exact partial inductance of
     each branch with itself and its neighbours within the operator's
     preconditioner radius (``operator.near_inductance(mesh)``), by sparse LU;

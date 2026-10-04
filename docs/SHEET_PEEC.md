@@ -417,9 +417,11 @@ run. The diagonal variant needs 8–10× block's iterations and 3–5× its time
 `preconditioner="auto"` therefore takes `near` below `AUTO_BLOCK_FROM_UNKNOWNS`
 (60,000 saddle-point unknowns, between the 0.5 mm and 0.25 mm rows) and
 `block` above. **Decision:** `block` adopted as the large-system
-preconditioner and `auto` added; the default of `solve_sheet_case` stays
-`near` until the consumer's acceptance evaluation has been measured with
-`auto`. The first run of the benchmark judged block by GMRES iterations
+preconditioner and `auto` made the default of `solve_sheet_case` and of the
+current-field contract (2026-10-05, after the consumer's acceptance
+evaluation of `power_module` at 0.1 mm ran in 3.1 GB with `block` where
+`near` exceeded 9.8 GB; Kicad_PowerOpt
+`docs/research/acceptance_memory_power_module_2026-10-05.json`). The first run of the benchmark judged block by GMRES iterations
 (3× near) and failed it; that criterion was replaced by wall time before
 adoption because an iteration of the two variants is not the same unit (the
 JSON records both the counts and the note).

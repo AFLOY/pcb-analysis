@@ -518,7 +518,7 @@ def solve_current_field_problem(
         "tolerance": float(settings.get("relative_tolerance", 1e-9)),
         "max_iterations": int(settings.get("maximum_iterations", 200)),
         "restart": int(settings.get("restart", 120)),
-        "preconditioner": str(settings.get("preconditioner", "near")),
+        "preconditioner": str(settings.get("preconditioner", "auto")),
     }
     if execution_backend == "cuda":
         from .sheet_cuda import solve_sheet_case_cuda

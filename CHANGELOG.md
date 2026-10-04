@@ -12,8 +12,9 @@ Versions before 0.7.0 were not tagged; see the Git history.
   saddle-point matrix; about 1/4 of the memory from 64k branches on and faster
   there, the same solution to 1e-9. `"auto"` picks `near` below 60,000
   saddle-point unknowns and `block` above (`AUTO_BLOCK_FROM_UNKNOWNS`,
-  `choose_preconditioner`). The default stays `near`. Measurements in
-  `docs/SHEET_PRECONDITIONER_RESULTS.json`.
+  `choose_preconditioner`) and is the new default of `solve_sheet_case` and of
+  the current-field contract; pass `preconditioner="near"` for the previous
+  behaviour. Measurements in `docs/SHEET_PRECONDITIONER_RESULTS.json`.
 
 ## 0.9.2
 
