@@ -271,14 +271,20 @@ def dc_port_basis(
         unit_voltage[column] = potential
         conductance[:, port] = operator.terminal_currents(potential, terminals)
         solves.append(result)
-    # Every port at 1 V drives no current: the reference column closes KCL.
-    conductance[:, ports.reference] = -np.sum(
-        conductance[:, list(ports.driven)], axis=1
-    )
-    # Symmetrise against solver round-off so the reduced inverse is exact SPD.
-    conductance = 0.5 * (conductance + conductance.T)
+    # The driven block is what the solves measured; it is symmetrised against
+    # solver round-off.  The reference row and column follow from KCL exactly
+    # (every port at 1 V drives no current), so G has zero row and column sums
+    # to machine precision instead of to the solver tolerance, and a constant
+    # current I = G V satisfies KCL as tightly as the loss reconstruction asks.
     driven = list(ports.driven)
-    resistance = np.linalg.inv(conductance[np.ix_(driven, driven)])
+    block = conductance[np.ix_(driven, driven)]
+    block = 0.5 * (block + block.T)
+    conductance = np.zeros((n, n), dtype=np.float64)
+    conductance[np.ix_(driven, driven)] = block
+    conductance[driven, ports.reference] = -block.sum(axis=1)
+    conductance[ports.reference, driven] = -block.sum(axis=0)
+    conductance[ports.reference, ports.reference] = float(block.sum())
+    resistance = np.linalg.inv(block)
     # φ_k (1 A into driven port k) = Σ_j R_jk · (unit voltage field of port j).
     unit_current = np.tensordot(resistance.T, unit_voltage, axes=1)
     return DCPortBasis(
