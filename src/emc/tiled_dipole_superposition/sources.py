@@ -31,6 +31,8 @@ from .fields import CurrentDipoles
 def terminal_closure_dipoles(
     problem: PCBConductionProblem,
     layer_height_m: Sequence[float],
+    *,
+    voltage_terminal_current_a: Sequence[float] | None = None,
 ) -> CurrentDipoles:
     """Current elements that close the terminal currents outside the copper.
 
@@ -43,16 +45,28 @@ def terminal_closure_dipoles(
     pad, as one straight element per leg.  The moments are exact, so the net
     electric dipole moment of board plus closure is zero to discretisation;
     the geometry of the actual component is not represented.
+
+    A voltage terminal's current is an output of the solve, so a
+    voltage-driven problem needs ``voltage_terminal_current_a`` (the
+    solution's field of that name) to place its legs.
     """
 
+    if problem.voltage_terminals and voltage_terminal_current_a is None:
+        raise ValueError("a voltage-driven problem needs voltage_terminal_current_a")
+    driven = [(terminal.nodes, float(terminal.current_a)) for terminal in problem.terminals]
+    if problem.voltage_terminals:
+        solved = np.asarray(voltage_terminal_current_a, dtype=np.float64)
+        if solved.shape != (len(problem.voltage_terminals),):
+            raise ValueError("voltage_terminal_current_a must hold one current per voltage terminal")
+        driven += [(terminal.nodes, float(current)) for terminal, current in zip(problem.voltage_terminals, solved)]
     mesh = problem.mesh
     heights = np.asarray(layer_height_m, dtype=np.float64)
     x_nodes = np.concatenate(([0.0], np.cumsum(mesh.pitch_x_m)))
     y_nodes = np.concatenate(([0.0], np.cumsum(mesh.pitch_y_m)))
     centroids = []
     currents = []
-    for terminal in problem.terminals:
-        nodes = np.asarray(terminal.nodes, dtype=np.int64)
+    for terminal_nodes, terminal_current in driven:
+        nodes = np.asarray(terminal_nodes, dtype=np.int64)
         centroid = np.array(
             [
                 np.mean(x_nodes[nodes[:, 2]]),
@@ -61,7 +75,7 @@ def terminal_closure_dipoles(
             ]
         )
         centroids.append(centroid)
-        currents.append(float(terminal.current_a))
+        currents.append(terminal_current)
     centroid_array = np.asarray(centroids)
     current_array = np.asarray(currents)
     sources = current_array > 0.0
@@ -138,7 +152,13 @@ def dipoles_from_pcb_dc(
         moments = np.vstack((moments, np.asarray(via_moments, dtype=np.complex128)))
     dipoles = CurrentDipoles(positions, moments)
     if close_terminals:
-        dipoles = dipoles.concatenate(terminal_closure_dipoles(problem, heights))
+        dipoles = dipoles.concatenate(
+            terminal_closure_dipoles(
+                problem,
+                heights,
+                voltage_terminal_current_a=solution.voltage_terminal_current_a,
+            )
+        )
     return dipoles
 
 

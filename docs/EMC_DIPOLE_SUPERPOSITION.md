@@ -69,7 +69,9 @@ terminal currents balance, a non-zero `|P|` means the path through the
 component is missing. `close_terminals=True` (or `terminal_closure_dipoles`)
 appends one straight element per terminal leg through a star point so the
 whole distribution is divergence-free; its moment is exact, the geometry of
-the component is not represented.
+the component is not represented. For a voltage-driven solve the legs carry
+the solved `voltage_terminal_current_a`; `dipoles_from_pcb_dc` passes it on,
+and `terminal_closure_dipoles` called directly needs it as an argument.
 
 ## Verification
 

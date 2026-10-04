@@ -10,6 +10,7 @@ from electrical.matrix_free_mpir_fem import (
     LayeredPCBMesh,
     PCBConductionProblem,
     ViaConnection,
+    VoltageTerminal,
     solve_pcb_dc,
 )
 from emc.tiled_dipole_superposition import (
@@ -17,6 +18,7 @@ from emc.tiled_dipole_superposition import (
     dipoles_from_pcb_dc,
     dipoles_from_sheet_peec,
     far_field_pattern,
+    terminal_closure_dipoles,
 )
 
 
@@ -56,6 +58,35 @@ def test_dc_strip_dipoles_carry_the_terminal_current_over_the_strip_length() -> 
     open_pattern = far_field_pattern(dipoles, 100e6)
     closed_pattern = far_field_pattern(closed, 100e6)
     assert closed_pattern.radiated_power_w < 1e-3 * open_pattern.radiated_power_w
+
+
+def test_voltage_driven_closure_uses_the_solved_terminal_currents() -> None:
+    columns, rows = 12, 2
+    pitch = 0.5e-3
+    mesh = LayeredPCBMesh(
+        element_active=np.ones((1, rows, columns), dtype=bool),
+        layer_thickness_m=(35e-6,),
+        pitch_x_m=pitch,
+        pitch_y_m=pitch,
+    )
+    problem = PCBConductionProblem(
+        mesh=mesh,
+        voltage_terminals=(
+            VoltageTerminal(tuple((0, r, 0) for r in range(rows + 1)), 5e-3, "in"),
+            VoltageTerminal(tuple((0, r, columns) for r in range(rows + 1)), 0.0, "out"),
+        ),
+    )
+    solution = solve_pcb_dc(problem)
+    open_dipoles = dipoles_from_pcb_dc(problem, solution, layer_height_m=(1.6e-3,))
+    closed = dipoles_from_pcb_dc(problem, solution, layer_height_m=(1.6e-3,), close_terminals=True)
+
+    current = float(solution.voltage_terminal_current_a[0])
+    assert current > 0.0
+    assert np.sum(open_dipoles.moment_a_m, axis=0)[0].real == pytest.approx(current * columns * pitch, rel=1e-8)
+    assert closed.count == open_dipoles.count + 2
+    np.testing.assert_allclose(np.sum(closed.moment_a_m, axis=0), 0.0, atol=1e-9)
+    with pytest.raises(ValueError, match="voltage_terminal_current_a"):
+        terminal_closure_dipoles(problem, (1.6e-3,))
 
 
 def test_dc_vias_become_vertical_elements_with_the_layer_separation() -> None:
