@@ -1,14 +1,20 @@
 """Coupled scenarios on one board: electro-thermal iteration, then emission.
 
 A two-layer loop (outgoing trace on top, return on the bottom layer, vias at
-the far end) carries a fixed current. The demo runs, through `run_scenario`:
+the far end) is held at a fixed source voltage. Heating raises the copper
+resistance, so the current and the loss fall until the board settles; a
+fixed current would instead raise the loss and can run away, which is why
+current-driven coupling is deprecated. The demo runs, through `run_scenario`:
 
 1. the electro-thermal iteration with temperature-dependent copper, printing
-   each staggered step and the loss increase it converges to;
+   each staggered step and the loss and current it converges to;
 2. the emission of the ρ(T)-converged current at several frequencies against
    CISPR 32 Class B at 10 m, next to the emission of the cold current.
 
-    python examples/coupled_scenarios_demo.py [--current 3] [--backend cpu|cuda|auto]
+Without ``--voltage`` the source voltage is the one that drives
+``--cold-current`` through the cold loop.
+
+    python examples/coupled_scenarios_demo.py [--cold-current 3 | --voltage 0.02] [--backend cpu|cuda|auto]
 """
 
 from __future__ import annotations
@@ -19,10 +25,11 @@ import time
 import numpy as np
 
 from electrical.matrix_free_mpir_fem import (
-    CurrentTerminal,
     LayeredPCBMesh,
     PCBConductionProblem,
     ViaConnection,
+    VoltageTerminal,
+    solve_pcb_dc,
 )
 from multiphysics.staggered_coupling import (
     CouplingConfig,
@@ -42,7 +49,7 @@ from thermal.matrix_free_mpir_fem import (
 )
 
 
-def build_scenario(rows: int, cols: int, pitch_m: float, current_a: float, film: float, ambient: float) -> ElectroThermalScenario:
+def loop_problem(rows: int, cols: int, pitch_m: float, voltage_v: float) -> PCBConductionProblem:
     active = np.zeros((2, rows, cols), dtype=bool)
     trace = slice(rows // 2 - 2, rows // 2 + 2)
     active[:, trace, :] = True
@@ -51,15 +58,21 @@ def build_scenario(rows: int, cols: int, pitch_m: float, current_a: float, film:
     vias = tuple(
         ViaConnection((0, r, c), (1, r, c), 1.5e-3) for r in node_rows[1:-1] for c in (cols - 2, cols)
     )
-    electrical = PCBConductionProblem(
+    return PCBConductionProblem(
         mesh,
-        (
-            CurrentTerminal(tuple((1, r, 0) for r in node_rows), current_a, "source pad, top"),
-            CurrentTerminal(tuple((0, r, 0) for r in node_rows), -current_a, "return pad, bottom"),
+        voltage_terminals=(
+            VoltageTerminal(tuple((1, r, 0) for r in node_rows), voltage_v, "source pad, top"),
+            VoltageTerminal(tuple((0, r, 0) for r in node_rows), 0.0, "return pad, bottom"),
         ),
-        reference_node=(0, node_rows[0], 0),
         vias=vias,
     )
+
+
+def build_scenario(
+    rows: int, cols: int, pitch_m: float, voltage_v: float, film: float, ambient: float
+) -> ElectroThermalScenario:
+    electrical = loop_problem(rows, cols, pitch_m, voltage_v)
+    active = electrical.mesh.element_active
     copper = COPPER_THERMAL_CONDUCTIVITY_W_PER_M_K
     in_plane = np.full((3, rows, cols), FR4_IN_PLANE_THERMAL_CONDUCTIVITY_W_PER_M_K)
     through = np.full((3, rows, cols), FR4_THROUGH_PLANE_THERMAL_CONDUCTIVITY_W_PER_M_K)
@@ -84,14 +97,23 @@ def main() -> None:
     parser.add_argument("--rows", type=int, default=12)
     parser.add_argument("--cols", type=int, default=80)
     parser.add_argument("--pitch-mm", type=float, default=0.5)
-    parser.add_argument("--current", type=float, default=3.0, help="loop current in A")
+    drive = parser.add_mutually_exclusive_group()
+    drive.add_argument("--voltage", type=float, default=None, help="source voltage in V")
+    drive.add_argument("--cold-current", type=float, default=3.0,
+                       help="pick the voltage that drives this current (A) through cold copper")
     parser.add_argument("--film", type=float, default=10.0, help="W/m²K on both faces")
     parser.add_argument("--ambient", type=float, default=298.15)
     parser.add_argument("--no-aitken", action="store_true")
     parser.add_argument("--frequencies-mhz", type=float, nargs="+", default=(30.0, 100.0, 300.0))
     args = parser.parse_args()
 
-    scenario = build_scenario(args.rows, args.cols, args.pitch_mm * 1e-3, args.current, args.film, args.ambient)
+    pitch_m = args.pitch_mm * 1e-3
+    voltage = args.voltage
+    if voltage is None:
+        # The cold problem is linear in V: one probe solve at 1 V scales it.
+        probe = solve_pcb_dc(loop_problem(args.rows, args.cols, pitch_m, 1.0))
+        voltage = args.cold_current / float(probe.voltage_terminal_current_a[0])
+    scenario = build_scenario(args.rows, args.cols, pitch_m, voltage, args.film, args.ambient)
     config = CouplingConfig(aitken=not args.no_aitken)
 
     started = time.perf_counter()
@@ -105,6 +127,9 @@ def main() -> None:
               f"{step.thermal_inner_iterations:7d}")
     print(f"  loss cold {coupled.cold_joule_loss_w * 1e3:.2f} mW -> hot {coupled.electrical.joule_loss_w * 1e3:.2f} mW "
           f"(x{coupled.loss_increase_ratio:.3f}); copper {coupled.element_temperature_k[coupled.element_temperature_k > 0].max() - args.ambient:.1f} K above ambient")
+    cold_current = coupled.cold_joule_loss_w / voltage
+    hot_current = float(coupled.electrical.voltage_terminal_current_a[0])
+    print(f"  source {voltage * 1e3:.3f} mV: current cold {cold_current:.3f} A -> hot {hot_current:.3f} A")
     print(f"  via resistance {coupled.via_resistance_ohm.min() * 1e3:.3f}-{coupled.via_resistance_ohm.max() * 1e3:.3f} mΩ (cold 1.500)")
     print(f"  thermal heat budget error {coupled.thermal.heat_balance_error_w:.1e} W")
 
