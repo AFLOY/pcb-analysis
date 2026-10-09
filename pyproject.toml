@@ -30,6 +30,9 @@ classifiers = [
 dependencies = [
   "numpy>=1.26,<2.4",
   "scipy>=1.11,<1.18",
+  # electrical.threads.set_thread_budget limits the BLAS/OpenMP pools of
+  # NumPy and SciPy to the process-wide thread budget.
+  "threadpoolctl>=3.1,<4",
   # STEP input (OpenCASCADE) and the 3D voxel PEEC are part of the package,
   # pinned here so every install resolves the same versions.
   "cadquery-ocp>=8.0,<9",
