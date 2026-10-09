@@ -18,6 +18,12 @@ from .current_field_contract import (
     build_current_field_sheet_inputs,
     solve_current_field_problem,
 )
+from .dc_network import (
+    ConductanceNetwork,
+    DCNetworkSolution,
+    solve_conductance_network,
+    split_branch_sensitivity,
+)
 from .sheet_cuda import (
     CudaSheetSolveError,
     CudaSheetTelemetry,
@@ -53,11 +59,13 @@ __all__ = [
     "CURRENT_FIELD_PROBLEM_SCHEMA",
     "CURRENT_FIELD_RESULT_SCHEMA",
     "CellGeometry",
+    "ConductanceNetwork",
     "CudaSheetSolveError",
     "CudaSheetTelemetry",
     "CudaSheetUnavailableError",
     "CurrentFieldProblem",
     "CurrentFieldSolveResult",
+    "DCNetworkSolution",
     "LayerSkin",
     "SheetFields",
     "SheetInductanceOperator",
@@ -76,6 +84,8 @@ __all__ = [
     "self_partial_inductance",
     "sheet_fields",
     "skin_depth_m",
+    "split_branch_sensitivity",
+    "solve_conductance_network",
     "solve_current_field_problem",
     "solve_sheet_case",
     "solve_sheet_case_cuda",
