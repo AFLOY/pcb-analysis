@@ -42,6 +42,7 @@ from thermal.matrix_free_mpir_fem import (  # noqa: E402
     solve_thermal_conduction,
 )
 from thermal.matrix_free_mpir_fem.native_hex import native_available  # noqa: E402
+from electrical.threads import set_thread_budget, thread_budget  # noqa: E402
 
 
 def _cpu_model() -> str:
@@ -119,8 +120,7 @@ def block_in_void(size: int, repeats: int, runtime: Any) -> dict[str, Any]:
     paths: dict[str, Any] = {}
     candidates: list[tuple[str, Callable[[], Any]]] = [("array", lambda: solve_thermal_conduction(masked_problem))]
     if native_available():
-        threads = int(os.environ.get("PCB_NATIVE_THREADS", "1"))
-        candidates.append((f"cpp-native-threads{threads}", lambda: solve_thermal_conduction(masked_problem, native=True, native_threads=threads)))
+        candidates.append((f"cpp-native-threads{thread_budget()}", lambda: solve_thermal_conduction(masked_problem, native=True)))
     if runtime is not None:
         candidates.append(("cuda", lambda: solve_thermal_conduction(masked_problem, runtime=runtime)))
     inside = (slice(pad, pad + n + 1),) * 3
@@ -289,7 +289,7 @@ def run(repeats: int, block_size: int, fin_cols: list[int]) -> dict[str, Any]:
             "cpu_count": os.cpu_count(),
             "compiler": _compiler(),
             "native_extension_built": native_available(),
-            "PCB_NATIVE_THREADS": os.environ.get("PCB_NATIVE_THREADS"),
+            "thread_budget": thread_budget(),
             "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"),
         },
         "acceptance_2_block_in_void": block,
@@ -316,7 +316,9 @@ def main() -> None:
     parser.add_argument("--block-size", type=int, default=24)
     parser.add_argument("--fin-cols", default="20,40,80")
     parser.add_argument("--output", type=Path, default=Path("benchmark-results") / "board_enclosure_acceptance.json")
+    parser.add_argument("--threads", type=int, default=None, help="process-wide thread budget (electrical.threads.set_thread_budget); default: every available CPU")
     args = parser.parse_args()
+    set_thread_budget(args.threads)
     report = run(args.repeats, args.block_size, [int(v) for v in args.fin_cols.split(",")])
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")

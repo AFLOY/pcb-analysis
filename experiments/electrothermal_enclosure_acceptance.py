@@ -62,6 +62,7 @@ from thermal.matrix_free_mpir_fem import (  # noqa: E402
     solve_thermal_conduction,
 )
 from thermal.matrix_free_mpir_fem.native_hex import native_available  # noqa: E402
+from electrical.threads import set_thread_budget, thread_budget  # noqa: E402
 
 AMBIENT = 298.15
 PITCH = 0.5e-3
@@ -109,7 +110,7 @@ def _environment() -> dict[str, Any]:
         "cpu_count": os.cpu_count(),
         "compiler": _compiler(),
         "native_extension_built": native_available(),
-        "PCB_NATIVE_THREADS": os.environ.get("PCB_NATIVE_THREADS"),
+        "thread_budget": thread_budget(),
         "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"),
     }
 
@@ -288,7 +289,9 @@ def sigma_t_enclosure(radiating: bool) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output", type=Path, default=Path("benchmark-results/electrothermal_enclosure_acceptance.json"))
+    parser.add_argument("--threads", type=int, default=None, help="process-wide thread budget (electrical.threads.set_thread_budget); default: every available CPU")
     args = parser.parse_args()
+    set_thread_budget(args.threads)
 
     radiation = radiation_plate()
     sigma = [sigma_t_enclosure(False), sigma_t_enclosure(True)]

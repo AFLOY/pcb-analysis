@@ -34,6 +34,7 @@ from geometry.cad_import import (  # noqa: E402
     sample_plane_fill,
     sample_volume_fill,
 )
+from electrical.threads import set_thread_budget  # noqa: E402
 
 MM = 1.0e-3
 
@@ -94,7 +95,7 @@ def run(repeats: int, threads: list[int], pitch_mm: float, supersample: int) -> 
         paths["numpy"] = {"timing": numpy_timing, "max_fill_difference_vs_occ": float(np.max(np.abs(numpy_fill - reference))), "speedup_vs_occ": occ_timing["median_ms"] / numpy_timing["median_ms"]}
         if native_classify_available():
             for count in threads:
-                os.environ["PCB_NATIVE_THREADS"] = str(count)
+                set_thread_budget(count)  # the process-wide budget is the only thread control
                 native_fill, native_timing = _timed(lambda: fn(solids[group], method="native", **kwargs), repeats)
                 paths[f"native_threads{count}"] = {
                     "threads": count,
@@ -104,6 +105,7 @@ def run(repeats: int, threads: list[int], pitch_mm: float, supersample: int) -> 
                     "speedup_vs_occ": occ_timing["median_ms"] / native_timing["median_ms"],
                     "speedup_vs_numpy": numpy_timing["median_ms"] / native_timing["median_ms"],
                 }
+            set_thread_budget(None)
         cases.append({
             "case": name,
             "solids": len(solids[group]),

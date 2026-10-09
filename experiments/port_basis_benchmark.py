@@ -58,6 +58,7 @@ from multiphysics.staggered_coupling import (  # noqa: E402
 )
 from thermal.matrix_free_mpir_fem import ConvectionBoundary, LayeredThermalMesh  # noqa: E402
 from thermal.matrix_free_mpir_fem.native_hex import native_available as thermal_native_available  # noqa: E402
+from electrical.threads import set_thread_budget, thread_budget  # noqa: E402
 
 AMBIENT_K = 298.15
 COLD_CURRENT_A = 10.0
@@ -250,7 +251,7 @@ def run(sizes: list[int], repeats: int) -> dict[str, Any]:
             "dc_native_requested": native_requested(),
             "thermal_native_available": thermal_native_available(),
             "openblas_num_threads": os.environ.get("OPENBLAS_NUM_THREADS"),
-            "pcb_native_threads": os.environ.get("PCB_NATIVE_THREADS"),
+            "thread_budget": thread_budget(),
         },
         "settings": {
             "sizes": sizes,
@@ -291,7 +292,9 @@ def main() -> None:
         type=Path,
         default=Path(__file__).resolve().parents[1] / "benchmark-results" / "port_basis_benchmark.json",
     )
+    parser.add_argument("--threads", type=int, default=None, help="process-wide thread budget (electrical.threads.set_thread_budget); default: every available CPU")
     args = parser.parse_args()
+    set_thread_budget(args.threads)
     sizes = [int(value) for value in args.sizes.split(",") if value]
     report = run(sizes, args.repeats)
     args.output.parent.mkdir(parents=True, exist_ok=True)

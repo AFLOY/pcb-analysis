@@ -36,9 +36,9 @@ from electrical.matrix_free_mpir_fem.native_q1 import (  # noqa: E402
     native_available,
     native_dot_accumulation,
     native_orthogonalization,
-    native_threads,
 )
 from maxwell_cuda_benchmark import _problem  # noqa: E402
+from electrical.threads import set_thread_budget, thread_budget  # noqa: E402
 
 CONFIG = MPIRConfig(
     relative_tolerance=1.0e-10,
@@ -199,7 +199,7 @@ def run(
             "numpy": np.__version__,
             "cpu": _cpu_model(),
             "compiler": _compiler(),
-            "native_threads": native_threads(),
+            "thread_budget": thread_budget(),
             "native_orthogonalization": orthogonalization,
             "native_dot_accumulation": dot_accumulation,
             "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"),
@@ -276,7 +276,9 @@ def main() -> None:
         default=None,
         help="native dot-product accumulation; default follows PCB_NATIVE_DOT or float64",
     )
+    parser.add_argument("--threads", type=int, default=None, help="process-wide thread budget (electrical.threads.set_thread_budget); default: every available CPU")
     args = parser.parse_args()
+    set_thread_budget(args.threads)
     shapes = [tuple(int(v) for v in item.split("x")) for item in args.shapes.split(",")]
     orthogonalization = args.orthogonalization or native_orthogonalization()
     dot_accumulation = args.dot_accumulation or native_dot_accumulation()

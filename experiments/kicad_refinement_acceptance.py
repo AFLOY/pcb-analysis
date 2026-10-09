@@ -12,7 +12,7 @@ Needs ``kicad-cli``, the KiCad 3D library models of the board's parts, and the
 ``environment`` and ``decision``; the adopted copy lives at
 ``docs/KICAD_REFINEMENT_RESULTS.json``.
 
-    OPENBLAS_NUM_THREADS=1 PCB_NATIVE_THREADS=4 .venv/bin/python experiments/kicad_refinement_acceptance.py
+    OPENBLAS_NUM_THREADS=1 .venv/bin/python experiments/kicad_refinement_acceptance.py --threads 4
 """
 
 from __future__ import annotations
@@ -52,6 +52,7 @@ from geometry.cad_import import (  # noqa: E402
 )
 from thermal.matrix_free_mpir_fem import ConvectionBoundary, ThermalConductionProblem, solve_thermal_conduction  # noqa: E402
 from thermal.matrix_free_mpir_fem.native_hex import native_available  # noqa: E402
+from electrical.threads import set_thread_budget, thread_budget  # noqa: E402
 
 AMBIENT = 298.15
 H = 10.0
@@ -79,7 +80,7 @@ def _environment() -> dict[str, Any]:
         "platform": platform.platform(), "python": platform.python_version(), "numpy": np.__version__,
         "cpu": _cpu_model(), "cpu_count": os.cpu_count(), "compiler": _compiler(),
         "native_extension_built": native_available(), "kicad_cli": kicad_cli_version(),
-        "PCB_NATIVE_THREADS": os.environ.get("PCB_NATIVE_THREADS"), "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"),
+        "thread_budget": thread_budget(), "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"),
     }
 
 
@@ -165,7 +166,9 @@ def main() -> None:
     parser.add_argument("--margin-mm", type=float, default=1.0)
     parser.add_argument("--growth", type=float, default=1.4)
     parser.add_argument("--heated", default="C1")
+    parser.add_argument("--threads", type=int, default=None, help="process-wide thread budget (electrical.threads.set_thread_budget); default: every available CPU")
     args = parser.parse_args()
+    set_thread_budget(args.threads)
     out_dir = Path("benchmark-results/kicad-step")
     out_dir.mkdir(parents=True, exist_ok=True)
     result = run(args.plane_opt / "board" / "power_module" / "power_module.kicad_pcb", out_dir, coarse_mm=args.coarse_mm,

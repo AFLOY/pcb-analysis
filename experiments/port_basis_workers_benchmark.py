@@ -3,7 +3,7 @@
 The two-layer board of ``dc_native_benchmark.py`` (60 mm square, a slot, a via
 bank) with the two edge pads plus interior taps as ports.  For every size and
 port count, ``dc_port_basis`` runs with 1, 2, 4 and 8 worker threads
-(``PCB_NATIVE_THREADS=1``), and once more with one worker and an OpenMP team
+(OpenMP team 1), and once more with one worker and an OpenMP team
 of 4 on the native path, so the two kinds of CPU parallelism are compared at
 the same core count, and with both combined on 8 cores (2 x 4 and 4 x 2).  Every variant runs in its own subprocess so that its
 peak RSS and its thread environment are its own; the fields of every variant
@@ -61,9 +61,17 @@ def ports(problem: Any, count: int) -> Any:
     return PortSet(pads=pads, names=names, reference=len(pads) - 1)
 
 
-def run_variant(elements: int, count: int, workers: int, repeats: int, out: Path) -> None:
+def run_variant(elements: int, count: int, workers: int, team: int, repeats: int, out: Path) -> None:
     from electrical.matrix_free_mpir_fem import MPIRConfig, dc_port_basis
+    from electrical.matrix_free_mpir_fem import ports as port_module
     from electrical.matrix_free_mpir_fem.native_dc import native_requested
+    from electrical.threads import set_thread_budget
+
+    # The pool width and the OpenMP team are internal to pcb-analysis; this
+    # measurement pins its split (``ports._split_budget``) to the variant and
+    # gives the process exactly their product as its budget.
+    set_thread_budget(workers * team)
+    port_module._split_budget = lambda budget, tasks: (workers, team)
 
     problem = board(elements)
     port_set = ports(problem, count)
@@ -71,13 +79,13 @@ def run_variant(elements: int, count: int, workers: int, repeats: int, out: Path
     samples = []
     for _ in range(repeats):
         started = time.perf_counter()
-        basis = dc_port_basis(problem.mesh, port_set, vias=problem.vias, config=config, workers=workers)
+        basis = dc_port_basis(problem.mesh, port_set, vias=problem.vias, config=config)
         samples.append(time.perf_counter() - started)
     np.save(out, basis.unit_voltage_potential_v)
     print(json.dumps({
         "elements": elements, "nodes": int(problem.mesh.size), "ports": count,
         "workers": workers, "workers_used": int(basis.workers),
-        "native_threads": int(os.environ.get("PCB_NATIVE_THREADS", "1")),
+        "native_threads": team, "thread_budget": workers * team,
         "native": bool(native_requested()),
         "low_operator_backend": basis.operator.low_operator_backend,
         "converged": bool(basis.converged), "inner_iterations": int(basis.inner_iterations),
@@ -96,8 +104,8 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.variant:
-        elements, count, workers = (int(v) for v in args.variant.split(":"))
-        run_variant(elements, count, workers, args.repeats, args.out)
+        elements, count, workers, team = (int(v) for v in args.variant.split(":"))
+        run_variant(elements, count, workers, team, args.repeats, args.out)
         return
 
     scratch = args.output.parent / "port_basis_workers_scratch"
@@ -109,10 +117,9 @@ def main() -> None:
             results: list[dict[str, Any]] = []
             for workers, team in variants:
                 out = scratch / f"{elements}_{count}_{workers}_{team}.npy"
-                env = dict(os.environ, PCB_NATIVE_THREADS=str(team))
                 done = subprocess.run(
-                    [sys.executable, __file__, "--variant", f"{elements}:{count}:{workers}", "--repeats", str(args.repeats), "--out", str(out)],
-                    capture_output=True, text=True, timeout=3600, env=env,
+                    [sys.executable, __file__, "--variant", f"{elements}:{count}:{workers}:{team}", "--repeats", str(args.repeats), "--out", str(out)],
+                    capture_output=True, text=True, timeout=3600,
                 )
                 if done.returncode != 0:
                     results.append({"workers": workers, "native_threads": team, "failed": (done.stderr.strip().splitlines() or ["killed"])[-1][:200]})

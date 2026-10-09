@@ -40,6 +40,7 @@ from thermal.matrix_free_mpir_fem import (  # noqa: E402
     solve_thermal_transient,
 )
 from thermal.matrix_free_mpir_fem.native_hex import native_available  # noqa: E402
+from electrical.threads import set_thread_budget, thread_budget  # noqa: E402
 
 AMBIENT = 300.0
 COPPER_RHO_C = 3.45e6
@@ -79,7 +80,7 @@ def _environment() -> dict[str, Any]:
         "cpu_count": os.cpu_count(),
         "compiler": _compiler(),
         "native_extension_built": native_available(),
-        "PCB_NATIVE_THREADS": os.environ.get("PCB_NATIVE_THREADS"),
+        "thread_budget": thread_budget(),
         "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"),
     }
 
@@ -178,7 +179,9 @@ def board_to_steady() -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output", type=Path, default=Path("benchmark-results/thermal_transient_acceptance.json"))
+    parser.add_argument("--threads", type=int, default=None, help="process-wide thread budget (electrical.threads.set_thread_budget); default: every available CPU")
     args = parser.parse_args()
+    set_thread_budget(args.threads)
     lumped = lumped_cooling()
     board = board_to_steady()
     lumped_ok = all(c["max_deviation_from_discrete_backward_euler_k"] < 5e-4 for c in lumped["cases"]) and all(

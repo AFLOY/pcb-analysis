@@ -33,6 +33,7 @@ from emc.tiled_dipole_superposition import (  # noqa: E402
     scan_plane,
 )
 from emc.tiled_dipole_superposition.native_dipole import native_available  # noqa: E402
+from electrical.threads import set_thread_budget  # noqa: E402
 
 FREQUENCY_HZ = 300.0e6
 
@@ -79,8 +80,9 @@ def _case(sources: int, points_side: int, repeats: int, threads: list[int]) -> d
     far_ref, far_timing = _timed(lambda: far_field_pattern(dipoles, FREQUENCY_HZ, native=False), repeats, 1)
     by_threads: dict[str, Any] = {}
     for count in threads:
-        near, nt = _timed(lambda: evaluate_fields(dipoles, points, FREQUENCY_HZ, native=True, native_threads=count), repeats, 1)
-        far, ft = _timed(lambda: far_field_pattern(dipoles, FREQUENCY_HZ, native=True, native_threads=count), repeats, 1)
+        set_thread_budget(count)  # the process-wide budget is the only thread control
+        near, nt = _timed(lambda: evaluate_fields(dipoles, points, FREQUENCY_HZ, native=True), repeats, 1)
+        far, ft = _timed(lambda: far_field_pattern(dipoles, FREQUENCY_HZ, native=True), repeats, 1)
         by_threads[str(count)] = {
             "threads": count,
             "near_field_ms": nt,
@@ -92,6 +94,7 @@ def _case(sources: int, points_side: int, repeats: int, threads: list[int]) -> d
             "relative_error_far_field": _relative(far.electric_v_per_m, far_ref.electric_v_per_m),
             "radiated_power_w": far.radiated_power_w,
         }
+    set_thread_budget(None)
     return {
         "sources": sources,
         "points": int(points.shape[0]),

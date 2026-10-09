@@ -42,6 +42,7 @@ from multiphysics.staggered_coupling import (  # noqa: E402
 )
 from thermal.matrix_free_mpir_fem import ConvectionBoundary, LayeredThermalMesh  # noqa: E402
 from thermal.matrix_free_mpir_fem.native_hex import native_available as thermal_native_available  # noqa: E402
+from electrical.threads import set_thread_budget  # noqa: E402
 
 AMBIENT_K = 298.15
 COUPLING = CouplingConfig(
@@ -115,8 +116,9 @@ def _case(elements: int, repeats: int, threads: list[int]) -> dict[str, Any]:
     portable = _summary(portable_result, portable_timing)
     by_threads: dict[str, Any] = {}
     for count in threads:
+        set_thread_budget(count)  # the process-wide budget is the only thread control
         native_result, native_timing = _timed(
-            lambda: run_electro_thermal(case, config=COUPLING, native=True, native_threads=count),
+            lambda: run_electro_thermal(case, config=COUPLING, native=True),
             repeats=repeats,
             warmups=1,
         )
@@ -134,6 +136,7 @@ def _case(elements: int, repeats: int, threads: list[int]) -> dict[str, Any]:
                 / portable_result.electrical.joule_loss_w
             ),
         }
+    set_thread_budget(None)
     return {
         "elements": [2, elements, elements],
         "electrical_nodes": int(case.electrical.mesh.size),

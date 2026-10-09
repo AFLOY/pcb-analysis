@@ -13,7 +13,7 @@
 Writes a JSON with ``environment`` and ``decision``; the adopted copy lives at
 ``docs/TENSOR_GRID_RESULTS.json``.
 
-    OPENBLAS_NUM_THREADS=1 PCB_NATIVE_THREADS=4 .venv/bin/python experiments/tensor_grid_acceptance.py
+    OPENBLAS_NUM_THREADS=1 .venv/bin/python experiments/tensor_grid_acceptance.py --threads 4
 """
 
 from __future__ import annotations
@@ -50,6 +50,7 @@ from thermal.matrix_free_mpir_fem import (  # noqa: E402
     solve_thermal_conduction,
 )
 from thermal.matrix_free_mpir_fem.native_hex import native_available  # noqa: E402
+from electrical.threads import set_thread_budget, thread_budget  # noqa: E402
 
 AMBIENT = 300.0
 PATCH = (14e-3, 16e-3, 9e-3, 11e-3)
@@ -83,7 +84,7 @@ def _environment() -> dict[str, Any]:
         "platform": platform.platform(), "python": platform.python_version(), "numpy": np.__version__,
         "cupy": cupy_version, "cpu": _cpu_model(), "cpu_count": os.cpu_count(), "compiler": _compiler(),
         "native_extension_built": native_available(),
-        "PCB_NATIVE_THREADS": os.environ.get("PCB_NATIVE_THREADS"),
+        "thread_budget": thread_budget(),
         "OPENBLAS_NUM_THREADS": os.environ.get("OPENBLAS_NUM_THREADS"),
     }
 
@@ -177,7 +178,9 @@ def dc_conduction() -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output", type=Path, default=Path("benchmark-results/tensor_grid_acceptance.json"))
+    parser.add_argument("--threads", type=int, default=None, help="process-wide thread budget (electrical.threads.set_thread_budget); default: every available CPU")
     args = parser.parse_args()
+    set_thread_budget(args.threads)
     thermal = thermal_hot_spot()
     dc = dc_conduction()
     rise = thermal["rise_k_reference"]

@@ -10,7 +10,7 @@ cells (plane_opt's inclusive centre-within-radius rule against sampling).
 Writes a JSON with ``environment`` and ``decision``; the adopted copy lives at
 ``docs/KICAD_STEP_RESULTS.json``.
 
-    PCB_NATIVE_THREADS=6 .venv/bin/python experiments/kicad_step_acceptance.py --boards power_module,bldc_driver,drone
+    .venv/bin/python experiments/kicad_step_acceptance.py --boards power_module,bldc_driver,drone --threads 6
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ from geometry.cad_import import (  # noqa: E402
     read_kicad_stackup,
     resolve_bodies,
 )
+from electrical.threads import set_thread_budget, thread_budget  # noqa: E402
 
 
 class _AllRoles(dict):
@@ -203,8 +204,10 @@ def main() -> None:
     parser.add_argument("--step-dir", type=Path, default=Path("benchmark-results") / "kicad-step")
     parser.add_argument("--max-points", type=int, default=2_000_000, help="skip a sampling whose point count exceeds this")
     parser.add_argument("--output", type=Path, default=Path("benchmark-results") / "kicad_step_acceptance.json")
+    parser.add_argument("--threads", type=int, default=None, help="process-wide thread budget (electrical.threads.set_thread_budget); default: every available CPU")
     args = parser.parse_args()
-    threads = int(os.environ.get("PCB_NATIVE_THREADS", "1"))
+    set_thread_budget(args.threads)
+    threads = thread_budget()
     args.step_dir.mkdir(parents=True, exist_ok=True)
     boards = [run_board(args.plane_opt, name, args.pitch_mm, [int(v) for v in args.supersamples.split(",")], args.step_dir, threads, args.max_points) for name in args.boards.split(",")]
     layers_all = [layer for b in boards for r in b["rasters"] for layer in r.get("layers", [])]
@@ -218,7 +221,7 @@ def main() -> None:
             "platform": platform.platform(), "python": platform.python_version(), "numpy": np.__version__,
             "ocp": __import__("importlib.metadata").metadata.version("cadquery-ocp"),
             "kicad_cli": kicad_cli_version(), "cpu_count": os.cpu_count(), "native_extension_built": native_classify_available(),
-            "PCB_NATIVE_THREADS": threads, "plane_opt_checkout": str(args.plane_opt), "device": "cpu",
+            "thread_budget": threads, "plane_opt_checkout": str(args.plane_opt), "device": "cpu",
         },
         "definitions": {
             "interior": "cells where no 4-neighbour differs in either mask and no drill hole is within half a diagonal",

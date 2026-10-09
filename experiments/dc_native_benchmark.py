@@ -39,6 +39,7 @@ from electrical.matrix_free_mpir_fem import (  # noqa: E402
     solve_mpir,
 )
 from electrical.matrix_free_mpir_fem.native_dc import native_available  # noqa: E402
+from electrical.threads import set_thread_budget  # noqa: E402
 
 CONFIG = MPIRConfig()
 
@@ -134,8 +135,9 @@ def _case(elements: int, repeats: int, threads: list[int]) -> dict[str, Any]:
 
     by_threads: dict[str, Any] = {}
     for count in threads:
+        set_thread_budget(count)  # the process-wide budget is the only thread control
         start = time.perf_counter()
-        native = _operator(problem, native=True, native_threads=count)
+        native = _operator(problem, native=True)
         native_construction_ms = (time.perf_counter() - start) * 1e3
         native_high, high_timing = _timed(lambda: native.apply_high(probe_high), repeats=20, warmups=2)
         native_apply, apply_timing = _timed(lambda: native.apply_low(probe), repeats=40, warmups=3)
@@ -157,6 +159,7 @@ def _case(elements: int, repeats: int, threads: list[int]) -> dict[str, Any]:
                 np.linalg.norm(native_result.solution - portable_result.solution) / np.linalg.norm(portable_result.solution)
             ),
         }
+    set_thread_budget(None)
     return {
         "elements": [2, elements, elements],
         "nodes": portable.size,
