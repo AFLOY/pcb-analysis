@@ -303,25 +303,66 @@ class SheetMesh:
             position += 1
         return values
 
+    def _branch_positions(self) -> dict[str, Any]:
+        """Index arrays of every branch's grid position, built once per mesh.
+
+        ``scatter``/``gather`` and their vertical variants run once per
+        operator application, hundreds of times a solve; walking the branch
+        lists in Python each time was a fifth of a sheet solve.  An in-plane
+        position is never repeated, so assigning through these arrays writes
+        exactly what the loop wrote.  Two vertical branches on one cell of one
+        level would make the last one win in the loop, which fancy assignment
+        does not promise; such a mesh keeps the loop (``vertical_unique``).
+        """
+        cached = self.__dict__.get("_positions")
+        if cached is not None:
+            return cached
+        def columns(group: list[tuple[int, int, int]]) -> tuple[np.ndarray, ...]:
+            if not group:
+                empty = np.zeros(0, dtype=np.intp)
+                return empty, empty, empty
+            array = np.asarray(group, dtype=np.intp)
+            return array[:, 0], array[:, 1], array[:, 2]
+        index_of = {key: position for position, key in enumerate(self.vertical_levels)}
+        vertical = columns(
+            [
+                (index_of[(via.lower_layer, via.upper_layer)], via.row, via.col)
+                for via in self.via_branches
+            ]
+        )
+        keys = set(zip(*(axis.tolist() for axis in vertical)))
+        positions = {
+            "x": columns(self.branch_x),
+            "y": columns(self.branch_y),
+            "vertical": vertical,
+            "vertical_unique": len(keys) == len(self.via_branches),
+        }
+        self.__dict__["_positions"] = positions
+        return positions
+
     def scatter(self, currents: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Lay the in-plane branch currents out on the grid the operator wants."""
         rows, cols = self.shape
         grid_x = np.zeros((len(self.stackup), rows, cols), dtype=np.float64)
         grid_y = np.zeros_like(grid_x)
-        for index, (layer, row, col) in enumerate(self.branch_x):
-            grid_x[layer, row, col] = currents[index]
-        offset = len(self.branch_x)
-        for index, (layer, row, col) in enumerate(self.branch_y):
-            grid_y[layer, row, col] = currents[offset + index]
+        positions = self._branch_positions()
+        count_x = len(self.branch_x)
+        count_y = len(self.branch_y)
+        grid_x[positions["x"]] = currents[:count_x]
+        grid_y[positions["y"]] = currents[count_x : count_x + count_y]
         return grid_x, grid_y
 
     def scatter_vertical(self, currents: np.ndarray) -> np.ndarray:
         """Lay the vertical branch currents out by level, row and column."""
         levels = self.vertical_levels
-        index_of = {key: position for position, key in enumerate(levels)}
         rows, cols = self.shape
         grid = np.zeros((len(levels), rows, cols), dtype=np.float64)
         offset = len(self.branch_x) + len(self.branch_y)
+        positions = self._branch_positions()
+        if positions["vertical_unique"]:
+            grid[positions["vertical"]] = currents[offset : offset + len(self.via_branches)]
+            return grid
+        index_of = {key: position for position, key in enumerate(levels)}
         for index, via in enumerate(self.via_branches):
             level = index_of[(via.lower_layer, via.upper_layer)]
             grid[level, via.row, via.col] = currents[offset + index]
@@ -329,22 +370,19 @@ class SheetMesh:
 
     def gather_vertical(self, grid: np.ndarray, into: np.ndarray) -> np.ndarray:
         """Read the vertical branch values back off the grid, in place."""
-        levels = self.vertical_levels
-        index_of = {key: position for position, key in enumerate(levels)}
         offset = len(self.branch_x) + len(self.branch_y)
-        for index, via in enumerate(self.via_branches):
-            level = index_of[(via.lower_layer, via.upper_layer)]
-            into[offset + index] = grid[level, via.row, via.col]
+        positions = self._branch_positions()
+        into[offset : offset + len(self.via_branches)] = grid[positions["vertical"]]
         return into
 
     def gather(self, grid_x: np.ndarray, grid_y: np.ndarray) -> np.ndarray:
         """Read the in-plane branch values back off the grid."""
         values = np.zeros(self.branch_count, dtype=np.float64)
-        for index, (layer, row, col) in enumerate(self.branch_x):
-            values[index] = grid_x[layer, row, col]
-        offset = len(self.branch_x)
-        for index, (layer, row, col) in enumerate(self.branch_y):
-            values[offset + index] = grid_y[layer, row, col]
+        positions = self._branch_positions()
+        count_x = len(self.branch_x)
+        count_y = len(self.branch_y)
+        values[:count_x] = grid_x[positions["x"]]
+        values[count_x : count_x + count_y] = grid_y[positions["y"]]
         return values
 
 
