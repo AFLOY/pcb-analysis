@@ -359,14 +359,13 @@ def run_circuit_coupled(
     backend: RuntimeBackend | None = None,
     device_id: int = 0,
     native: bool | None = None,
-    native_threads: int | None = None,
-    port_basis_workers: int | None = None,
 ) -> CircuitCoupledResult:
     """Iterate N-port, circuit and thermal solves to a self-consistent ρ(T) state.
 
-    ``port_basis_workers`` threads run the unit solves of every N-port basis
-    concurrently (see :func:`electrical.matrix_free_mpir_fem.dc_port_basis`);
-    ``None`` reads ``PCB_PORT_BASIS_WORKERS``.
+    Every solve draws on the process-wide thread budget
+    (:func:`electrical.threads.set_thread_budget`); how an N-port basis splits
+    it between concurrent unit solves and their OpenMP teams is decided inside
+    :func:`electrical.matrix_free_mpir_fem.dc_port_basis`.
     """
 
     config = config or CouplingConfig()
@@ -397,9 +396,7 @@ def run_circuit_coupled(
                 backend=backend,
                 device_id=device_id,
                 native=native,
-                native_threads=native_threads,
                 initial=bases[conductor.name],
-                workers=port_basis_workers,
             )
             bases[conductor.name] = basis
             heated[conductor.name] = (mesh, vias)
@@ -453,7 +450,6 @@ def run_circuit_coupled(
             device_id=device_id,
             initial_temperature_k=fixed_point.temperature,
             native=native,
-            native_threads=native_threads,
         )
         proposed = np.where(
             np.isfinite(thermal_solution.temperature_k),

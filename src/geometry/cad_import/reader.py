@@ -127,7 +127,6 @@ class StepSolid:
         tolerance_m: float = 1.0e-9,
         method: ClassifyMethod = "auto",
         deflection_m: float = DEFAULT_DEFLECTION_M,
-        threads: int | None = None,
     ) -> np.ndarray:
         """Point-in-solid test for ``(n, 3)`` points in metres.
 
@@ -139,7 +138,7 @@ class StepSolid:
 
         chosen = default_method() if method == "auto" else method
         if chosen != "occ":
-            return self.tessellate(deflection_m).contains(points_m, method=chosen, threads=threads)
+            return self.tessellate(deflection_m).contains(points_m, method=chosen)
         _ocp()
         from OCP.BRepClass3d import BRepClass3d_SolidClassifier
         from OCP.gp import gp_Pnt

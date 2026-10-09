@@ -29,7 +29,6 @@ branches (vias, filament links) get the same treatment on their level pairs.
 from __future__ import annotations
 
 import math
-import os
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -37,6 +36,7 @@ import numpy as np
 import scipy.sparse as sp
 
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
+from electrical.threads import thread_budget
 
 from .sheet_inductance import _MU0_OVER_4PI, closed_form_mutual_inductance_arrays
 from .sheet_operator import SheetStackup
@@ -52,11 +52,6 @@ def native_available() -> bool:
     """True when the C++ near-field kernel is built (``python -m electrical.sheet_peec.native.build``)."""
 
     return _native is not None
-
-
-def native_threads() -> int:
-    value = os.environ.get("PCB_NATIVE_THREADS")
-    return max(1, int(value)) if value else 0
 
 
 def lagrange_stencil(coordinate: np.ndarray, origin: float, pitch: float, count: int, order: int) -> tuple[np.ndarray, np.ndarray]:
@@ -291,7 +286,7 @@ class PfftSheetInductanceOperator:
                 _native.grid_pair_coupling(
                     p.indptr.astype(np.int32), p.indices.astype(np.int32), p.data.astype(np.float64),
                     int(self.grid.nodes_x), np.ascontiguousarray(table), np.ascontiguousarray(i, dtype=np.int64),
-                    np.ascontiguousarray(j, dtype=np.int64), native_threads(),
+                    np.ascontiguousarray(j, dtype=np.int64), thread_budget(),
                 )
             )
         out = np.zeros(i.size)

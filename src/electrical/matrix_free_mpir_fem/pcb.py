@@ -279,9 +279,10 @@ class MatrixFreePCBOperator:
     PCG iterations per outer step.  ``"jacobi"`` keeps the plain scaling.
 
     ``native=True`` runs the FP32 action, the whole inner PCG and the FP64
-    action in the optional C++ extension (CPU runtime only, ``native_threads``
-    OpenMP threads); ``None`` follows ``PCB_NATIVE_Q1``.  The results are the
-    same either way; only the speed differs.
+    action in the optional C++ extension (CPU runtime only, an OpenMP team of
+    :func:`electrical.threads.thread_budget` threads); ``None`` follows
+    ``PCB_NATIVE_Q1``.  The results are the same either way; only the speed
+    differs.
 
     Fixed nodes are the inactive nodes, the ``reference_node`` and every
     ``dirichlet_nodes`` entry; at least one of the last two must be given.
@@ -303,7 +304,6 @@ class MatrixFreePCBOperator:
         preconditioner: Preconditioner = "two-level",
         coarse_block_nodes: int | None = None,
         native: bool | None = None,
-        native_threads: int | None = None,
     ) -> None:
         if runtime is not None and backend is not None:
             raise ValueError("pass either runtime or backend, not both")
@@ -388,7 +388,6 @@ class MatrixFreePCBOperator:
                 self._via_a_high,
                 self._via_b_high,
                 self._via_g_high,
-                threads=native_threads,
             )
             self.high_operator_backend = self._native_high.kernel_name
 
@@ -433,9 +432,19 @@ class MatrixFreePCBOperator:
                 diagonal,
                 coarse_block=None if coarse is None else coarse.block,
                 coarse_inverse=None if coarse is None else coarse._coarse_inverse_high,
-                threads=native_threads,
             )
             self.low_operator_backend = self._native.kernel_name
+
+    def _set_native_team(self, threads: int) -> None:
+        """OpenMP team of the native kernels when this operator shares the budget.
+
+        Kernels start with the whole process budget; :func:`.ports.dc_port_basis`
+        lowers it when it runs several solves on this operator at once.
+        """
+
+        for kernel in (self._native, self._native_high):
+            if kernel is not None:
+                kernel.threads = max(1, int(threads))
 
     @staticmethod
     def _element_views(grid: Any) -> tuple[Any, Any, Any, Any]:
@@ -708,7 +717,6 @@ def solve_pcb_dc(
     preconditioner: Preconditioner = "two-level",
     coarse_block_nodes: int | None = None,
     native: bool | None = None,
-    native_threads: int | None = None,
 ) -> PCBConductionSolution:
     """Solve a layered PCB's DC conduction problem with matrix-free MPIR.
 
@@ -716,8 +724,9 @@ def solve_pcb_dc(
     the potential of the previous iteration of a coupled analysis; NaN entries
     (inactive nodes of a reported solution) are treated as zero.
     ``preconditioner`` selects the two-level (default) or Jacobi inner
-    preconditioner.  ``native`` and ``native_threads`` select the fused C++
-    host path of :class:`MatrixFreePCBOperator`.
+    preconditioner.  ``native`` selects the fused C++ host path of
+    :class:`MatrixFreePCBOperator`, whose threads come from the process-wide
+    budget (:func:`electrical.threads.set_thread_budget`).
     """
 
     operator = MatrixFreePCBOperator(
@@ -733,7 +742,6 @@ def solve_pcb_dc(
         preconditioner=preconditioner,
         coarse_block_nodes=coarse_block_nodes,
         native=native,
-        native_threads=native_threads,
     )
     rhs = operator.build_rhs(problem.terminals, problem.voltage_terminals)
     fixed = operator.dirichlet_potential(problem.voltage_terminals)

@@ -49,7 +49,6 @@ class MatrixFreeThermalOperator:
         preconditioner: Preconditioner = "two-level",
         coarse_block_nodes: int | None = None,
         native: bool | None = None,
-        native_threads: int | None = None,
         capacity_per_s: np.ndarray | None = None,
     ) -> None:
         """``capacity_per_s`` is the lumped nodal heat capacity over the time step,
@@ -167,7 +166,6 @@ class MatrixFreeThermalOperator:
                 self._unit_high,
                 self._robin_total_high,
                 self.free_nodes,
-                threads=native_threads,
             )
             self.high_operator_backend = self._native_high.kernel_name
 
@@ -196,7 +194,6 @@ class MatrixFreeThermalOperator:
                 diagonal,
                 coarse_block=None if coarse is None else coarse.block,
                 coarse_inverse=None if coarse is None else coarse._coarse_inverse_high,
-                threads=native_threads,
             )
             self.low_operator_backend = self._native.kernel_name
 

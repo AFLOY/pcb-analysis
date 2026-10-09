@@ -165,7 +165,6 @@ def evaluate_fields(
     tile_points: int = 2048,
     dtype: Any = np.complex128,
     native: bool | None = None,
-    native_threads: int | None = None,
 ) -> FieldSamples:
     """Sum the exact dipole fields of every source at every observation point.
 
@@ -175,7 +174,8 @@ def evaluate_fields(
     near field, which does not rely on cancellation, is what is wanted.
 
     ``native=True`` sums the pairs in the optional C++ extension (CPU,
-    complex128 only, ``native_threads`` OpenMP threads); ``None`` follows
+    complex128 only, an OpenMP team of
+    :func:`electrical.threads.thread_budget` threads); ``None`` follows
     ``PCB_NATIVE_EMC``.  The result is the same sum in a different order.
     """
 
@@ -198,7 +198,6 @@ def evaluate_fields(
             sources.moment_a_m,
             k,
             electric=electric,
-            threads=native_threads,
         )
         return FieldSamples(
             point_m=points,

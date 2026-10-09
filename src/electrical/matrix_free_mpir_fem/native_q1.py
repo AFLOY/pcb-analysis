@@ -13,6 +13,8 @@ from typing import Any
 
 import numpy as np
 
+from ..threads import thread_budget
+
 try:  # pragma: no cover - depends on the local build
     from . import _scalar_maxwell_native as _native
 except ImportError:  # pragma: no cover
@@ -62,15 +64,6 @@ def native_dot_accumulation() -> str:
     return value
 
 
-def native_threads() -> int:
-    """Thread count for the fused operator; ``PCB_NATIVE_THREADS`` overrides."""
-
-    value = os.environ.get("PCB_NATIVE_THREADS")
-    if value:
-        return max(1, int(value))
-    return 1
-
-
 class NativeScalarMaxwellQ1:
     """Host complex64 operator and inner GMRES bound to one prepared mesh."""
 
@@ -86,7 +79,6 @@ class NativeScalarMaxwellQ1:
         free_nodes: np.ndarray,
         diagonal: np.ndarray,
         *,
-        threads: int | None = None,
         orthogonalization: str | None = None,
         dot_accumulation: str | None = None,
     ) -> None:
@@ -98,7 +90,8 @@ class NativeScalarMaxwellQ1:
         self.element_rows = int(element_shape[0])
         self.element_columns = int(element_shape[1])
         self.size = (self.element_rows + 1) * (self.element_columns + 1)
-        self.threads = threads if threads is not None else native_threads()
+        # OpenMP team: the whole process budget, since the kernel runs alone.
+        self.threads = thread_budget()
         self.orthogonalization = (
             orthogonalization if orthogonalization is not None else native_orthogonalization()
         )

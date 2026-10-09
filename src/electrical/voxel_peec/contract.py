@@ -22,6 +22,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from ..sheet_peec.skin_filaments import COPPER_RESISTIVITY_OHM_M
+from ..threads import thread_budget
 
 _SOLVER_LOCK = threading.Lock()
 
@@ -156,9 +157,19 @@ def linear_indices(mask: np.ndarray) -> list[int]:
 
 
 def default_tolerance(settings: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """PyPEEC 5.8 solver settings: SciPy FFT dense operator, GMRES, direct coupling."""
+    """PyPEEC 5.8 solver settings: SciPy FFT dense operator, GMRES, direct coupling.
+
+    The SciPy FFT runs on :func:`electrical.threads.thread_budget` workers; a
+    thread count in ``settings`` is rejected, since the process-wide budget is
+    the only threading control.
+    """
 
     settings = dict(settings or {})
+    if "scipy_workers" in settings:
+        raise ValueError(
+            "settings['scipy_workers'] is no longer read: thread counts come from "
+            "electrical.threads.set_thread_budget"
+        )
     iterative = {
         "solver": str(settings.get("iterative_solver", "gmres")),
         "rel_tol": float(settings.get("relative_tolerance", 1e-6)),
@@ -175,7 +186,7 @@ def default_tolerance(settings: Mapping[str, Any] | None = None) -> dict[str, An
             "split": bool(settings.get("split_fft", True)),
             "fft_options": {
                 "library": str(settings.get("fft_library", "SciPy")),
-                "scipy_worker": int(settings.get("scipy_workers", -1)),
+                "scipy_worker": thread_budget(),
                 "fftw_thread": 0,
                 "fftw_cache": False,
                 "fftw_timeout": 100.0,

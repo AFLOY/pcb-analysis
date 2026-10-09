@@ -15,7 +15,7 @@ from typing import Any
 
 import numpy as np
 
-from .native_q1 import native_threads
+from ..threads import thread_budget
 
 try:  # pragma: no cover - depends on the local build
     from . import _layered_dc_native as _native
@@ -73,7 +73,6 @@ class _Prepared:
         via_b: np.ndarray,
         via_g: np.ndarray,
         dtype: Any,
-        threads: int | None,
     ) -> None:
         if _native is None:
             raise ImportError(
@@ -85,7 +84,10 @@ class _Prepared:
         if self.rows < 1 or self.cols < 1 or self.layers < 1:
             raise ValueError("node_shape must describe at least one element per layer")
         self.size = layers * node_rows * node_cols
-        self.threads = threads if threads is not None else native_threads()
+        # OpenMP team of every call: the process budget.  A caller that runs
+        # several solves at once (``ports.dc_port_basis``) lowers it to its
+        # share of the budget through the operator that owns this kernel.
+        self.threads = thread_budget()
         cast = lambda value: np.ascontiguousarray(value, dtype=dtype).reshape(-1)
         self._coefficients = cast(coefficients)
         self._unit = cast(unit)
@@ -116,9 +118,8 @@ class NativeLayeredDCQ1(_Prepared):
         *,
         coarse_block: int | None = None,
         coarse_inverse: np.ndarray | None = None,
-        threads: int | None = None,
     ) -> None:
-        super().__init__(node_shape, coefficients, unit, free_nodes, via_a, via_b, via_g, np.float32, threads)
+        super().__init__(node_shape, coefficients, unit, free_nodes, via_a, via_b, via_g, np.float32)
         self._diagonal = np.ascontiguousarray(diagonal, dtype=np.float32).reshape(-1)
         if self._diagonal.size != self.size:
             raise ValueError("diagonal must hold one value per node")
@@ -187,10 +188,8 @@ class NativeLayeredDCQ1High(_Prepared):
         via_a: np.ndarray,
         via_b: np.ndarray,
         via_g: np.ndarray,
-        *,
-        threads: int | None = None,
     ) -> None:
-        super().__init__(node_shape, coefficients, unit, free_nodes, via_a, via_b, via_g, np.float64, threads)
+        super().__init__(node_shape, coefficients, unit, free_nodes, via_a, via_b, via_g, np.float64)
 
     def apply(self, vector: Any) -> np.ndarray:
         vector = np.ascontiguousarray(vector, dtype=np.float64).reshape(-1)

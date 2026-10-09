@@ -138,7 +138,6 @@ def solve_thermal_transient(
     preconditioner: Preconditioner = "two-level",
     coarse_block_nodes: int | None = None,
     native: bool | None = None,
-    native_threads: int | None = None,
     radiation_max_iterations: int = 25,
     radiation_tolerance_k: float = 1.0e-4,
 ) -> TransientThermalSolution:
@@ -183,7 +182,7 @@ def solve_thermal_transient(
     options = dict(
         config=config, runtime=runtime, backend=backend, device_id=device_id,
         preconditioner=preconditioner, coarse_block_nodes=coarse_block_nodes,
-        native=native, native_threads=native_threads,
+        native=native,
         radiation_max_iterations=radiation_max_iterations, radiation_tolerance_k=radiation_tolerance_k,
     )
     for index, (time_s, step_s) in enumerate(zip(schedule.times_s[1:], schedule.steps_s), start=1):

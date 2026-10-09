@@ -4,7 +4,8 @@ OpenCASCADE classifies one point at a time through Python, about 25 µs per
 point; a board sampled at 0.1 mm with three samples per axis asks for
 millions of points.  Tessellating each solid once (``BRepMesh``) turns the
 test into a sum of signed solid angles over a few hundred triangles, which
-the C++ module evaluates over all points in parallel and NumPy evaluates in
+the C++ module evaluates over all points in parallel (on
+:func:`electrical.threads.thread_budget` threads) and NumPy evaluates in
 chunks when the module is not built.  Planar solids tessellate exactly;
 curved faces carry the linear deflection the tessellation was asked for.
 """
@@ -17,6 +18,8 @@ from typing import Literal
 
 import numpy as np
 
+from electrical.threads import thread_budget
+
 try:  # pragma: no cover - depends on the local build
     from . import _voxelize_native as _native
 except ImportError:  # pragma: no cover
@@ -28,13 +31,6 @@ ClassifyMethod = Literal["auto", "occ", "numpy", "native", "section"]
 
 def native_available() -> bool:
     return _native is not None
-
-
-def native_threads() -> int:
-    value = os.environ.get("PCB_NATIVE_THREADS")
-    if value:
-        return max(1, int(value))
-    return 1
 
 
 def default_method() -> ClassifyMethod:
@@ -97,7 +93,7 @@ class TriangleMesh:
         return forward == reverse and len(forward) == edges.shape[0]
 
     # ------------------------------------------------------------ queries
-    def winding_numbers(self, points_m: np.ndarray, *, method: ClassifyMethod = "auto", threads: int | None = None) -> np.ndarray:
+    def winding_numbers(self, points_m: np.ndarray, *, method: ClassifyMethod = "auto") -> np.ndarray:
         points = np.ascontiguousarray(points_m, dtype=np.float64)
         if points.ndim != 2 or points.shape[1] != 3:
             raise ValueError("points_m must have shape (n, 3)")
@@ -108,12 +104,12 @@ class TriangleMesh:
                     "the geometry native extension is not built; run cmake or "
                     "python -m geometry.cad_import.native.build"
                 )
-            return np.asarray(_native.winding_numbers(points, self.triangles_m, threads or native_threads()))
+            return np.asarray(_native.winding_numbers(points, self.triangles_m, thread_budget()))
         if chosen == "numpy":
             return winding_numbers_numpy(points, self.triangles_m)
         raise ValueError("winding numbers are computed by 'numpy' or 'native', not 'occ'")
 
-    def contains(self, points_m: np.ndarray, *, method: ClassifyMethod = "auto", threads: int | None = None, threshold: float = 0.5) -> np.ndarray:
+    def contains(self, points_m: np.ndarray, *, method: ClassifyMethod = "auto", threshold: float = 0.5) -> np.ndarray:
         points = np.ascontiguousarray(points_m, dtype=np.float64)
         if points.ndim != 2 or points.shape[1] != 3:
             raise ValueError("points_m must have shape (n, 3)")
@@ -124,7 +120,7 @@ class TriangleMesh:
                     "the geometry native extension is not built; run cmake or "
                     "python -m geometry.cad_import.native.build"
                 )
-            return np.asarray(_native.contains(points, self.triangles_m, threshold, threads or native_threads()), dtype=bool)
+            return np.asarray(_native.contains(points, self.triangles_m, threshold, thread_budget()), dtype=bool)
         lo, hi = self.bounds_m
         inside = np.all((points >= lo) & (points <= hi), axis=1)
         candidates = np.nonzero(inside)[0]
@@ -244,4 +240,4 @@ def winding_numbers_numpy(points_m: np.ndarray, triangles_m: np.ndarray, *, chun
     return out
 
 
-__all__ = ["ClassifyMethod", "TriangleMesh", "default_method", "default_plane_method", "native_available", "native_threads", "plane_section_coverage", "section_segments_numpy", "winding_numbers_numpy"]
+__all__ = ["ClassifyMethod", "TriangleMesh", "default_method", "default_plane_method", "native_available", "plane_section_coverage", "section_segments_numpy", "winding_numbers_numpy"]

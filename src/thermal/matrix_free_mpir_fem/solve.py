@@ -47,7 +47,6 @@ def solve_thermal_conduction(
     coarse_block_nodes: int | None = None,
     reference_temperature_k: float | None = None,
     native: bool | None = None,
-    native_threads: int | None = None,
     radiation_max_iterations: int = 25,
     radiation_tolerance_k: float = 1.0e-4,
 ) -> ThermalConductionSolution:
@@ -74,7 +73,7 @@ def solve_thermal_conduction(
         problem, config=config, runtime=runtime, backend=backend, device_id=device_id,
         initial_temperature_k=initial_temperature_k, preconditioner=preconditioner,
         coarse_block_nodes=coarse_block_nodes, reference_temperature_k=reference_temperature_k,
-        native=native, native_threads=native_threads,
+        native=native,
         radiation_max_iterations=radiation_max_iterations, radiation_tolerance_k=radiation_tolerance_k,
     )
 
@@ -91,7 +90,6 @@ def _solve(
     coarse_block_nodes: int | None = None,
     reference_temperature_k: float | None = None,
     native: bool | None = None,
-    native_threads: int | None = None,
     radiation_max_iterations: int = 25,
     radiation_tolerance_k: float = 1.0e-4,
     capacity_per_s: np.ndarray | None = None,
@@ -102,7 +100,7 @@ def _solve(
     linear_options = dict(
         config=config, runtime=runtime, backend=backend, device_id=device_id,
         preconditioner=preconditioner, coarse_block_nodes=coarse_block_nodes,
-        reference_temperature_k=reference_temperature_k, native=native, native_threads=native_threads,
+        reference_temperature_k=reference_temperature_k, native=native,
         capacity_per_s=capacity_per_s, previous_temperature_k=previous_temperature_k,
     )
     if not problem.radiation:
@@ -162,7 +160,6 @@ def _solve_linear(
     coarse_block_nodes: int | None,
     reference_temperature_k: float | None,
     native: bool | None,
-    native_threads: int | None,
     capacity_per_s: np.ndarray | None = None,
     previous_temperature_k: np.ndarray | None = None,
 ) -> ThermalConductionSolution:
@@ -174,7 +171,6 @@ def _solve_linear(
         preconditioner=preconditioner,
         coarse_block_nodes=coarse_block_nodes,
         native=native,
-        native_threads=native_threads,
         capacity_per_s=capacity_per_s,
     )
     previous = None

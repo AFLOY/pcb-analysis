@@ -12,6 +12,8 @@ from typing import Any
 
 import numpy as np
 
+from electrical.threads import thread_budget
+
 try:  # pragma: no cover - depends on the local build
     from . import _thermal_native as _native
 except ImportError:  # pragma: no cover
@@ -32,15 +34,6 @@ def native_requested() -> bool:
     return flag in {"1", "true", "yes", "on"} and native_available()
 
 
-def native_threads() -> int:
-    """Thread count for the native path; ``PCB_NATIVE_THREADS`` overrides."""
-
-    value = os.environ.get("PCB_NATIVE_THREADS")
-    if value:
-        return max(1, int(value))
-    return 1
-
-
 class NativeThermalHexQ1:
     """Host float32 operator and two-level inner PCG bound to one prepared mesh."""
 
@@ -57,7 +50,6 @@ class NativeThermalHexQ1:
         *,
         coarse_block: int | None = None,
         coarse_inverse: np.ndarray | None = None,
-        threads: int | None = None,
     ) -> None:
         if _native is None:
             raise ImportError(
@@ -66,7 +58,7 @@ class NativeThermalHexQ1:
             )
         self.slabs, self.rows, self.cols = (int(axis) for axis in element_grid_shape)
         self.size = (self.slabs + 1) * (self.rows + 1) * (self.cols + 1)
-        self.threads = threads if threads is not None else native_threads()
+        self.threads = thread_budget()  # the whole process budget: the kernel runs alone
         f32 = lambda value: np.ascontiguousarray(value, dtype=np.float32).reshape(-1)
         self._coefficients = f32(coefficients)
         self._unit = f32(unit)
@@ -161,8 +153,6 @@ class NativeThermalHexQ1High:
         unit: np.ndarray,
         robin: np.ndarray,
         free_nodes: np.ndarray,
-        *,
-        threads: int | None = None,
     ) -> None:
         if _native is None:
             raise ImportError(
@@ -171,7 +161,7 @@ class NativeThermalHexQ1High:
             )
         self.slabs, self.rows, self.cols = (int(axis) for axis in element_grid_shape)
         self.size = (self.slabs + 1) * (self.rows + 1) * (self.cols + 1)
-        self.threads = threads if threads is not None else native_threads()
+        self.threads = thread_budget()  # the whole process budget: the kernel runs alone
         f64 = lambda value: np.ascontiguousarray(value, dtype=np.float64).reshape(-1)
         self._coefficients = f64(coefficients)
         self._unit = f64(unit)

@@ -30,21 +30,23 @@ P_e(ψ_m)`` with ``ψ_m = Σ_k u_mk φ_k``, so the loss of every element and via
 comes from the exact element quadratic forms of :class:`.pcb.MatrixFreePCBOperator`.
 
 The ``n - 1`` unit solves are independent and share one read-only operator,
-so :func:`dc_port_basis` can run them on a thread pool (``workers=``, or
-``PCB_PORT_BASIS_WORKERS``).  Threads multiply with the OpenMP team of the
-native kernels (``PCB_NATIVE_THREADS``); their product is the core budget.
-A CUDA runtime solves serially, since its stream is shared.
+so :func:`dc_port_basis` can run them on a thread pool whose threads each
+drive an OpenMP team of the native kernels.  This is the one place where
+pcb-analysis nests parallelism.  The caller sets only the process-wide total
+(:func:`electrical.threads.set_thread_budget`); :func:`_split_budget` divides
+it into pool width × team with a product inside the budget.  A CUDA runtime
+solves serially, since its stream is shared.
 """
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Sequence
 
 import numpy as np
 
+from ..threads import thread_budget
 from .pcb import (
     LayeredPCBMesh,
     MatrixFreePCBOperator,
@@ -57,13 +59,28 @@ from .runtime import LowPrecisionRuntime, RuntimeBackend
 from .solver import MPIRConfig, MPIRResult, solve_mpir
 
 
-def port_basis_workers() -> int:
-    """Threads for the unit solves of a basis; ``PCB_PORT_BASIS_WORKERS`` overrides (default 1)."""
+def _split_budget(budget: int, tasks: int) -> tuple[int, int]:
+    """Pool width and per-solve OpenMP team for ``tasks`` unit solves in ``budget`` threads.
 
-    value = os.environ.get("PCB_PORT_BASIS_WORKERS")
-    if value:
-        return max(1, int(value))
-    return 1
+    Returns ``(width, team)`` with ``1 <= width <= max(1, tasks)``,
+    ``team >= 1`` and ``width * team <= budget``.
+
+    Provisional rule: a serial pool and the whole budget to each solve's
+    OpenMP team.  ``docs/PORT_BASIS_WORKERS_RESULTS.json`` (8-core Ryzen
+    7 9700X, fused kernels, 5 and 9 ports, 100² to 300² elements) has, at
+    four threads, a pool of 4 and a team of 4 within 5 % of each other, and at
+    eight threads 2 × 4 and 4 × 2 fastest (up to 2.6× over one thread), but no
+    team of 8 to set against them, so it does not yet say where a pool beats
+    a wider team.  A forthcoming measurement with
+    ``experiments/port_basis_workers_benchmark.py`` sweeps width × team at
+    fixed totals per mesh size and port count; its crossover replaces this
+    rule.  Only this function changes then: callers neither pass nor see the
+    split, and the result does not depend on it.
+    """
+
+    budget = max(1, int(budget))
+    del tasks  # the provisional rule ignores it; the measured one will not
+    return 1, budget
 
 
 @dataclass(frozen=True)
@@ -245,19 +262,20 @@ def dc_port_basis(
     preconditioner: Preconditioner = "two-level",
     coarse_block_nodes: int | None = None,
     native: bool | None = None,
-    native_threads: int | None = None,
     initial: DCPortBasis | None = None,
-    workers: int | None = None,
 ) -> DCPortBasis:
     """Measure the N-port of ``mesh`` at ``ports`` with ``n - 1`` unit voltage solves.
 
     One operator with every port node fixed serves all solves.  ``initial``
     warm-starts each unit solve from the same port's field of an earlier
     basis (for example the previous iterate of a coupled analysis on the
-    same mesh with other conductivities).  ``workers`` threads run the unit
-    solves concurrently (``None``: :func:`port_basis_workers`); the operator
-    is read-only once built and every solve owns its vectors, so the result
-    does not depend on the thread count.  A CUDA runtime solves serially.
+    same mesh with other conductivities).  The unit solves may run
+    concurrently: the process-wide thread budget
+    (:func:`electrical.threads.set_thread_budget`) is split internally between
+    a pool over the solves and the OpenMP team of each solve
+    (``DCPortBasis.workers`` reports the pool width used).  The operator is
+    read-only once built and every solve owns its vectors, so the result does
+    not depend on the split.  A CUDA runtime solves serially.
     """
 
     operator = MatrixFreePCBOperator(
@@ -270,7 +288,6 @@ def dc_port_basis(
         preconditioner=preconditioner,
         coarse_block_nodes=coarse_block_nodes,
         native=native,
-        native_threads=native_threads,
     )
     if initial is not None and (
         initial.ports != ports or initial.mesh.node_shape != mesh.node_shape
@@ -293,12 +310,23 @@ def dc_port_basis(
         potential = result.solution.reshape(mesh.node_shape)
         return potential, operator.terminal_currents(potential, terminals), result
 
-    threads = port_basis_workers() if workers is None else max(1, int(workers))
-    threads = min(threads, n - 1)
+    budget = thread_budget()
+    width, team = _split_budget(budget, n - 1)
+    # Whatever the rule says: no idle pool threads, no oversubscription, and
+    # one stream for CUDA (whose solves have no OpenMP team).
+    width = max(1, min(int(width), n - 1, budget))
     if getattr(operator.runtime, "is_cuda", False):
-        threads = 1
-    if threads > 1:
-        with ThreadPoolExecutor(max_workers=threads, thread_name_prefix="port-basis") as pool:
+        width = 1
+    team = max(1, min(int(team), budget // width))
+    operator._set_native_team(team)
+    if width > 1:
+        from threadpoolctl import threadpool_limits
+
+        # The pool's own NumPy work (coarse correction, portable path) must
+        # stay inside the team as well, or width × BLAS pool overruns the budget.
+        with threadpool_limits(limits=team), ThreadPoolExecutor(
+            max_workers=width, thread_name_prefix="port-basis"
+        ) as pool:
             outcomes = list(pool.map(unit_solve, range(n - 1), ports.driven))
     else:
         outcomes = [unit_solve(column, port) for column, port in enumerate(ports.driven)]
@@ -332,5 +360,5 @@ def dc_port_basis(
         unit_voltage_potential_v=unit_voltage,
         unit_current_potential_v=unit_current,
         solves=tuple(solves),
-        workers=threads,
+        workers=width,
     )

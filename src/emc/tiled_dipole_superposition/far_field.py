@@ -174,7 +174,6 @@ def far_field_pattern(
     tile_directions: int = 1024,
     dtype: Any = np.complex128,
     native: bool | None = None,
-    native_threads: int | None = None,
 ) -> FarFieldPattern:
     """Evaluate the far-zone field on a sphere and integrate the radiated power.
 
@@ -182,7 +181,8 @@ def far_field_pattern(
     tiles against all sources.  ``distance_m`` only scales the reported field
     by ``1/r``; it has to be in the far zone of the source for the numbers to
     mean what a test site measures.  ``native=True`` sums the phase-weighted
-    moments in the optional C++ extension (CPU, complex128); ``None`` follows
+    moments in the optional C++ extension (CPU, complex128, an OpenMP team of
+    :func:`electrical.threads.thread_budget` threads); ``None`` follows
     ``PCB_NATIVE_EMC``.
     """
 
@@ -196,7 +196,7 @@ def far_field_pattern(
     sampling = sampling or SphereSampling.gauss_legendre()
     if use_native(native, backend, dtype):
         pattern = far_field_pattern_native(
-            sampling.direction, sources.position_m, sources.moment_a_m, k, threads=native_threads
+            sampling.direction, sources.position_m, sources.moment_a_m, k
         )
     else:
         pattern = _array_pattern(sources, sampling, k, backend, tile_directions, dtype)
