@@ -132,13 +132,16 @@ electro-thermal analysis in [MULTIPHYSICS_SCENARIOS.md](MULTIPHYSICS_SCENARIOS.m
   reduced inverse `G_rr⁻¹` is the pad-to-pad resistance matrix an external
   circuit carries. `initial=` warm-starts every unit solve from an earlier
   basis of the same ports, as a coupled iteration does after a conductivity
-  update. `workers=` (default `PCB_PORT_BASIS_WORKERS`, else 1) runs the
-  unit solves on a thread pool: the operator is read-only once built, every
-  solve owns its vectors and the native kernels release the GIL, so the
-  fields are the serial ones bit for bit (`DCPortBasis.workers` reports the
-  count used; a CUDA runtime solves serially). The threads multiply with the
-  OpenMP team of `PCB_NATIVE_THREADS`; `run_circuit_coupled` passes
-  `port_basis_workers=` through.
+  update. The unit solves can run on a thread pool, each solve driving an
+  OpenMP team of the native kernels: the operator is read-only once built,
+  every solve owns its vectors and the native kernels release the GIL, so
+  the fields are the serial ones bit for bit. The caller sets only the
+  process-wide thread budget (`electrical.set_thread_budget`, see
+  [Threads](#threads)); `dc_port_basis` splits it into pool width × team
+  itself (`ports._split_budget`, product at most the budget) and
+  `DCPortBasis.workers` reports the width used. The provisional split is a
+  serial pool with the whole budget in the team; a CUDA runtime solves
+  serially.
 - `potential_v(I)` and `port_voltage_v(I)` are linear in the port currents
   `I` (positive into the copper, summing to zero).
 - `mean_loss_w(C)` returns the time-averaged loss of every element and via
@@ -195,9 +198,12 @@ milliseconds. **Decision:** adopted
 --repeats 2` on the same board, AMD Ryzen 7 9700X 8-Core Processor, 16 logical
 CPUs (8 cores), Python 3.12.14, NumPy 2.3.5, DC native extension on
 (`PCB_NATIVE_Q1=1`), `OPENBLAS_NUM_THREADS=1`, 2026-10-04. Each variant in its
-own subprocess, median of 2; "w" is the thread pool of `dc_port_basis(workers=)`,
-"omp" the OpenMP team of the fused kernels (`PCB_NATIVE_THREADS`). Wall time in s
-(speed-up over one thread); peak RSS for 1 / 4 / 8 workers:
+own subprocess, median of 2; "w" is the thread pool over the unit solves,
+"omp" the OpenMP team of the fused kernels. At the time both were caller
+options (`dc_port_basis(workers=)` and `PCB_NATIVE_THREADS`); both are now
+internal, the benchmark pins the split through `ports._split_budget` and sets
+the budget to w × omp. Wall time in s (speed-up over one thread); peak RSS for
+1 / 4 / 8 workers:
 
 | Elements / nodes | Ports | 1 thread | w2 | w4 | w8 | omp4 | w2·omp4 | w4·omp2 | Peak RSS MB (w1 / w4 / w8) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -218,7 +224,10 @@ the 16-core Xeon 8581C scaled further). Four pool threads cost up to about
 thread); the OpenMP team costs nothing. Combining them (2·4 or 4·2) is the
 fastest at every size. The pool
 also applies where the team does not: the portable NumPy path, and the
-Python-side part of each solve. **Decision:** adopted as an
+Python-side part of each solve. The table has no team of 8 to set against
+2·4 and 4·2, so it does not yet fix where a pool beats a wider team; until a
+sweep of width × team at fixed totals does, `_split_budget` gives the whole
+budget to the team. **Decision:** adopted as an
 option, default one thread (at the largest size, 4 workers converge, give the serial fields bit for bit, run at least 1.5x faster than one worker, and need at most 2x its peak RSS; the pcb-analysis default stays one worker either way (the consumer sets the thread budget)).
 
 ## Software boundary
@@ -242,6 +251,25 @@ that replaces the default Jacobi scaling in every inner solver; the DC and
 the thermal operators use this hook for the two-level preconditioner. A new accelerator
 provides the low-precision vector runtime. CUDA is optional and imported only
 when a CuPy runtime is constructed.
+
+## Threads
+
+The only threading control is the process-wide thread budget of
+`electrical.threads`: `set_thread_budget(n)` (or `thread_budget_scope(n)` for
+a block; `None` restores the default, `available_threads()`, the CPUs of the
+process's affinity mask). No solver takes a thread argument and no environment
+variable sets a thread count. Every fused C++ kernel (`native_q1`,
+`native_dc`) runs an OpenMP team of the budget when it runs alone; an
+explicit budget also limits the BLAS/OpenMP pools of NumPy and SciPy through
+`threadpoolctl`. Where pcb-analysis nests parallelism, in `dc_port_basis`, it
+splits the budget itself so that pool width × team stays inside it. CUDA
+paths do not read the budget.
+
+Until 0.9.3 the kernels took `native_threads=` and `PCB_NATIVE_THREADS`
+(default one thread) and the N-port pool took `workers=` and
+`PCB_PORT_BASIS_WORKERS`; the measurements below that sweep "threads" or set
+`PCB_NATIVE_THREADS=n` correspond to a budget of `n` now. The default is
+every available CPU rather than one thread.
 
 ## CUDA execution
 
@@ -368,7 +396,7 @@ implementation language, limits that size. With the default OpenBLAS thread
 pool (`MAXWELL_NATIVE_DEFAULT_ENV_RESULTS.json`) the spinning BLAS threads
 contend with the single native thread and the 16,705-unknown ratio drops to
 2.94×; the other two cases are within noise of the table above. Operator
-threads (`PCB_NATIVE_THREADS`) gain another 1.2× at 16,705 unknowns with eight
+threads (then `PCB_NATIVE_THREADS`, now the thread budget) gain another 1.2× at 16,705 unknowns with eight
 threads because Gram-Schmidt stays single-threaded and L3-bound.
 
 Second environment, Intel Core i7-8700 (6 cores, AVX2, no AVX-512), GCC
@@ -390,7 +418,7 @@ implementation. The relative action difference between the two operators is
 8.4e-8 on every case. With the default OpenBLAS thread pool
 (`MAXWELL_NATIVE_I7_8700_DEFAULT_ENV_RESULTS.json`) the 16,705-unknown ratio
 drops from 4.12× to 3.65× and the largest case from 2.56× to 2.48×. With six
-operator threads (`PCB_NATIVE_THREADS=6`,
+operator threads (`PCB_NATIVE_THREADS=6`, a budget of 6 now;
 `MAXWELL_NATIVE_I7_8700_THREADS6_RESULTS.json`) the operator alone is 25×
 faster than NumPy and the end-to-end solve gains a further 1.21× at 16,705
 unknowns (886 ms) and 1.20× at 66,049 unknowns (7,059 ms); the remaining time
@@ -415,7 +443,7 @@ Flush-to-zero is set per thread, which the earlier version did only on the
 calling thread. Convergence is unchanged: inner iterations 3,299 / 2,900 /
 4,792 and the same reached residuals at every thread count.
 
-Core i7-8700, `OPENBLAS_NUM_THREADS=1`, `PCB_NATIVE_THREADS` swept
+Core i7-8700, `OPENBLAS_NUM_THREADS=1`, `PCB_NATIVE_THREADS` (now the budget) swept
 (`MAXWELL_NATIVE_I7_8700_SPMD_T{1,2,3,4,6,12}_RESULTS.json`; T1 and T6 use
 five repeats, the others three):
 
@@ -434,15 +462,17 @@ within noise of the earlier build (1,071 ms and 8,484 ms). Scaling is close to
 linear up to three threads and flattens at the six physical cores; the twelve
 hyper-threads gain nothing because the cycle is bound by L3 and DRAM bandwidth,
 not by issue rate. The 4,369-unknown case reaches 122 ms on six threads
-(14.2×). The default remains one thread; a caller who wants the parallel
-cycle sets `PCB_NATIVE_THREADS` to the physical core count.
+(14.2×). The default was one thread then; a caller who wanted the parallel
+cycle set `PCB_NATIVE_THREADS` to the physical core count. The default is now
+the whole thread budget (every available CPU), and a caller who wants the
+physical cores sets `set_thread_budget` to their count.
 
 ### Threaded inner GMRES on the Xeon Platinum 8581C
 
 The SPMD cycle was re-measured on the first environment, Intel Xeon Platinum
 8581C (16 physical cores, 32 hyper-threads, AVX-512, one socket), GCC 14.2.1,
 NumPy 2.3.5, Python 3.12.9, `OPENBLAS_NUM_THREADS=1`, runs sequential,
-`PCB_NATIVE_THREADS` swept
+`PCB_NATIVE_THREADS` (now the budget) swept
 (`MAXWELL_NATIVE_XEON_8581C_SPMD_T{1,2,4,8,16,32}_RESULTS.json`; T1 and T16
 use five repeats, the others three). Solve medians, NumPy ratio in brackets:
 
@@ -528,8 +558,8 @@ Iteration counts equal the float64 runs at each thread count. float32
 accumulation gains 24 % on one thread (11 to 21 % on the Xeon) and 6 to
 16 % threaded; the criteria hold at all three counts (minimum 2.61× on one
 thread). **Decision:** unchanged. The native cycle stays opt-in, float64 and
-one thread by default; on this host a caller sets `PCB_NATIVE_THREADS` to 16
-to 32.
+then one thread by default; on this host a caller set `PCB_NATIVE_THREADS` to
+16 to 32, which is now a thread budget of 16 to 32.
 
 ### Threaded inner GMRES on the Core i7-14700KF (hybrid x86)
 
@@ -579,8 +609,8 @@ Iteration counts equal the float64 runs. float32 accumulation gains 19 to
 from 676 to 1,438 ms and 2,116 to 2,392 ms, where the float64 20-thread runs
 stay within 13 % and 1 %; the spread was not investigated. The criteria hold
 at all three counts (minimum 2.32×). **Decision:** unchanged. The native cycle
-stays opt-in, float64 and one thread by default; on this host a caller sets
-`PCB_NATIVE_THREADS` to 8 (the P-cores).
+stays opt-in, float64 and then one thread by default; on this host a caller
+set `PCB_NATIVE_THREADS` to 8 (the P-cores), which is now a thread budget of 8.
 
 ### CGS2 orthogonalisation (measured, not adopted)
 

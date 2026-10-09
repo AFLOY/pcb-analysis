@@ -324,7 +324,9 @@ The default is order 3, radius 3, on a projection grid of twice the finest
 cell. The near terms (one closed form per distinct bar pair and offset, one
 grid stencil product per distinct configuration) are the build's cost; the
 grid products run in C++ with OpenMP when `electrical.sheet_peec.native` is
-built (`native_available()`), else in NumPy. A 12 × 1 mm strip line at 1e+06 Hz
+built (`native_available()`), else in NumPy. The OpenMP team is the
+process-wide thread budget (`electrical.set_thread_budget`), passed explicitly,
+so `OMP_NUM_THREADS` no longer sets it. A 12 × 1 mm strip line at 1e+06 Hz
 (F.Cu go, B.Cu return, 35 µm copper cut into filaments), loss relative to the
 uniform 0.1 mm convolution solve:
 

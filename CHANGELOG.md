@@ -15,6 +15,45 @@ Versions before 0.7.0 were not tagged; see the Git history.
   halved). The order of floating-point operations is fixed, so a network gives
   the same bits every time; Kicad_PowerOpt's search screen moved onto it with
   identical numbers. Additive.
+- `electrical.threads`: one process-wide thread budget is the only threading
+  control. `available_threads()` (the CPUs of the process's affinity mask),
+  `thread_budget()` (default `available_threads()`),
+  `set_thread_budget(n | None)` (also limits the BLAS/OpenMP pools of NumPy
+  and SciPy through `threadpoolctl`, a new dependency; `None` restores the
+  default and the original pool limits) and `thread_budget_scope(n)`; all four
+  are exported from `electrical`. Every fused C++ kernel (layered DC and
+  scalar Maxwell Q1, thermal hexahedral Q1, dipole fields, point-in-solid
+  tests, sheet pFFT near-field products) runs an OpenMP team of the budget,
+  passed explicitly, so `OMP_NUM_THREADS` no longer sets the pFFT kernel's
+  team; PyPEEC's SciPy FFT runs on the budget. `dc_port_basis` splits the
+  budget between its pool over the unit solves and each solve's OpenMP team
+  internally (provisionally a serial pool and the whole budget in the team,
+  to be replaced by a measured rule); `DCPortBasis.workers` still reports the
+  pool width used. CUDA paths are unchanged.
+
+### Breaking
+
+The default thread count of the native kernels changes from one to every
+available CPU. Callers that set threads replace those settings with one
+`electrical.set_thread_budget(n)` at start-up (or `thread_budget_scope(n)`
+around a block). Removed:
+
+- the `native_threads=` parameter of `solve_pcb_dc`, `MatrixFreePCBOperator`,
+  `dc_port_basis`, `solve_thermal_conduction`, `MatrixFreeThermalOperator`,
+  `solve_thermal_transient`, `run_electro_thermal`, `run_circuit_coupled`,
+  `evaluate_fields` and `far_field_pattern`, and the `threads=` parameter of
+  the internal native kernel wrappers;
+- `dc_port_basis(workers=)`, `run_circuit_coupled(port_basis_workers=)` and
+  the exported `electrical.matrix_free_mpir_fem.port_basis_workers()`;
+- `geometry.cad_import.StepSolid.contains(threads=)` and
+  `TriangleMesh.contains(threads=)` / `TriangleMesh.winding_numbers(threads=)`;
+- the environment variables `PCB_NATIVE_THREADS` and `PCB_PORT_BASIS_WORKERS`
+  and the `native_threads()` helpers of the native modules
+  (`geometry.cad_import.mesh.native_threads` was in that module's `__all__`).
+  `PCB_NATIVE_Q1`, `PCB_NATIVE_THERMAL` and `PCB_NATIVE_EMC`, which select a
+  path rather than a thread count, stay;
+- `electrical.voxel_peec.default_tolerance` no longer reads
+  `settings["scipy_workers"]` and raises `ValueError` when it is given.
 
 ## 0.9.3
 

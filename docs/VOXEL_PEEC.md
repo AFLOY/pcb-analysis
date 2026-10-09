@@ -28,6 +28,12 @@ the Joule loss is its sum times the voxel volume, time-averaged for AC
 (`|I|² R / 2` for a peak phasor). The frequency sweep is initialised from a
 DC solve when the frequency is not zero.
 
+PyPEEC's SciPy FFT runs on as many workers as the process-wide thread budget
+(`electrical.set_thread_budget`). `default_tolerance` takes no thread count:
+until 0.9.3 `settings["scipy_workers"]` set it (default `-1`, every CPU), and
+passing it now raises `ValueError`. The CUDA executor keeps its own FFT
+setting.
+
 ## Acceptance (measured, adopted)
 
 `experiments/voxel_peec_acceptance.py`, PyPEEC 5.8.0, NumPy

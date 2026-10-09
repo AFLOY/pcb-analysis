@@ -125,7 +125,10 @@ voxelisation and remain available for layers (`"occ"`, `"numpy"`, `"native"`):
   Unlike ray parity it has no degenerate ray/edge cases. `numpy` evaluates
   it in chunks; `native` is the same sum in C++ (`native/point_in_mesh.cpp`,
   OpenMP over points, module `_voxelize_native`), built by the root
-  `CMakeLists.txt` with the other kernels. `auto` picks `native` when built,
+  `CMakeLists.txt` with the other kernels. Its OpenMP team is the
+  process-wide thread budget (`electrical.set_thread_budget`); `contains` and
+  `winding_numbers` take no thread argument (until 0.9.3 `threads=` or
+  `PCB_NATIVE_THREADS`). `auto` picks `native` when built,
   else `numpy`.
 
 Planar solids tessellate exactly, so the two winding-number paths reproduce
@@ -134,7 +137,8 @@ via at 5 µm carries 248 triangles and 0.17 % less volume). `StepSolid.tessellat
 rejects a mesh with inward orientation and `TriangleMesh.is_closed` checks
 watertightness. Measured by `experiments/geometry_classify_benchmark.py`
 (Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz, 12 logical CPUs, OCP 8.0.1.0.0, NumPy 2.3.5,
-g++ (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)); the adopted run is `GEOMETRY_CLASSIFY_RESULTS.json`:
+g++ (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)); the adopted run is `GEOMETRY_CLASSIFY_RESULTS.json`
+(`native_threadsN` was `PCB_NATIVE_THREADS=N` then and is a thread budget of N now):
 
 | Case | Path | Time (ms) | Speed-up vs occ | Max fill difference vs occ |
 |---|---|---|---|---|

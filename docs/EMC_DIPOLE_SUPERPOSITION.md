@@ -140,7 +140,9 @@ about thirty times per tile, so it is memory bound.  `native=True` on
 `evaluate_fields` and `far_field_pattern` (or `PCB_NATIVE_EMC=1`, after
 `python -m emc.tiled_dipole_superposition.native.build`) sums the pairs point
 by point in C++ with the same complex128 formulas; OpenMP threads own disjoint
-observation points (`native_threads`, default `PCB_NATIVE_THREADS` or one), so
+observation points (as many as the process-wide thread budget,
+`electrical.set_thread_budget`; until 0.9.3 `native_threads=` or
+`PCB_NATIVE_THREADS`, default one, whose swept counts below are budgets now), so
 the result is the array path's sum in another order and does not depend on the
 thread count.  CPU and complex128 only; CuPy and complex64 keep the array path.
 

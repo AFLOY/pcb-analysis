@@ -130,7 +130,9 @@ and the unit fields without another field solve, heats the board, and the
 loop continues as in `run_electro_thermal` (warm starts, Aitken, the same
 `CouplingConfig`). The result carries, per conductor, the final basis, the
 excitation, the element and via losses, the RMS current density and the
-element temperatures.
+element temperatures. `run_circuit_coupled` takes no thread argument: every
+solve draws on the process-wide thread budget (`electrical.set_thread_budget`),
+and each N-port basis splits it between its unit solves internally.
 
 Why the second moments: temperature follows the time-averaged loss
 (the thermal time constant of a board is of the order of 100 s against
@@ -330,9 +332,12 @@ decade in field and that the FCC Class B limits at 3 m are read correctly.
 
 ## Fused C++ host paths in the coupled solve (measured on `exp/cpp-multiphysics-dc-emc`)
 
-`run_electro_thermal(native=, native_threads=)` hands one selection to both
+`run_electro_thermal(native=)` hands one selection to both
 solvers, `solve_pcb_dc` and `solve_thermal_conduction`; `None` (the default)
-leaves each to its own flag, `PCB_NATIVE_Q1` and `PCB_NATIVE_THERMAL`. The
+leaves each to its own flag, `PCB_NATIVE_Q1` and `PCB_NATIVE_THERMAL`. Both
+kernels run on the process-wide thread budget (`electrical.set_thread_budget`);
+until 0.9.3 they took `native_threads=` (default `PCB_NATIVE_THREADS`, else
+one), and the thread counts measured below are budgets now. The
 coupling itself stays NumPy: the Joule-heat mapping, the ρ(T) update of the
 element conductivities and the Aitken fixed point are O(elements) array
 passes and do not show in a profile.
@@ -392,7 +397,7 @@ boards, while the native path is 1.7 to 1.8× slower on one thread and about
 1.5× slower at sixteen. Going from 16 to 32 threads changes the run by 3 to
 7 %; as on the Xeon, the remainder is the eight preconditioner constructions
 with their dense coarse inverses and the NumPy FP64 residual work, which do
-not scale with `PCB_NATIVE_THREADS`. The benchmark's criterion misses at one thread on
+not scale with the thread count. The benchmark's criterion misses at one thread on
 the smallest case (0.90×), as it did on the Xeon (1.6×). **Decision:**
 unchanged (opt-in).
 
@@ -435,6 +440,10 @@ adapter was current-driven at the time.
 | `main` `00e4491` (0.9.0), no extension built | none | 1,895 s | 4,275 s | 177.1 s |
 | `exp/cpp-multiphysics-dc-emc` `836b144`, all extensions built | `PCB_NATIVE_Q1=1 PCB_NATIVE_THERMAL=1 PCB_NATIVE_EMC=1 PCB_NATIVE_THREADS=3` | 1,551 s | 3,132 s | 21.7 s |
 | same, thermal kernel only | `PCB_NATIVE_THERMAL=1 PCB_NATIVE_THREADS=3` | — | — | 27.2 s |
+
+`PCB_NATIVE_THREADS=3` is what that run set; it no longer exists, and the
+same run now sets a thread budget of 3 (`electrical.set_thread_budget(3)`)
+in each process that runs a scenario thread's share.
 
 The 9-case column is `evaluate_thermal_coupling` on the full-domain copper of
 every role with the run's own thread pool (nine scenario threads, three
