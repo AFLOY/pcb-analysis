@@ -269,7 +269,7 @@ Until 0.9.3 the kernels took `native_threads=` and `PCB_NATIVE_THREADS`
 (default one thread) and the N-port pool took `workers=` and
 `PCB_PORT_BASIS_WORKERS`; the measurements below that sweep "threads" or set
 `PCB_NATIVE_THREADS=n` correspond to a budget of `n` now. The default is
-every available CPU rather than one thread.
+the physical cores (hyper-threads excluded) rather than one thread.
 
 ## CUDA execution
 
@@ -464,8 +464,7 @@ hyper-threads gain nothing because the cycle is bound by L3 and DRAM bandwidth,
 not by issue rate. The 4,369-unknown case reaches 122 ms on six threads
 (14.2×). The default was one thread then; a caller who wanted the parallel
 cycle set `PCB_NATIVE_THREADS` to the physical core count. The default is now
-the whole thread budget (every available CPU), and a caller who wants the
-physical cores sets `set_thread_budget` to their count.
+the whole thread budget, which by default is the physical cores.
 
 ### Threaded inner GMRES on the Xeon Platinum 8581C
 

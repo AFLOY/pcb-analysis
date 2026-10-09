@@ -16,11 +16,12 @@ Versions before 0.7.0 were not tagged; see the Git history.
   the same bits every time; Kicad_PowerOpt's search screen moved onto it with
   identical numbers. Additive.
 - `electrical.threads`: one process-wide thread budget is the only threading
-  control. `available_threads()` (the CPUs of the process's affinity mask),
-  `thread_budget()` (default `available_threads()`),
-  `set_thread_budget(n | None)` (also limits the BLAS/OpenMP pools of NumPy
-  and SciPy through `threadpoolctl`, a new dependency; `None` restores the
-  default and the original pool limits) and `thread_budget_scope(n)`; all four
+  control. `available_threads()` (the physical cores of the process's
+  affinity mask; hyper-threads are not counted), `thread_budget()` (default
+  `available_threads()`), `set_thread_budget(n | None)` (also limits the
+  BLAS/OpenMP pools of NumPy and SciPy to the budget through `threadpoolctl`,
+  a new dependency; `None` sets the default budget and limits the pools to
+  it) and `thread_budget_scope(n)`; all four
   are exported from `electrical`. Every fused C++ kernel (layered DC and
   scalar Maxwell Q1, thermal hexahedral Q1, dipole fields, point-in-solid
   tests, sheet pFFT near-field products) runs an OpenMP team of the budget,
@@ -33,8 +34,8 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ### Breaking
 
-The default thread count of the native kernels changes from one to every
-available CPU. Callers that set threads replace those settings with one
+The default thread count of the native kernels changes from one to the
+physical cores (hyper-threads excluded). Callers that set threads replace those settings with one
 `electrical.set_thread_budget(n)` at start-up (or `thread_budget_scope(n)`
 around a block). Removed:
 

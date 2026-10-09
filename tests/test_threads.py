@@ -29,10 +29,30 @@ def _blas_threads() -> list[int]:
     return [pool["num_threads"] for pool in threadpool_info() if pool["user_api"] == "blas"]
 
 
-def test_default_budget_is_every_available_thread() -> None:
-    expected = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+def test_default_budget_is_the_physical_cores() -> None:
+    """Hyper-threads are not part of the default: one thread per physical core."""
+    cpus = os.sched_getaffinity(0) if hasattr(os, "sched_getaffinity") else set()
+    cores = set()
+    for cpu in cpus:
+        topology = f"/sys/devices/system/cpu/cpu{cpu}/topology/"
+        try:
+            cores.add((open(topology + "physical_package_id").read(), open(topology + "core_id").read()))
+        except OSError:
+            cores = set()
+            break
+    expected = len(cores) or len(cpus) or (os.cpu_count() or 1)
     assert available_threads() == expected
+    assert available_threads() <= (len(cpus) or expected)
     assert thread_budget() == available_threads()
+
+
+def test_the_default_budget_also_limits_the_blas_pools() -> None:
+    np.dot(np.ones((4, 4)), np.ones((4, 4)))
+    pools = _blas_threads()
+    if not pools:
+        pytest.skip("no BLAS library visible to threadpoolctl")
+    set_thread_budget(None)
+    assert _blas_threads() == [available_threads()] * len(pools)
 
 
 def test_the_package_exports_the_budget_and_no_other_thread_control() -> None:

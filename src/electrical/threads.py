@@ -45,13 +45,36 @@ _budget: int | None = None
 _pool_limit: Any = None
 
 
+def _physical_cores(cpus: set[int]) -> int | None:
+    """Distinct (package, core) pairs among ``cpus``; ``None`` without sysfs topology."""
+
+    cores = set()
+    for cpu in cpus:
+        topology = f"/sys/devices/system/cpu/cpu{cpu}/topology/"
+        try:
+            with open(topology + "physical_package_id") as package, open(topology + "core_id") as core:
+                cores.add((package.read().strip(), core.read().strip()))
+        except OSError:
+            return None
+    return len(cores) or None
+
+
 def available_threads() -> int:
-    """Logical CPUs this process may run on (its affinity mask where the OS reports one)."""
+    """Physical cores this process may run on: the default budget.
+
+    Hyper-threads (SMT siblings) are not counted.  The kernels here are
+    floating-point and memory bound, where a sibling adds contention rather
+    than throughput, and a thread count measured on physical cores is the one
+    that transfers between machines.  The cores are those of the affinity
+    mask, read from the sysfs topology; where that is not available the
+    logical CPU count is the fallback.
+    """
 
     try:
-        return max(1, len(os.sched_getaffinity(0)))
+        cpus = os.sched_getaffinity(0)
     except (AttributeError, OSError):  # pragma: no cover - non-Linux hosts
         return os.cpu_count() or 1
+    return max(1, _physical_cores(set(cpus)) or len(cpus))
 
 
 def thread_budget() -> int:
@@ -74,11 +97,13 @@ def _validated(threads: int | None) -> int | None:
 def set_thread_budget(threads: int | None) -> None:
     """Set the total thread count of pcb-analysis for the whole process.
 
-    ``threads`` must be at least 1; ``None`` restores the default
-    (:func:`available_threads`).  An explicit budget also limits the BLAS and
-    OpenMP pools of the NumPy and SciPy libraries loaded so far to that many
-    threads; a later call replaces the limit and ``None`` restores the
-    limits those libraries had before the first call.
+    ``threads`` must be at least 1; ``None`` sets the default
+    (:func:`available_threads`, the physical cores).  Either way the BLAS and
+    OpenMP pools of the NumPy and SciPy libraries loaded so far are limited
+    to the budget, so the application's total is the budget whatever library
+    a solve happens to use; a later call replaces the limit.  An application
+    that never calls this leaves those pools at their own defaults (usually
+    every logical CPU), so call it once at start-up.
     """
 
     global _budget, _pool_limit
@@ -88,10 +113,11 @@ def set_thread_budget(threads: int | None) -> None:
             _pool_limit.restore_original_limits()
             _pool_limit = None
         _budget = value
-        if value is not None:
-            from threadpoolctl import threadpool_limits
+        from threadpoolctl import threadpool_limits
 
-            _pool_limit = threadpool_limits(limits=value)
+        _pool_limit = threadpool_limits(
+            limits=value if value is not None else available_threads()
+        )
 
 
 @contextmanager
