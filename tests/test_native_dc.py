@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from electrical.threads import thread_budget_scope
 from electrical.matrix_free_mpir_fem import (
     CurrentTerminal,
     LayeredPCBMesh,
@@ -67,10 +68,11 @@ def _board(rows: int, cols: int, *, layers: int = 2, vias: bool = True, graded: 
 def test_native_apply_matches_portable_float32(shape, graded, threads) -> None:
     problem = _board(*shape, graded=graded)
     portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner="jacobi")
-    native = MatrixFreePCBOperator(
-        problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner="jacobi",
-        native=True, native_threads=threads,
-    )
+    with thread_budget_scope(threads):
+        native = MatrixFreePCBOperator(
+            problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner="jacobi",
+            native=True,
+        )
     assert portable.low_operator_backend == "array-element-loops"
     assert native.low_operator_backend == "cpp-fused-node-gather-layered-dc-q1"
     rng = np.random.default_rng(3)
@@ -89,10 +91,11 @@ def test_native_apply_matches_portable_float32(shape, graded, threads) -> None:
 def test_native_apply_high_matches_portable_float64(shape, graded, threads) -> None:
     problem = _board(*shape, graded=graded)
     portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner="jacobi")
-    native = MatrixFreePCBOperator(
-        problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner="jacobi",
-        native=True, native_threads=threads,
-    )
+    with thread_budget_scope(threads):
+        native = MatrixFreePCBOperator(
+            problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner="jacobi",
+            native=True,
+        )
     assert portable.high_operator_backend == "array-element-loops-fp64"
     assert native.high_operator_backend == "cpp-fused-node-gather-layered-dc-q1-fp64"
     rng = np.random.default_rng(5)
@@ -108,7 +111,8 @@ def test_native_apply_high_matches_portable_float64(shape, graded, threads) -> N
 def test_native_coarse_space_matches_portable() -> None:
     problem = _board(9, 14)
     portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias)
-    native = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, native=True, native_threads=2)
+    with thread_budget_scope(2):
+        native = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, native=True)
     np.testing.assert_allclose(
         native.coarse_correction._coarse_inverse_high,
         portable.coarse_correction._coarse_inverse_high,
@@ -132,10 +136,11 @@ def test_native_inner_pcg_reaches_the_same_fp64_solution(preconditioner, threads
     problem = _board(16, 24, graded=True)
     config = MPIRConfig(max_outer_iterations=16, max_inner_iterations=3000)
     portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner=preconditioner)
-    native = MatrixFreePCBOperator(
-        problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner=preconditioner,
-        native=True, native_threads=threads,
-    )
+    with thread_budget_scope(threads):
+        native = MatrixFreePCBOperator(
+            problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner=preconditioner,
+            native=True,
+        )
     rhs = portable.build_rhs(problem.terminals)
     reference = solve_mpir(portable, rhs, config=config)
     result = solve_mpir(native, rhs, config=config)
@@ -149,7 +154,8 @@ def test_native_inner_pcg_reaches_the_same_fp64_solution(preconditioner, threads
 def test_native_solve_pcb_dc_matches_the_portable_currents_and_losses() -> None:
     problem = _board(10, 16)
     portable = solve_pcb_dc(problem)
-    native = solve_pcb_dc(problem, native=True, native_threads=2)
+    with thread_budget_scope(2):
+        native = solve_pcb_dc(problem, native=True)
     assert native.solve.converged
     np.testing.assert_allclose(native.via_current_a, portable.via_current_a, rtol=1e-8, atol=1e-12)
     assert native.joule_loss_w == pytest.approx(portable.joule_loss_w, rel=1e-8)
@@ -168,7 +174,8 @@ def test_native_voltage_driven_solve_matches_portable() -> None:
         vias=current.vias,
     )
     portable = solve_pcb_dc(problem)
-    native = solve_pcb_dc(problem, native=True, native_threads=2)
+    with thread_budget_scope(2):
+        native = solve_pcb_dc(problem, native=True)
     assert native.solve.converged and portable.solve.converged
     np.testing.assert_allclose(
         native.voltage_terminal_current_a, portable.voltage_terminal_current_a, rtol=1e-8
@@ -185,7 +192,8 @@ def test_native_port_basis_matches_portable() -> None:
     mid = tuple((1, r, 8) for r in range(3, 7))
     ports = PortSet(pads=(source.nodes, mid, sink.nodes), names=("source", "tap", "sink"), reference=2)
     portable = dc_port_basis(current.mesh, ports, vias=current.vias)
-    native = dc_port_basis(current.mesh, ports, vias=current.vias, native=True, native_threads=2)
+    with thread_budget_scope(2):
+        native = dc_port_basis(current.mesh, ports, vias=current.vias, native=True)
     assert native.converged and portable.converged
     np.testing.assert_allclose(native.conductance_s, portable.conductance_s, rtol=1e-8)
     np.testing.assert_allclose(

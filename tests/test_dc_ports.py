@@ -15,6 +15,10 @@ from electrical.matrix_free_mpir_fem import (
     dc_port_basis,
     solve_pcb_dc,
 )
+from electrical.matrix_free_mpir_fem import ports as ports_module
+from electrical.matrix_free_mpir_fem.native_dc import native_available as native_dc_available
+from electrical.matrix_free_mpir_fem.ports import _split_budget
+from electrical.threads import thread_budget_scope
 
 TIGHT = MPIRConfig(relative_tolerance=1.0e-12)
 
@@ -229,25 +233,40 @@ def test_invalid_ports_and_correlations_are_rejected() -> None:
         dc_port_basis(mesh, PortSet(pads=ports.pads, reference=0), vias=vias, initial=basis)
 
 
-def test_threaded_unit_solves_give_the_serial_basis(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_split_budget_keeps_pool_times_team_inside_the_budget() -> None:
+    for budget in (1, 2, 3, 8, 16):
+        for tasks in (1, 2, 8):
+            width, team = _split_budget(budget, tasks)
+            assert 1 <= width <= max(1, tasks)
+            assert team >= 1 and width * team <= budget
+    # Provisional rule: a serial pool, the whole budget to each solve's team.
+    assert _split_budget(8, 4) == (1, 8)
+
+
+@pytest.mark.parametrize("native", [False, pytest.param(True, marks=pytest.mark.skipif(not native_dc_available(), reason="layered DC native extension not built"))])
+def test_threaded_unit_solves_give_the_serial_basis(monkeypatch: pytest.MonkeyPatch, native: bool) -> None:
     mesh, ports, vias = _three_port_board()
-    serial = dc_port_basis(mesh, ports, vias=vias, config=TIGHT, workers=1)
-    threaded = dc_port_basis(mesh, ports, vias=vias, config=TIGHT, workers=4)
+    with thread_budget_scope(4):
+        serial = dc_port_basis(mesh, ports, vias=vias, config=TIGHT, native=native)
+        monkeypatch.setattr(ports_module, "_split_budget", lambda budget, tasks: (4, 1))
+        threaded = dc_port_basis(mesh, ports, vias=vias, config=TIGHT, native=native)
     assert serial.workers == 1
     assert threaded.workers == 2  # capped at n - 1 unit solves
+    if native:
+        assert serial.operator._native.threads == 4  # one solve at a time: the whole budget
+        assert threaded.operator._native.threads == 1  # the team the split asked for
     assert threaded.converged
     np.testing.assert_array_equal(threaded.conductance_s, serial.conductance_s)
     np.testing.assert_array_equal(threaded.unit_voltage_potential_v, serial.unit_voltage_potential_v)
     np.testing.assert_array_equal(threaded.unit_current_potential_v, serial.unit_current_potential_v)
     assert [r.inner_iterations for r in threaded.solves] == [r.inner_iterations for r in serial.solves]
 
-    # The default comes from the environment; the warm start works on the pool too.
-    monkeypatch.setenv("PCB_PORT_BASIS_WORKERS", "3")
-    from electrical.matrix_free_mpir_fem import port_basis_workers
-
-    assert port_basis_workers() == 3
-    warm = dc_port_basis(mesh, ports, vias=vias, config=TIGHT, initial=serial)
+    # The warm start works on the pool too; a pool wider than the budget is cut to it.
+    with thread_budget_scope(1):
+        narrow = dc_port_basis(mesh, ports, vias=vias, config=TIGHT, initial=serial, native=native)
+    assert narrow.workers == 1
+    with thread_budget_scope(4):
+        warm = dc_port_basis(mesh, ports, vias=vias, config=TIGHT, initial=serial, native=native)
     assert warm.workers == 2
     np.testing.assert_allclose(warm.conductance_s, serial.conductance_s, rtol=1.0e-9)
-    monkeypatch.delenv("PCB_PORT_BASIS_WORKERS")
-    assert port_basis_workers() == 1
+    np.testing.assert_array_equal(narrow.conductance_s, warm.conductance_s)

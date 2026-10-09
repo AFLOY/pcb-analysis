@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from electrical.threads import thread_budget_scope
 from thermal.matrix_free_mpir_fem import (
     ConvectionBoundary,
     ExposedFaceConvection,
@@ -305,11 +306,13 @@ def test_native_path_solves_the_masked_mesh_like_the_array_path(threads: int) ->
     heat[1, 2, 3] = 0.3
     problem = ThermalConductionProblem(mesh, convection=(ExposedFaceConvection(20.0, 300.0),), element_heat_w=heat)
     portable = MatrixFreeThermalOperator(problem)
-    native = MatrixFreeThermalOperator(problem, native=True, native_threads=threads)
+    with thread_budget_scope(threads):
+        native = MatrixFreeThermalOperator(problem, native=True)
     vector = np.random.default_rng(3).standard_normal(portable.size).astype(np.float32)
     np.testing.assert_allclose(native.apply_low(vector), portable.apply_low(vector), rtol=2.0e-5, atol=1.0e-6)
     a = solve_thermal_conduction(problem)
-    b = solve_thermal_conduction(problem, native=True, native_threads=threads)
+    with thread_budget_scope(threads):
+        b = solve_thermal_conduction(problem, native=True)
     assert a.solve.converged and b.solve.converged
     np.testing.assert_allclose(b.temperature_k, a.temperature_k, rtol=1.0e-7, atol=1.0e-6, equal_nan=True)
 

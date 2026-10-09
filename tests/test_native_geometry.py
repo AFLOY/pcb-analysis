@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from electrical.threads import thread_budget_scope
 from geometry.cad_import import (
     TriangleMesh,
     box_solid,
@@ -42,9 +43,11 @@ def test_native_winding_numbers_match_numpy(threads: int) -> None:
     rng = np.random.default_rng(1)
     points = rng.uniform(-0.2, 1.2, size=(5000, 3))
     expected = winding_numbers_numpy(points, mesh.triangles_m)
-    actual = mesh.winding_numbers(points, method="native", threads=threads)
+    with thread_budget_scope(threads):
+        actual = mesh.winding_numbers(points, method="native")
+        inside = mesh.contains(points, method="native")
     np.testing.assert_allclose(actual, expected, atol=1.0e-12)
-    np.testing.assert_array_equal(mesh.contains(points, method="native", threads=threads), mesh.contains(points, method="numpy"))
+    np.testing.assert_array_equal(inside, mesh.contains(points, method="numpy"))
 
 
 @pytest.mark.skipif(not ocp_available(), reason="OCP not installed")

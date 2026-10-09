@@ -13,6 +13,7 @@ from emc.tiled_dipole_superposition import (
     scan_plane,
 )
 from emc.tiled_dipole_superposition.native_dipole import native_available
+from electrical.threads import thread_budget_scope
 
 pytestmark = pytest.mark.skipif(
     not native_available(),
@@ -31,7 +32,8 @@ def test_native_near_field_matches_the_array_path(threads) -> None:
     sources = _sources(123)
     points = scan_plane(np.linspace(-0.03, 0.03, 9), np.linspace(-0.02, 0.02, 7), 0.005)
     reference = evaluate_fields(sources, points, 150e6, native=False)
-    native = evaluate_fields(sources, points, 150e6, native=True, native_threads=threads)
+    with thread_budget_scope(threads):
+        native = evaluate_fields(sources, points, 150e6, native=True)
     np.testing.assert_allclose(native.magnetic_a_per_m, reference.magnetic_a_per_m, rtol=1e-12, atol=0)
     np.testing.assert_allclose(native.electric_v_per_m, reference.electric_v_per_m, rtol=1e-12, atol=0)
 
@@ -51,7 +53,8 @@ def test_native_far_field_matches_pattern_power_and_peak() -> None:
     sources = _sources(200).with_ground_plane_images(-0.05)
     sampling = SphereSampling.gauss_legendre(24, 48)
     reference = far_field_pattern(sources, 400e6, sampling=sampling, native=False)
-    native = far_field_pattern(sources, 400e6, sampling=sampling, native=True, native_threads=2)
+    with thread_budget_scope(2):
+        native = far_field_pattern(sources, 400e6, sampling=sampling, native=True)
     np.testing.assert_allclose(native.electric_v_per_m, reference.electric_v_per_m, rtol=1e-11, atol=0)
     assert native.radiated_power_w == pytest.approx(reference.radiated_power_w, rel=1e-12)
     assert native.max_field_dbuv_per_m == pytest.approx(reference.max_field_dbuv_per_m, abs=1e-9)
