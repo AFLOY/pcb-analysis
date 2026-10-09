@@ -79,8 +79,34 @@ def _split_budget(budget: int, tasks: int) -> tuple[int, int]:
     """
 
     budget = max(1, int(budget))
-    del tasks  # the provisional rule ignores it; the measured one will not
-    return 1, budget
+    tasks = max(1, int(tasks))
+    return _fit_split(budget, _preferred_width(budget, tasks), tasks)
+
+
+def _preferred_width(budget: int, tasks: int) -> int:
+    """The pool width the measurements favour; provisionally a serial pool."""
+
+    del budget, tasks  # the provisional rule ignores them; the measured one will not
+    return 1
+
+
+def _fit_split(budget: int, preferred: int, tasks: int) -> tuple[int, int]:
+    """The width at most ``preferred`` that leaves the fewest budget threads idle.
+
+    A width that does not divide the budget strands its remainder (five
+    threads as a pool of two teams of two use four), so among widths up to
+    the preferred one the split that uses the most threads wins, and of those
+    the one nearest the preference: five threads asked for as two unit solves
+    side by side run as one solve on five, six asked for as four run as three
+    pools of two.
+    """
+
+    limit = max(1, min(int(preferred), tasks, budget))
+    width = max(
+        range(1, limit + 1),
+        key=lambda candidate: (candidate * (budget // candidate), -(limit - candidate)),
+    )
+    return width, budget // width
 
 
 @dataclass(frozen=True)

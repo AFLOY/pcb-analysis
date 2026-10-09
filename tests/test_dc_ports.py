@@ -243,6 +243,28 @@ def test_split_budget_keeps_pool_times_team_inside_the_budget() -> None:
     assert _split_budget(8, 4) == (1, 8)
 
 
+def test_an_odd_budget_is_split_without_idle_threads() -> None:
+    from electrical.matrix_free_mpir_fem.ports import _fit_split
+
+    # Five threads as two teams would use four; one solve on five uses them all.
+    assert _fit_split(5, 2, 8) == (1, 5)
+    assert _fit_split(5, 5, 8) == (5, 1)
+    # Six asked for as four side by side run as three teams of two.
+    assert _fit_split(6, 4, 8) == (3, 2)
+    assert _fit_split(7, 3, 8) == (1, 7)
+    assert _fit_split(9, 3, 8) == (3, 3)
+    for budget in range(1, 17):
+        for preferred in range(1, 9):
+            for tasks in (1, 2, 3, 8):
+                width, team = _fit_split(budget, preferred, tasks)
+                assert 1 <= width <= min(preferred, tasks, budget)
+                assert width * team <= budget
+                # No smaller-or-equal width would have used more threads.
+                assert width * team == max(
+                    w * (budget // w) for w in range(1, min(preferred, tasks, budget) + 1)
+                )
+
+
 @pytest.mark.parametrize("native", [False, pytest.param(True, marks=pytest.mark.skipif(not native_dc_available(), reason="layered DC native extension not built"))])
 def test_threaded_unit_solves_give_the_serial_basis(monkeypatch: pytest.MonkeyPatch, native: bool) -> None:
     mesh, ports, vias = _three_port_board()
