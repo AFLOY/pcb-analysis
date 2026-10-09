@@ -426,6 +426,43 @@ evaluation of `power_module` at 0.1 mm ran in 3.1 GB with `block` where
 adoption because an iteration of the two variants is not the same unit (the
 JSON records both the counts and the note).
 
+## The DC network on its own (`dc_network`)
+
+At zero frequency the sheet mesh is a resistor network, and a router that
+screens thousands of shapes needs that network and nothing else: no
+inductance operator, no preconditioner, an exact answer, and often the
+sensitivity of one voltage to every branch. `electrical.sheet_peec.dc_network`
+is that solve with the mesh left to the caller.
+
+- `ConductanceNetwork(node_count, left, right, conductance)`: numbered nodes and
+  the branches between them, in siemens. The caller decides what a node is (a
+  cell on a layer) and which branches exist (in-plane neighbours, vertical
+  connections).
+- `solve_conductance_network(network, reference, injection,
+  objective_weights=None)`: node `reference` is held at 0 V and dropped. With
+  objectives the reduced Laplacian is factored once by SuperLU and the forward
+  and every adjoint right-hand side (`L λ = c`, the Laplacian being symmetric)
+  are one `solve`; without, the forward system goes to `spsolve`. The result
+  carries the potentials, the branch currents, each node's net branch current,
+  the I²R loss and the relative residual.
+- `split_branch_sensitivity(network, branch_product, in_plane)`: `G·ΔV·Δλ` per
+  branch, with an in-plane branch split half to each endpoint (two half-cells
+  in series) and vertical branches kept apart. With every conductance scaled
+  alike the terms add back to the objective, which is the identity a caller
+  can check an adjoint against.
+
+The order of every floating-point operation is part of the contract: the
+matrix is assembled from the branches in the order given, duplicate indices
+accumulate in sequence (`np.add.at`), and the loss is a running sum. The same
+network and injection therefore give the same bits, and the factored and the
+`spsolve` paths are both kept because they can differ in the last ones.
+Kicad_PowerOpt's search screen (`physics/sparse_resistive.py`) moved onto this
+module unchanged in numbers: its replay of 80 recorded power_module cases,
+each solved with and without an adjoint objective, matched bit for bit.
+`tests/test_dc_network.py` checks the solve against a dense one, the adjoint
+against a dense solve of `L λ = c`, the sensitivity closure and
+reproducibility.
+
 ## What is not done
 
 - The barrel's partial self inductance is taken as a given scalar. Nothing

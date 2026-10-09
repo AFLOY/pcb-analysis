@@ -4,6 +4,18 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
+## Unreleased
+
+- `electrical.sheet_peec.dc_network`: the zero-frequency sheet mesh as a bare
+  conductance network. `ConductanceNetwork` (numbered nodes, branches in
+  siemens), `solve_conductance_network(network, reference, injection,
+  objective_weights=None)` (SuperLU factored once for the forward and every
+  adjoint right-hand side when objectives are given, `spsolve` otherwise) and
+  `split_branch_sensitivity` (per-node share of `G·ΔV·Δλ`, in-plane branches
+  halved). The order of floating-point operations is fixed, so a network gives
+  the same bits every time; Kicad_PowerOpt's search screen moved onto it with
+  identical numbers. Additive.
+
 ## 0.9.3
 
 Memory of the sheet-PEEC solve and threads for the N-port basis. Additive;
