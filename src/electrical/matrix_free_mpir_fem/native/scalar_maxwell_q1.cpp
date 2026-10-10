@@ -817,6 +817,12 @@ void apply_high(const OperatorView<double>& view, const std::complex<double>* co
     op.apply(x, y);
 }
 
+void apply_low(const OperatorView<float>& view, const std::complex<float>* const x, std::complex<float>* const y,
+               const int threads) {
+    const Q1OperatorT<float> op = pcb_scalar_maxwell::operator_from(view, threads);
+    op.apply(x, y);
+}
+
 MpirResult solve_mpir(const OperatorView<float>& low_view, const OperatorView<double>& high_view,
                       const std::complex<double>* const rhs_in, std::complex<double>* const sol,
                       const std::complex<float>* const diag, const MpirConfig& config, const GmresOptions& options,

@@ -372,11 +372,16 @@ the complex64 inner work into one pybind11 extension:
   Subnormal corrections made FP32 SIMD arithmetic several times slower on the
   66,049-unknown case; the FP64 residual remains the acceptance criterion.
 
-The path is opt-in: `MatrixFreeScalarMaxwellOperator(problem, native=True)`
-after `python -m electrical.matrix_free_mpir_fem.native.build`. Without the
-build, `native=True` raises and the default behaviour is unchanged. The solver
-dispatches through the optional `native_inner_gmres` hook; `precondition_low`
-systems and the CUDA runtime keep their existing paths.
+**Now (pcbcore):** the C++ path is the CPU default when the core is built,
+for `MatrixFreeScalarMaxwellOperator` and for `solve_scalar_maxwell`
+(`native=False` keeps NumPy; the answers differ within the GMRES tolerance).
+The whole prepared operator is `electrical._pcbcore.fem.ScalarMaxwellSystem`
+(`cpp/src/fem/scalar_maxwell_system.cpp`): materials, Q1 matrices, Dirichlet
+rows, the diagonal and its singularity check, the lifted right-hand side, the
+MPIR solve, the element fields and the losses.
+`tests/test_native_maxwell_system.py` compares it with NumPy and checks
+identical bits at budgets 1, 2, 3 and 8.  When first added the path was
+opt-in (`native=True`) and dispatched through a `native_inner_gmres` hook.
 
 Measured on an Intel Xeon Platinum 8581C, GCC 14.2.1, NumPy 2.3.5, one
 operator thread, `OPENBLAS_NUM_THREADS=1`, same fixture and `MPIRConfig` as

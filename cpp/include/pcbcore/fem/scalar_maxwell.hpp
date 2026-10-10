@@ -38,6 +38,8 @@ struct GmresOptions {
 void apply_high(const OperatorView<double>& op, const std::complex<double>* x, std::complex<double>* y,
                 int threads);
 
+void apply_low(const OperatorView<float>& op, const std::complex<float>* x, std::complex<float>* y, int threads);
+
 [[nodiscard]] MpirResult solve_mpir(const OperatorView<float>& low, const OperatorView<double>& high,
                                     const std::complex<double>* rhs, std::complex<double>* x,
                                     const std::complex<float>* diagonal, const MpirConfig& config,

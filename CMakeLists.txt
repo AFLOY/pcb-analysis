@@ -119,6 +119,7 @@ add_library(pcbcore STATIC
   cpp/src/fem/layered_dc_system.cpp
   cpp/src/fem/dc_ports.cpp
   cpp/src/fem/two_level.cpp
+  cpp/src/fem/scalar_maxwell_system.cpp
   cpp/src/thermal/thermal_system.cpp
   cpp/src/thermal/thermal_solve.cpp)
 target_include_directories(pcbcore PUBLIC cpp/include)
