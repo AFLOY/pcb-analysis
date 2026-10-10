@@ -1,0 +1,146 @@
+name: Native build matrix
+
+# Compiles the C++ core (electrical._pcbcore) in every configuration a
+# binary might be built in, and runs the test suite against each build:
+# GCC and Clang, OpenMP on and off, the runner's ISA and a portable baseline,
+# x86-64 and aarch64 Linux, Apple silicon and Windows/MSVC.  The CUDA module
+# is compiled in NVIDIA's container (there is no GPU on the runners; its
+# tests run on a CUDA machine).
+on:
+  push:
+    branches: [main, "feature/**", "fix/**", "ci/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64-gcc-native
+            os: ubuntu-24.04
+            cc: gcc
+            cxx: g++
+            openmp: "ON"
+            march: native
+          - name: linux-x64-gcc-portable
+            os: ubuntu-24.04
+            cc: gcc
+            cxx: g++
+            openmp: "ON"
+            march: x86-64-v2
+          - name: linux-x64-gcc-no-openmp
+            os: ubuntu-24.04
+            cc: gcc
+            cxx: g++
+            openmp: "OFF"
+            march: native
+          - name: linux-x64-clang
+            os: ubuntu-24.04
+            cc: clang
+            cxx: clang++
+            openmp: "ON"
+            march: native
+          - name: linux-arm64-gcc
+            os: ubuntu-24.04-arm
+            cc: gcc
+            cxx: g++
+            openmp: "ON"
+            march: native
+          - name: macos-arm64-clang
+            os: macos-14
+            cc: clang
+            cxx: clang++
+            openmp: "ON"
+            march: native
+          - name: windows-x64-msvc
+            os: windows-2022
+            cc: ""
+            cxx: ""
+            openmp: "ON"
+            march: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compiler prerequisites (Linux Clang)
+        if: matrix.name == 'linux-x64-clang'
+        run: sudo apt-get update && sudo apt-get install -y libomp-dev
+
+      - name: Compiler prerequisites (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install libomp
+          echo "OpenMP_ROOT=$(brew --prefix libomp)" >> "$GITHUB_ENV"
+
+      - name: Install the package and its test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test,native]"
+
+      - name: Configure
+        shell: bash
+        run: |
+          args=(-S . -B build/native -DCMAKE_BUILD_TYPE=Release
+                -DPython_EXECUTABLE="$(python -c 'import sys; print(sys.executable)')"
+                -DPCB_NATIVE_OPENMP=${{ matrix.openmp }}
+                "-DPCB_NATIVE_MARCH=${{ matrix.march }}")
+          if [ -n "${{ matrix.cc }}" ]; then
+            args+=(-DCMAKE_C_COMPILER=${{ matrix.cc }} -DCMAKE_CXX_COMPILER=${{ matrix.cxx }})
+          fi
+          cmake "${args[@]}"
+
+      - name: Build
+        run: cmake --build build/native --config Release --parallel 4
+
+      - name: The module imports and reports its OpenMP build
+        shell: bash
+        run: |
+          python -c "
+          import electrical._pcbcore as core
+          print('openmp', core.layered_dc.openmp)
+          assert core.layered_dc.openmp == ('${{ matrix.openmp }}' == 'ON')
+          from electrical import _backend
+          assert _backend.native_available()
+          "
+
+      - name: Test suite
+        run: python -m pytest tests -q -rs
+
+  cuda-compile:
+    name: cuda-compile (no GPU)
+    runs-on: ubuntu-24.04
+    container: nvidia/cuda:12.6.3-devel-ubuntu24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends cmake git python3 python3-dev python3-pip python3-venv
+          python3 -m venv /opt/venv
+          /opt/venv/bin/pip install --upgrade pip
+          /opt/venv/bin/pip install "pybind11>=2.12,<4" "numpy>=1.26,<2.4"
+
+      - name: Configure and build with CUDA
+        run: |
+          cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release \
+                -DPython_EXECUTABLE=/opt/venv/bin/python \
+                -DPCB_NATIVE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="75;86;89"
+          cmake --build build/native --parallel 4
+          ls src/electrical/_pcbcore*.so src/electrical/_pcbcore_cuda*.so
