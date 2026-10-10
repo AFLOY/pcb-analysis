@@ -15,11 +15,13 @@ the contract: the reduced Laplacian is assembled from the branches in the
 order given, duplicates accumulate in sequence (``np.add.at``), and the loss
 is a running sum, so the same network and injection give the same bits.
 
-``solve_conductance_network`` factors once with SuperLU when objectives are
-given (forward and adjoint right-hand sides in one ``solve``) and otherwise
-calls ``spsolve``; the two paths can differ in the last bits and are both
-kept.  ``split_branch_sensitivity`` turns an adjoint branch product into a
-per-node sensitivity.
+``solve_conductance_network`` runs in the C++ core (``electrical._pcbcore``)
+when it is built: one SuperLU factorisation solves the forward and every
+adjoint right-hand side.  Without the build, the NumPy reference in
+:mod:`._dc_network_reference` answers (``splu`` with objectives, ``spsolve``
+without).  The two agree to roundoff, not bit for bit; each gives the same
+bits every time.  ``split_branch_sensitivity`` turns an adjoint branch product
+into a per-node sensitivity.
 """
 
 from __future__ import annotations
@@ -28,7 +30,9 @@ from dataclasses import dataclass
 
 import numpy as np
 import scipy.sparse as sp
-import scipy.sparse.linalg as spla
+
+from .. import _backend
+from . import _dc_network_reference as _reference
 
 
 @dataclass(frozen=True)
@@ -145,87 +149,43 @@ def solve_conductance_network(
 
     ``injection`` is the current entering each node (A).  ``objective_weights``
     (``objectives × node_count``) are the linear functionals ``cᵀv`` whose
-    adjoint states ``L λ = c`` are wanted; with any, the matrix is factored
-    once and every right-hand side is one back substitution.  Without, the
-    forward system goes to ``spsolve``.  Non-finite potentials are returned,
-    not raised: the caller names the case it was solving.
+    adjoint states ``L λ = c`` are wanted.  The C++ core factors the reduced
+    Laplacian once (SuperLU, COLAMD ordering) and solves the injection and
+    every adjoint right-hand side together; the NumPy reference does the same
+    with ``splu`` when there are objectives and ``spsolve`` otherwise.  A
+    singular network gives non-finite potentials, not an exception: the
+    caller names the case it was solving.
     """
-    unknown = network.unknown_index(reference)
-    kept = unknown >= 0
-    matrix = network.reduced_laplacian(reference)
-    injection = np.asarray(injection, dtype=np.float64)
+    injection = np.ascontiguousarray(injection, dtype=np.float64)
     if injection.shape != (network.node_count,):
         raise ValueError("injection must have one entry per node")
-    rhs = np.zeros(network.node_count - 1, dtype=np.float64)
-    rhs[unknown[kept]] = injection[kept]
     weights = (
         np.zeros((0, network.node_count), dtype=np.float64)
         if objective_weights is None
-        else np.asarray(objective_weights, dtype=np.float64)
+        else np.ascontiguousarray(objective_weights, dtype=np.float64)
     )
     if weights.ndim != 2 or weights.shape[1] != network.node_count:
         raise ValueError("objective_weights must be objectives x node_count")
-    count = network.node_count - 1
-    factorized = bool(weights.shape[0] and count)
-    if factorized:
-        columns = np.empty((count, 1 + weights.shape[0]), dtype=np.float64)
-        columns[:, 0] = rhs
-        for offset, row in enumerate(weights):
-            column = np.zeros(count, dtype=np.float64)
-            column[unknown[kept]] = row[kept]
-            columns[:, offset + 1] = column
-        solutions = np.asarray(
-            spla.splu(matrix.tocsc()).solve(columns), dtype=np.float64
+    network.unknown_index(reference)  # validates the reference
+    native = _backend.core()
+    if native is not None:
+        fields = native.network.solve_conductance_network(
+            network.node_count, network.left, network.right, network.conductance,
+            int(reference), injection, weights,
         )
-        voltage_unknowns = solutions[:, 0]
-        adjoint_unknowns = [
-            solutions[:, offset + 1] for offset in range(weights.shape[0])
-        ]
     else:
-        voltage_unknowns = np.asarray(spla.spsolve(matrix, rhs), dtype=np.float64)
-        adjoint_unknowns = [
-            np.zeros(count, dtype=np.float64) for _ in range(weights.shape[0])
-        ]
-    residual = matrix @ voltage_unknowns - rhs
-    rhs_norm = float(np.linalg.norm(rhs))
-    relative_residual = float(np.linalg.norm(residual)) / max(rhs_norm, 1e-30)
-
-    def full(values: np.ndarray) -> np.ndarray:
-        out = np.zeros(network.node_count, dtype=np.float64)
-        out[kept] = values[unknown[kept]]
-        return out
-
-    node_voltage = full(voltage_unknowns)
-    edge_current = network.conductance * (
-        node_voltage[network.left] - node_voltage[network.right]
-    )
-    node_current = np.zeros(network.node_count, dtype=np.float64)
-    signed_nodes = np.empty(2 * network.left.size, dtype=np.int64)
-    signed_nodes[0::2] = network.left
-    signed_nodes[1::2] = network.right
-    signed_current = np.empty(2 * network.left.size, dtype=np.float64)
-    signed_current[0::2] = edge_current
-    signed_current[1::2] = -edge_current
-    np.add.at(node_current, signed_nodes, signed_current)
-    # A running sum, not a pairwise one, so the loss is reproducible branch
-    # order for branch order.
-    loss_w = (
-        float(
-            np.cumsum(edge_current * edge_current / network.conductance)[-1]
-        )
-        if network.left.size
-        else 0.0
-    )
+        fields = _reference.solve_conductance_network(network, reference, injection, weights)
+    adjoint = np.asarray(fields["adjoint_voltage"], dtype=np.float64)
     return DCNetworkSolution(
         reference=reference,
-        voltage_unknowns=voltage_unknowns,
-        node_voltage=node_voltage,
-        edge_current=edge_current,
-        node_current=node_current,
-        loss_w=loss_w,
-        relative_residual=relative_residual,
-        adjoint_voltage=tuple(full(values) for values in adjoint_unknowns),
-        factorized=factorized,
+        voltage_unknowns=np.asarray(fields["voltage_unknowns"], dtype=np.float64),
+        node_voltage=np.asarray(fields["node_voltage"], dtype=np.float64),
+        edge_current=np.asarray(fields["edge_current"], dtype=np.float64),
+        node_current=np.asarray(fields["node_current"], dtype=np.float64),
+        loss_w=float(fields["loss_w"]),
+        relative_residual=float(fields["relative_residual"]),
+        adjoint_voltage=tuple(adjoint[j] for j in range(adjoint.shape[0])),
+        factorized=bool(weights.shape[0] and network.node_count - 1),
     )
 
 
@@ -243,13 +203,13 @@ def split_branch_sensitivity(
     total)``; with uniform scaling the node sum plus the vertical total adds
     back to the objective.
     """
-    in_plane = np.asarray(in_plane, dtype=bool)
-    halves = np.where(
-        in_plane, network.conductance * branch_product * 0.5, 0.0
-    )
-    node_sensitivity = np.zeros(network.node_count, dtype=np.float64)
-    np.add.at(node_sensitivity, network.left, halves)
-    np.add.at(node_sensitivity, network.right, halves)
-    branch_sensitivity = network.conductance * branch_product
-    vertical_total = float(branch_sensitivity[~in_plane].sum())
-    return node_sensitivity, branch_sensitivity, vertical_total
+    branch_product = np.ascontiguousarray(branch_product, dtype=np.float64)
+    in_plane = np.ascontiguousarray(in_plane, dtype=bool)
+    native = _backend.core()
+    if native is not None:
+        node, branch, vertical = native.network.split_branch_sensitivity(
+            network.node_count, network.left, network.right, network.conductance,
+            branch_product, in_plane,
+        )
+        return np.asarray(node), np.asarray(branch), float(vertical)
+    return _reference.split_branch_sensitivity(network, branch_product, in_plane)

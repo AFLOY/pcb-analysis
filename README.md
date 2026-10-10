@@ -158,8 +158,9 @@ cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release
 cmake --build build/native
 ```
 
-Tests that need the C++ kernels are skipped until they are built.
-`CMakeLists.txt` lists the native targets; `-DPCB_NATIVE_OPENMP=OFF` drops
+Tests that need the C++ kernels are skipped until they are built. The first
+configure downloads SuperLU 7.0.1 (pinned by hash) for the solver core
+`electrical._pcbcore`. `CMakeLists.txt` lists the native targets; `-DPCB_NATIVE_OPENMP=OFF` drops
 OpenMP and `-DPCB_NATIVE_MARCH=x86-64-v3` (for example) replaces
 `-march=native`. The scripts in `experiments/` regenerate the numbers quoted
 in `docs/`; run them from the repository root.
