@@ -89,6 +89,37 @@ def _split_budget(budget: int, tasks: int) -> tuple[int, int]:
     return _fit_split(budget, _preferred_width(budget, tasks), tasks)
 
 
+def port_pool(budget: int, tasks: int, *, cuda: bool = False) -> tuple[int, int]:
+    """The (pool width, team) the unit solves of one basis run on.
+
+    Whatever :func:`_split_budget` says: no idle pool threads, no
+    oversubscription, and one stream for CUDA (whose solves have no OpenMP
+    team).
+    """
+
+    width, team = _split_budget(budget, tasks)
+    width = max(1, min(int(width), tasks, budget))
+    if cuda:
+        width = 1
+    return width, max(1, min(int(team), budget // width))
+
+
+def reduce_correlation(ports: "PortSet", correlation_a2: np.ndarray) -> tuple[np.ndarray, float]:
+    """``C_rr`` of a port-current correlation after the checks every reduction needs, and its scale."""
+
+    matrix = np.asarray(correlation_a2, dtype=np.float64)
+    n = ports.count
+    if matrix.shape != (n, n):
+        raise ValueError(f"correlation must be {n}×{n}, one row and column per port")
+    if not np.allclose(matrix, matrix.T, rtol=1.0e-10, atol=0.0):
+        raise ValueError("correlation must be symmetric")
+    scale = max(1.0, float(np.max(np.abs(matrix))))
+    if np.any(np.abs(matrix.sum(axis=1)) > 1.0e-9 * scale):
+        raise ValueError("correlation rows must sum to zero (port currents satisfy KCL)")
+    driven = list(ports.driven)
+    return np.ascontiguousarray(matrix[np.ix_(driven, driven)]), scale
+
+
 def _preferred_width(budget: int, tasks: int) -> int:
     """The pool width the measurements favour; provisionally a serial pool."""
 
@@ -234,19 +265,7 @@ class DCPortBasis:
         return voltages
 
     def _reduced_correlation(self, correlation_a2: np.ndarray) -> tuple[np.ndarray, float]:
-        """``C_rr`` after the checks every reduction needs, and its scale."""
-
-        matrix = np.asarray(correlation_a2, dtype=np.float64)
-        n = self.ports.count
-        if matrix.shape != (n, n):
-            raise ValueError(f"correlation must be {n}×{n}, one row and column per port")
-        if not np.allclose(matrix, matrix.T, rtol=1.0e-10, atol=0.0):
-            raise ValueError("correlation must be symmetric")
-        scale = max(1.0, float(np.max(np.abs(matrix))))
-        if np.any(np.abs(matrix.sum(axis=1)) > 1.0e-9 * scale):
-            raise ValueError("correlation rows must sum to zero (port currents satisfy KCL)")
-        driven = list(self.ports.driven)
-        return np.ascontiguousarray(matrix[np.ix_(driven, driven)]), scale
+        return reduce_correlation(self.ports, correlation_a2)
 
     def _modes(self, correlation_a2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Eigen-decompose ``C_rr`` into weights and potential modes ``ψ_m``."""
@@ -358,13 +377,7 @@ def dc_port_basis(
         return potential, operator.terminal_currents(potential, terminals), result
 
     budget = thread_budget()
-    width, team = _split_budget(budget, n - 1)
-    # Whatever the rule says: no idle pool threads, no oversubscription, and
-    # one stream for CUDA (whose solves have no OpenMP team).
-    width = max(1, min(int(width), n - 1, budget))
-    if getattr(operator.runtime, "is_cuda", False):
-        width = 1
-    team = max(1, min(int(team), budget // width))
+    width, team = port_pool(budget, n - 1, cuda=bool(getattr(operator.runtime, "is_cuda", False)))
     operator._set_native_team(team)
     if operator._system is not None:
         return _native_port_basis(operator, mesh, ports, config or MPIRConfig(), initial, width, team)

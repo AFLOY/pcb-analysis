@@ -445,6 +445,12 @@ class MatrixFreePCBOperator:
             0 if coarse_block_nodes is None else int(coarse_block_nodes),
             self._team,
         )
+        self._adopt_system(core, system, preconditioner)
+
+    def _adopt_system(self, core: Any, system: Any, preconditioner: Preconditioner) -> None:
+        """Answer every call with the prepared C++ ``system``."""
+
+        shape = self.mesh.node_shape
         self._system = system
         self._core = core
         self.active_nodes = system.active_nodes
@@ -464,6 +470,32 @@ class MatrixFreePCBOperator:
                 block=system.block,
                 assembled=(system.coarse_matrix, system.coarse_inverse),
             )
+
+    @classmethod
+    def _from_system(
+        cls,
+        mesh: LayeredPCBMesh,
+        vias: Sequence[ViaConnection],
+        system: Any,
+        core: Any,
+        *,
+        preconditioner: Preconditioner = "two-level",
+        team: int | None = None,
+    ) -> "MatrixFreePCBOperator":
+        """The operator of a C++ system the core built (a coupling loop's last basis)."""
+
+        operator = cls.__new__(cls)
+        operator.high_dtype = np.float64
+        operator.inner_solver = "pcg"
+        operator.mesh = mesh
+        operator.size = mesh.size
+        operator.runtime = make_float32_runtime("cpu")
+        operator.vias = tuple(vias)
+        operator.preconditioner = preconditioner
+        operator.reference_node = None
+        operator._team = thread_budget() if team is None else max(1, int(team))
+        operator._adopt_system(core, system, preconditioner)
+        return operator
 
     def _set_native_team(self, threads: int) -> None:
         """OpenMP team of the C++ system when this operator shares the budget.
