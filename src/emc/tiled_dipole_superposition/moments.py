@@ -22,6 +22,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from electrical import _backend
+
 from .fields import FREE_SPACE_IMPEDANCE_OHM, CurrentDipoles, wavenumber_per_m
 
 
@@ -66,6 +68,14 @@ def dipole_moments(
 
     position = sources.position_m
     moment = sources.moment_a_m
+    core = _backend.core()
+    if core is not None:
+        electric, magnetic = core.emc.dipole_moments(
+            np.ascontiguousarray(position, dtype=np.float64),
+            np.ascontiguousarray(moment, dtype=np.complex128),
+            None if origin_m is None else np.asarray(origin_m, dtype=np.float64).reshape(3),
+        )
+        return DipoleMoments(electric_a_m=electric, magnetic_a_m2=magnetic, frequency_hz=float(frequency_hz))
     if origin_m is None:
         weight = np.linalg.norm(moment, axis=1)
         total = float(np.sum(weight))
