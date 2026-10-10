@@ -83,10 +83,13 @@ packageに置き、`[tool.setuptools.package-data]`へ登録する。
   分ける。
 - 作業単位の境界へ注釈付きtag`work/<purpose>`を打つ。本文へ対象commit範囲、検証したこと、
   採用/不採用の根拠となる数値、検証していないことを書く。branch名と同名のtagは打たない。
-- GitHubへpushする前に、同じshellで`source ~/.bash_profile`を実行し`GITHUB_PASS`を読込む。
-  未設定または空ならpushせず、認証不足として報告する。`GITHUB_PASS`は`GIT_ASKPASS`または
-  credential helperへ環境変数として渡し、remote URL、Git設定、command引数、log、commit、
-  tag本文へ保存または表示しない。shell traceを有効にしない。
+- GitHubへpushする前に、`~/.bashrc`の`GITHUB_PASS`を読込む。`~/.bashrc`は非対話shellでは
+  冒頭で終わるため、同じshellで`export GITHUB_PASS="$(bash -ic 'printf %s "$GITHUB_PASS"')"`
+  とする。未設定または空ならpushせず、認証不足として報告する。
+- `GITHUB_PASS`は`origin`のSSH鍵(`~/.ssh/github`)のpassphraseである。値を標準出力へ
+  書くだけの`SSH_ASKPASS`を用意し、`SSH_ASKPASS_REQUIRE=force`で`ssh`へ環境変数として
+  渡す。値をremote URL、Git設定、command引数、log、commit、tag本文へ保存または表示せず、
+  長さや先頭文字も表示しない。shell traceを有効にしない。
 - pushはmain、作業branch、`work/`tagを含める。force pushをmainへ行わない。
 
 ## リリース
