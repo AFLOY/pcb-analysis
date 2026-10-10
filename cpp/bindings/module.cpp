@@ -18,6 +18,8 @@
 #include "pcbcore/errors.hpp"
 #include "pcbcore/network/dc_network.hpp"
 #include "pcbcore/sheet/convolution_operator.hpp"
+#include "pcbcore/sheet/hoer_love.hpp"
+#include "pcbcore/sheet/near_field.hpp"
 
 namespace py = pybind11;
 
@@ -156,6 +158,88 @@ py::tuple apply_convolution(const pcbcore::sheet::ConvolutionOperator& op, const
     return py::make_tuple(to_array(std::move(flux_x), shape), to_array(std::move(flux_y), shape), out_z);
 }
 
+py::array_t<double> build_kernel(const std::int64_t rows, const std::int64_t cols, const double length,
+                                 const double width, const double thickness_a, const double thickness_b,
+                                 const double separation, const bool along_x, const int near_radius_cells,
+                                 const int threads) {
+    std::vector<double> table;
+    {
+        py::gil_scoped_release release;
+        table = pcbcore::sheet::build_kernel(rows, cols, {length, width, thickness_a}, {length, width, thickness_b},
+                                             separation, along_x, near_radius_cells, threads);
+    }
+    return to_array(std::move(table), {static_cast<py::ssize_t>(rows), static_cast<py::ssize_t>(cols)});
+}
+
+py::array_t<double> build_vertical_kernel(const std::int64_t rows, const std::int64_t cols, const double pitch,
+                                          const double span_a, const double span_b, const double center_separation,
+                                          const int near_radius_cells, const int threads) {
+    std::vector<double> table;
+    {
+        py::gil_scoped_release release;
+        table = pcbcore::sheet::build_vertical_kernel(rows, cols, pitch, span_a, span_b, center_separation,
+                                                      near_radius_cells, threads);
+    }
+    return to_array(std::move(table), {static_cast<py::ssize_t>(rows), static_cast<py::ssize_t>(cols)});
+}
+
+// Nine equally long 1-D arrays: bar a (length, width, thickness), bar b, offset.
+py::tuple closed_form_arrays(const Input<double>& la, const Input<double>& wa, const Input<double>& ta,
+                             const Input<double>& lb, const Input<double>& wb, const Input<double>& tb,
+                             const Input<double>& du, const Input<double>& dv, const Input<double>& dw,
+                             const int threads) {
+    const py::ssize_t count = la.size();
+    for (const auto* array : {&la, &wa, &ta, &lb, &wb, &tb, &du, &dv, &dw}) {
+        if (array->ndim() != 1 || array->size() != count) {
+            throw pcbcore::InvalidInput("closed_form_arrays takes nine 1-D arrays of one length");
+        }
+    }
+    std::vector<double> out(static_cast<std::size_t>(count));
+    double retained = 1.0;
+    {
+        py::gil_scoped_release release;
+        const pcbcore::sheet::BarArrays a{la.data(), wa.data(), ta.data(), 1, 1, 1};
+        const pcbcore::sheet::BarArrays b{lb.data(), wb.data(), tb.data(), 1, 1, 1};
+        const pcbcore::sheet::OffsetArrays offset{du.data(), dv.data(), dw.data(), 1, 1, 1};
+        retained = pcbcore::sheet::closed_form_arrays(count, a, b, offset, out.data(), threads);
+    }
+    return py::make_tuple(to_array(std::move(out)), retained);
+}
+
+const std::int64_t* cell_triples(const Input<std::int64_t>& cells, const char* name) {
+    if (cells.size() == 0) {
+        return nullptr;
+    }
+    if (cells.ndim() != 2 || cells.shape(1) != 3) {
+        throw pcbcore::InvalidInput(std::string(name) + " must be (count, 3)");
+    }
+    return cells.data();
+}
+
+py::tuple uniform_near_field(const std::int64_t layers, const std::int64_t rows, const std::int64_t cols,
+                             const std::int64_t levels, const int radius, const Input<double>& tables_x,
+                             const Input<double>& tables_y, const Input<double>& tables_z,
+                             const Input<std::int64_t>& branch_x, const Input<std::int64_t>& branch_y,
+                             const Input<std::int64_t>& vias) {
+    const std::int64_t pairs = layers * (layers + 1) / 2;
+    const std::int64_t vertical = levels * (levels + 1) / 2;
+    const double* x = stacked_tables(tables_x, pairs, rows, cols, "tables_x");
+    const double* y = stacked_tables(tables_y, pairs, rows, cols, "tables_y");
+    const double* z = stacked_tables(tables_z, vertical, rows, cols, "tables_z");
+    const std::int64_t* bx = cell_triples(branch_x, "branch_x");
+    const std::int64_t* by = cell_triples(branch_y, "branch_y");
+    const std::int64_t* bz = cell_triples(vias, "vias");
+    pcbcore::sheet::NearFieldEntries entries;
+    {
+        py::gil_scoped_release release;
+        entries = pcbcore::sheet::uniform_near_field(layers, rows, cols, levels, radius, x, y, z, bx,
+                                                     bx ? branch_x.shape(0) : 0, by, by ? branch_y.shape(0) : 0,
+                                                     bz, bz ? vias.shape(0) : 0);
+    }
+    return py::make_tuple(to_array(std::move(entries.row)), to_array(std::move(entries.col)),
+                          to_array(std::move(entries.value)));
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_pcbcore, m) {
@@ -188,4 +272,16 @@ PYBIND11_MODULE(_pcbcore, m) {
         .def("apply", &apply_convolution, py::arg("currents_x"), py::arg("currents_y"),
              py::arg("currents_z") = py::none(), py::arg("threads"))
         .def_property_readonly("spectrum_bytes", &pcbcore::sheet::ConvolutionOperator::spectrum_bytes);
+    sheet.def("build_kernel", &build_kernel, py::arg("rows"), py::arg("cols"), py::arg("length"), py::arg("width"),
+              py::arg("thickness_a"), py::arg("thickness_b"), py::arg("separation"), py::arg("along_x"),
+              py::arg("near_radius_cells"), py::arg("threads"));
+    sheet.def("build_vertical_kernel", &build_vertical_kernel, py::arg("rows"), py::arg("cols"), py::arg("pitch"),
+              py::arg("span_a"), py::arg("span_b"), py::arg("center_separation"), py::arg("near_radius_cells"),
+              py::arg("threads"));
+    sheet.def("uniform_near_field", &uniform_near_field, py::arg("layers"), py::arg("rows"), py::arg("cols"),
+              py::arg("levels"), py::arg("radius"), py::arg("tables_x"), py::arg("tables_y"), py::arg("tables_z"),
+              py::arg("branch_x"), py::arg("branch_y"), py::arg("vias"));
+    sheet.def("closed_form_arrays", &closed_form_arrays, py::arg("length_a"), py::arg("width_a"),
+              py::arg("thickness_a"), py::arg("length_b"), py::arg("width_b"), py::arg("thickness_b"),
+              py::arg("du"), py::arg("dv"), py::arg("dw"), py::arg("threads"));
 }

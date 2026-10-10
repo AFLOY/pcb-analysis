@@ -44,6 +44,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from electrical import _backend
+from electrical.threads import thread_budget
+
 VACUUM_PERMEABILITY = 4.0e-7 * math.pi
 _MU0_OVER_4PI = VACUUM_PERMEABILITY / (4.0 * math.pi)
 
@@ -245,6 +248,17 @@ def closed_form_mutual_inductance_arrays(
     la, wa, ta = (np.asarray(value, dtype=np.float64) for value in extents_a)
     lb, wb, tb = (np.asarray(value, dtype=np.float64) for value in extents_b)
     shape = np.broadcast(du, dv, dw, la, wa, ta, lb, wb, tb).shape
+    core = _backend.core()
+    if core is not None:
+        flat = [np.ascontiguousarray(np.broadcast_to(v, shape)).reshape(-1) for v in (la, wa, ta, lb, wb, tb, du, dv, dw)]
+        values, retained = core.sheet.closed_form_arrays(*flat, threads=thread_budget())
+        if check_precision and values.size and retained < 1e-11:
+            raise ValueError(
+                "partial inductance lost its precision to cancellation: only "
+                f"{retained:.1e} of the summed magnitude survives; "
+                "the closed form is for cells near each other"
+            )
+        return np.asarray(values, dtype=np.float64).reshape(shape)
     total = np.zeros(shape, dtype=np.float64)
     largest = np.zeros(shape, dtype=np.float64)
     for sx, tx in _AXIS_SIGNS:
@@ -503,6 +517,12 @@ def build_kernel(
             "the two layers must share their in-plane extents; the offsets of "
             "a convolution step by those"
         )
+    core = _backend.core()
+    if core is not None:
+        return core.sheet.build_kernel(
+            rows, cols, cell.length_m, cell.width_m, cell.thickness_m, other.thickness_m,
+            float(layer_separation_m), axis == "x", int(near_radius_cells), thread_budget(),
+        )
 
     row_offsets = np.fft.fftfreq(rows, d=1.0 / rows).astype(np.int64)
     col_offsets = np.fft.fftfreq(cols, d=1.0 / cols).astype(np.int64)
@@ -564,6 +584,12 @@ def build_vertical_kernel(
     pitch = float(pitch_m)
     if pitch <= 0.0:
         raise ValueError("pitch must be positive")
+    core = _backend.core()
+    if core is not None:
+        return core.sheet.build_vertical_kernel(
+            rows, cols, pitch, float(span_a_m), float(span_b_m), float(center_separation_m),
+            int(near_radius_cells), thread_budget(),
+        )
 
     row_offsets = np.fft.fftfreq(rows, d=1.0 / rows).astype(np.int64)
     col_offsets = np.fft.fftfreq(cols, d=1.0 / cols).astype(np.int64)

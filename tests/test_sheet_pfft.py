@@ -11,10 +11,12 @@ from electrical.sheet_peec.sheet_inductance import (
     far_field_mutual_inductance,
     CellGeometry,
     closed_form_mutual_inductance,
+    closed_form_precision,
 )
 from electrical.sheet_peec.sheet_operator import SheetInductanceOperator, SheetLayer, SheetStackup
 from electrical.sheet_peec.sheet_peec import SheetMesh, Terminal, ViaBranch, solve_sheet_case
 from electrical.sheet_peec.sheet_pfft import PfftSheetInductanceOperator, lagrange_stencil
+from tests.tolerance import closed_form_rtol
 
 STACKUP = SheetStackup((SheetLayer("F", 0.0, 35e-6), SheetLayer("B", -1.6e-3, 35e-6)))
 
@@ -74,7 +76,11 @@ def test_array_closed_form_matches_the_scalar_one() -> None:
         (np.full(3, other.length_m), np.full(3, other.width_m), np.full(3, other.thickness_m)),
         offsets,
     )
-    np.testing.assert_allclose(actual, expected, rtol=1e-12)
+    # Each value is exact to eps over the fraction of its 64-term sum that
+    # survived cancellation; the near pair keeps nearly all of it.
+    retained = np.asarray(closed_form_precision(cell, other, offsets))
+    for value, reference, kept in zip(actual, expected, retained):
+        assert value == pytest.approx(reference, rel=closed_form_rtol(float(kept)))
 
 
 def test_pfft_matches_the_convolution_operator_on_a_uniform_mesh() -> None:
