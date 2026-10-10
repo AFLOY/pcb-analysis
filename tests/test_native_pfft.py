@@ -111,3 +111,34 @@ def test_the_core_applies_the_same_pfft_operator() -> None:
         with thread_budget_scope(threads):
             results.append(b"".join(part.tobytes() for part in native.apply(x, y, z)))
     assert all(result == results[0] for result in results)
+
+
+def test_the_core_builds_the_same_pfft_parts() -> None:
+    from electrical import _backend
+    from tests.tolerance import CLOSED_FORM_RTOL
+
+    if not _backend.native_available():
+        pytest.skip("electrical._pcbcore is not built")
+    mesh = _graded_mesh_with_vias()
+    native = PfftSheetInductanceOperator(mesh, order=3, near_radius_cells=4, preconditioner_radius_cells=2)
+    with _backend.use_reference():
+        reference = PfftSheetInductanceOperator(mesh, order=3, near_radius_cells=4, preconditioner_radius_cells=2)
+    families = [("x", native._projection["x"], reference._projection["x"]), ("y", native._projection["y"], reference._projection["y"]), ("z", native._projection_z, reference._projection_z)]
+    for name, actual, expected in families:
+        # The same stencil sums in the same order: identical.
+        assert (actual != expected).nnz == 0, name
+    pairs = [
+        (native._correction["x"], reference._correction["x"]),
+        (native._correction["y"], reference._correction["y"]),
+        (native._correction_z, reference._correction_z),
+        (native._near_exact["x"], reference._near_exact["x"]),
+        (native._near_exact["y"], reference._near_exact["y"]),
+        (native._near_exact_z, reference._near_exact_z),
+    ]
+    for actual, expected in pairs:
+        # Closed forms on both sides (C++ and NumPy), which keep about seven digits far out.
+        assert actual.shape == expected.shape and actual.nnz == expected.nnz
+        scale = float(np.max(np.abs(expected.data)))
+        assert np.max(np.abs((actual - expected).data), initial=0.0) <= CLOSED_FORM_RTOL * scale
+    for actual, expected in ((native._self["x"], reference._self["x"]), (native._self["y"], reference._self["y"]), (native._self_z, reference._self_z)):
+        np.testing.assert_allclose(actual, expected, rtol=DIRECT_RTOL)

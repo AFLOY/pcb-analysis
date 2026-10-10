@@ -22,6 +22,7 @@
 #include "pcbcore/sheet/hoer_love.hpp"
 #include "pcbcore/sheet/mesh.hpp"
 #include "pcbcore/sheet/near_field.hpp"
+#include "pcbcore/sheet/pfft_build.hpp"
 #include "pcbcore/sheet/pfft_operator.hpp"
 #include "pcbcore/sheet/sheet_solve.hpp"
 
@@ -392,6 +393,77 @@ py::array_t<T> copy_array(const std::vector<T>& values, std::vector<py::ssize_t>
     return to_array(std::move(copy), std::move(shape));
 }
 
+py::tuple csr_arrays(pcbcore::sheet::CsrMatrix&& m) {
+    return py::make_tuple(to_array(std::move(m.indptr)), to_array(std::move(m.indices)), to_array(std::move(m.data)),
+                          py::make_tuple(m.rows, m.cols));
+}
+
+pcbcore::sheet::ProjectionGridSpec grid_spec(const double origin_x, const double origin_y, const double pitch,
+                                             const std::int64_t nodes_x, const std::int64_t nodes_y, const int order,
+                                             const int near_radius, const int preconditioner_radius) {
+    return {origin_x, origin_y, pitch, nodes_x, nodes_y, order, near_radius, preconditioner_radius};
+}
+
+py::dict family_dict(pcbcore::sheet::PfftFamilyParts&& parts, const std::int64_t planes, const std::int64_t count) {
+    py::dict out;
+    out["projection"] = csr_arrays(std::move(parts.projection));
+    out["correction"] = csr_arrays(std::move(parts.correction));
+    out["near_exact"] = csr_arrays(std::move(parts.near_exact));
+    out["self"] = to_array(std::move(parts.self_value), {static_cast<py::ssize_t>(planes), static_cast<py::ssize_t>(count)});
+    return out;
+}
+
+py::dict pfft_inplane_family(const double origin_x, const double origin_y, const double pitch,
+                             const std::int64_t nodes_x, const std::int64_t nodes_y, const int order,
+                             const int near_radius, const int preconditioner_radius, const bool axis_x,
+                             const bool sample_along_x, const Input<double>& centre_x, const Input<double>& centre_y,
+                             const Input<double>& length, const Input<double>& width, const Input<double>& layer_z,
+                             const Input<double>& layer_thickness, const Input<double>& separation, const int threads) {
+    if (centre_x.ndim() != 2 || centre_y.size() != centre_x.size() || length.size() != centre_x.size() ||
+        width.size() != centre_x.size()) {
+        throw pcbcore::InvalidInput("centres, lengths and widths must be one (rows, cols) grid");
+    }
+    const std::int64_t layers = layer_z.size();
+    if (layer_thickness.size() != layers || separation.size() != layers * layers) {
+        throw pcbcore::InvalidInput("one z and thickness per layer and a layers x layers separation table");
+    }
+    const auto spec = grid_spec(origin_x, origin_y, pitch, nodes_x, nodes_y, order, near_radius, preconditioner_radius);
+    pcbcore::sheet::PfftFamilyParts parts;
+    {
+        py::gil_scoped_release release;
+        parts = pcbcore::sheet::pfft_inplane_family(spec, axis_x, sample_along_x, centre_x.shape(0), centre_x.shape(1),
+                                                    centre_x.data(), centre_y.data(), length.data(), width.data(),
+                                                    layers, layer_z.data(), layer_thickness.data(), separation.data(),
+                                                    threads);
+    }
+    return family_dict(std::move(parts), layers, centre_x.size());
+}
+
+py::dict pfft_vertical_family(const double origin_x, const double origin_y, const double pitch,
+                              const std::int64_t nodes_x, const std::int64_t nodes_y, const int order,
+                              const int near_radius, const int preconditioner_radius, const bool sample_along_x,
+                              const Input<double>& centre_x, const Input<double>& centre_y,
+                              const Input<double>& pitch_x, const Input<double>& pitch_y, const Input<double>& span,
+                              const Input<double>& z_mid, const Input<double>& separation, const int threads) {
+    if (centre_x.ndim() != 2 || centre_y.size() != centre_x.size() || pitch_x.size() != centre_x.shape(1) ||
+        pitch_y.size() != centre_x.shape(0)) {
+        throw pcbcore::InvalidInput("centres must be (rows, cols) with one pitch per column and per row");
+    }
+    const std::int64_t levels = span.size();
+    if (z_mid.size() != levels || separation.size() != levels * levels) {
+        throw pcbcore::InvalidInput("one span and mid-plane per level and a levels x levels separation table");
+    }
+    const auto spec = grid_spec(origin_x, origin_y, pitch, nodes_x, nodes_y, order, near_radius, preconditioner_radius);
+    pcbcore::sheet::PfftFamilyParts parts;
+    {
+        py::gil_scoped_release release;
+        parts = pcbcore::sheet::pfft_vertical_family(spec, sample_along_x, centre_x.shape(0), centre_x.shape(1),
+                                                     centre_x.data(), centre_y.data(), pitch_x.data(), pitch_y.data(),
+                                                     levels, span.data(), z_mid.data(), separation.data(), threads);
+    }
+    return family_dict(std::move(parts), levels, centre_x.size());
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_pcbcore, m) {
@@ -512,6 +584,16 @@ PYBIND11_MODULE(_pcbcore, m) {
                 return py::make_tuple(to_array(std::move(along_x)), to_array(std::move(along_y)));
             },
             py::arg("branch_current"), py::arg("pitch_x"), py::arg("pitch_y"), py::arg("thickness_m"));
+    sheet.def("pfft_inplane_family", &pfft_inplane_family, py::arg("origin_x"), py::arg("origin_y"), py::arg("pitch"),
+              py::arg("nodes_x"), py::arg("nodes_y"), py::arg("order"), py::arg("near_radius"),
+              py::arg("preconditioner_radius"), py::arg("axis_x"), py::arg("sample_along_x"), py::arg("centre_x"),
+              py::arg("centre_y"), py::arg("length"), py::arg("width"), py::arg("layer_z"),
+              py::arg("layer_thickness"), py::arg("separation"), py::arg("threads"));
+    sheet.def("pfft_vertical_family", &pfft_vertical_family, py::arg("origin_x"), py::arg("origin_y"),
+              py::arg("pitch"), py::arg("nodes_x"), py::arg("nodes_y"), py::arg("order"), py::arg("near_radius"),
+              py::arg("preconditioner_radius"), py::arg("sample_along_x"), py::arg("centre_x"), py::arg("centre_y"),
+              py::arg("pitch_x"), py::arg("pitch_y"), py::arg("span"), py::arg("z_mid"), py::arg("separation"),
+              py::arg("threads"));
     sheet.def("solve_sheet", &solve_sheet, py::arg("node_count"), py::arg("left"), py::arg("right"),
               py::arg("resistance"), py::arg("injection"), py::arg("frequency_hz"), py::arg("tolerance"),
               py::arg("max_iterations"), py::arg("restart"), py::arg("preconditioner"),
