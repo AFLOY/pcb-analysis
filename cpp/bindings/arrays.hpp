@@ -4,8 +4,13 @@
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 
+#include <cstdint>
+#include <cstring>
+#include <string>
 #include <utility>
 #include <vector>
+
+#include "pcbcore/errors.hpp"
 
 namespace pcbcore_bindings {
 
@@ -33,6 +38,21 @@ template <typename T>
 py::array_t<T> copy_array(const std::vector<T>& values, std::vector<py::ssize_t> shape) {
     std::vector<T> copy(values);
     return to_array(std::move(copy), std::move(shape));
+}
+
+// The data of ``array`` after checking it holds ``expected`` values.
+template <typename T>
+const T* sized(const Input<T>& array, const py::ssize_t expected, const char* const name) {
+    if (array.size() != expected) {
+        throw pcbcore::InvalidInput(std::string(name) + " has the wrong size");
+    }
+    return array.data();
+}
+
+inline py::array_t<bool> mask_array(const std::vector<std::uint8_t>& values, std::vector<py::ssize_t> shape) {
+    py::array_t<bool> out(std::move(shape));
+    std::memcpy(out.mutable_data(), values.data(), values.size());
+    return out;
 }
 
 }  // namespace pcbcore_bindings

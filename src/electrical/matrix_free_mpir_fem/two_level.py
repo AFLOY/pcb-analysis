@@ -64,8 +64,11 @@ class AggregationCoarseCorrection:
         runtime: Any,
         block: int | None = None,
         max_coarse_size: int = DEFAULT_MAX_COARSE_SIZE,
-        native_operator: Any = None,
+        assembled: tuple[np.ndarray, np.ndarray] | None = None,
     ) -> None:
+        """``assembled`` is ``(Z^T A Z, its inverse)`` when a C++ system already
+        built the coarse space for ``block``; otherwise it is assembled here."""
+
         layers, rows, cols = (int(axis) for axis in node_shape)
         self.node_shape = (layers, rows, cols)
         if block is None:
@@ -92,9 +95,8 @@ class AggregationCoarseCorrection:
         if diagonal.size != free.size:
             raise ValueError("diagonal_high must hold one value per node")
 
-        native_assembler = getattr(native_operator, "assemble_coarse", None)
-        if native_assembler is not None:
-            matrix, inverse = native_assembler(self.block)
+        if assembled is not None:
+            matrix, inverse = assembled
             shape = (self.coarse_size, self.coarse_size)
             self.coarse_matrix = np.asarray(matrix, dtype=np.float64).reshape(shape)
             self._coarse_inverse_high = np.asarray(inverse, dtype=np.float64).reshape(shape)

@@ -26,7 +26,7 @@ from thermal.matrix_free_mpir_fem import (
     planar_contact_map,
     solve_thermal_conduction,
 )
-from thermal.matrix_free_mpir_fem.mesh import _local_hexahedron_matrices
+from thermal.matrix_free_mpir_fem.mesh import _local_hexahedron_matrices, unit_hexahedron_matrices
 from thermal.matrix_free_mpir_fem.native_hex import native_available
 
 AMBIENT = 300.0
@@ -80,7 +80,7 @@ def test_uniform_arrays_reproduce_the_scalar_pitch_operator_and_unit_matrices() 
     # The three unit matrices with the element coefficients equal the old per-slab matrices.
     in_plane, through = _local_hexahedron_matrices(pitch, pitch, scalar.slab_thickness_m)
     ax, ay, az = scalar.element_coefficients()
-    ux, uy, uz = op_a._unit_high
+    ux, uy, uz = unit_hexahedron_matrices()
     for slab in range(3):
         rebuilt = (ax[slab, 0, 0] * ux + ay[slab, 0, 0] * uy) / 385.0 * (1.0 if slab != 1 else 385.0 / 0.8)
         expected = in_plane[slab]

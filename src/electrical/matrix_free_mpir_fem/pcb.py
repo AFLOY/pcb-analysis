@@ -272,18 +272,6 @@ def _flat_index(node: Node, shape: tuple[int, int, int]) -> int:
         raise ValueError(f"node {node!r} lies outside mesh shape {shape}") from exc
 
 
-class _AssembledCoarse:
-    """The coarse space the C++ system assembled, offered to the preconditioner."""
-
-    def __init__(self, system: Any) -> None:
-        self._system = system
-
-    def assemble_coarse(self, block: int) -> tuple[np.ndarray, np.ndarray]:
-        if block != self._system.block:
-            raise ValueError("the system assembled its coarse space for another patch width")
-        return self._system.coarse_matrix, self._system.coarse_inverse
-
-
 class MatrixFreePCBOperator:
     """Split FP64/FP32 element-by-element conductivity operator.
 
@@ -474,7 +462,7 @@ class MatrixFreePCBOperator:
                 apply_high=self.apply_high,
                 runtime=self.runtime,
                 block=system.block,
-                native_operator=_AssembledCoarse(system),
+                assembled=(system.coarse_matrix, system.coarse_inverse),
             )
 
     def _set_native_team(self, threads: int) -> None:

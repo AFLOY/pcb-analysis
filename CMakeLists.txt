@@ -117,7 +117,10 @@ add_library(pcbcore STATIC
   cpp/src/sheet/mesh.cpp
   cpp/src/sheet/pfft_build.cpp
   cpp/src/fem/layered_dc_system.cpp
-  cpp/src/fem/dc_ports.cpp)
+  cpp/src/fem/dc_ports.cpp
+  cpp/src/fem/two_level.cpp
+  cpp/src/thermal/thermal_system.cpp
+  cpp/src/thermal/thermal_solve.cpp)
 target_include_directories(pcbcore PUBLIC cpp/include)
 target_include_directories(pcbcore PRIVATE ${pocketfft_SOURCE_DIR})
 target_compile_definitions(pcbcore PRIVATE POCKETFFT_NO_MULTITHREADING POCKETFFT_CACHE_SIZE=16)
@@ -136,7 +139,7 @@ if(PCB_NATIVE_OPENMP)
   target_link_libraries(pcbcore PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
-pybind11_add_module(_pcbcore MODULE cpp/bindings/module.cpp cpp/bindings/fem.cpp)
+pybind11_add_module(_pcbcore MODULE cpp/bindings/module.cpp cpp/bindings/fem.cpp cpp/bindings/thermal.cpp)
 target_compile_options(_pcbcore PRIVATE -O3 -DNDEBUG)
 target_link_libraries(_pcbcore PRIVATE pcbcore pcbcore_kernels)
 set_target_properties(_pcbcore PROPERTIES

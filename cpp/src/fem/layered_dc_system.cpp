@@ -34,19 +34,6 @@ template <typename To>
 
 }  // namespace
 
-int choose_block_size(const int layers, const int node_rows, const int node_cols, const std::int64_t max_coarse_size,
-                      const int minimum) {
-    int block = std::max(1, minimum);
-    while (true) {
-        const Index coarse = static_cast<Index>(layers) * ((node_rows + block - 1) / block) *
-                             ((node_cols + block - 1) / block);
-        if (coarse <= max_coarse_size || block >= std::max(node_rows, node_cols)) {
-            return block;
-        }
-        ++block;
-    }
-}
-
 LayeredDCSystem::LayeredDCSystem(const LayeredDCMeshView& mesh, const ViaLinksView& vias,
                                  const std::int64_t reference_node, const std::int64_t* const dirichlet_nodes,
                                  const std::int64_t dirichlet_count, const bool two_level, const int block,

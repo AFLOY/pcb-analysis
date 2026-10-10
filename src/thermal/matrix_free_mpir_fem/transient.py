@@ -19,7 +19,9 @@ time constant of interest to a last step of the order of the slowest one
 walks from ``t = 0`` to the steady state in a few dozen steps
 (``TimeSchedule.geometric``); ``until_steady`` stops once the field moves
 less than ``steady_tolerance_k_per_s`` per second.  ``TimeSchedule.uniform``
-gives constant steps.  The operator is rebuilt only when ``Δt`` changes.
+gives constant steps.  The C++ march (the default with the core built)
+reuses the prepared system while ``Δt`` repeats and the problem has no
+radiation; the NumPy path rebuilds it every step.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from electrical.matrix_free_mpir_fem.runtime import LowPrecisionRuntime, Runtime
 from electrical.matrix_free_mpir_fem.solver import MPIRConfig
 
 from .mesh import Preconditioner
+from .native_system import native_problem, solution_from, solve_options, thermal_core
 from .problem import ThermalConductionProblem
 from .solve import ThermalConductionSolution, _solve
 
@@ -173,6 +176,27 @@ def solve_thermal_transient(
             raise ValueError("initial_temperature_k must be finite on active nodes")
     # Fixed nodes start at their prescribed value; inactive nodes are NaN in the output.
     current = np.where(problem.fixed_temperature_mask, problem.fixed_temperature_k, current)
+    core = thermal_core(runtime, backend, native)
+    if core is not None:
+        run = core.thermal.solve_transient(
+            native_problem(core, problem),
+            list(schedule.times_s),
+            np.ascontiguousarray(current, dtype=np.float64).reshape(-1),
+            np.ascontiguousarray(capacity, dtype=np.float64),
+            store == "all",
+            until_steady,
+            float(steady_tolerance_k_per_s),
+            **solve_options(
+                config, preconditioner, coarse_block_nodes, None, radiation_max_iterations, radiation_tolerance_k
+            ),
+        )
+        return TransientThermalSolution(
+            times_s=run["times"],
+            temperature_k=run["temperature"],
+            history=tuple(TransientStep(**step) for step in run["history"]),
+            final=solution_from(run["final"]),
+            reached_steady=bool(run["reached_steady"]),
+        )
     active = mesh.active_nodes
     fields = [np.where(active, current, np.nan)]
     times = [0.0]
