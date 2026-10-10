@@ -33,6 +33,7 @@
 #include <omp.h>
 #endif
 #include "pcbcore/flush_subnormals.hpp"
+#include "pcbcore/pragmas.hpp"
 
 #include "pcbcore/fem/scalar_maxwell.hpp"
 #include "pcbcore/lane_sum.hpp"
@@ -152,7 +153,7 @@ struct Q1OperatorT final {
             y[(node_y * N) + C] = gather(x, node_y, C);
             const int row0 = node_y * N;
             const int e_here = node_y * C;
-#pragma omp simd
+PCBCORE_OMP_SIMD
             for (int node_x = 1; node_x < C; ++node_x) {
                 const int node = row0 + node_x;
                 const int e = e_here + node_x;
@@ -316,7 +317,7 @@ inline void divide_into(const c64* const v, const c64* const d, c64* const z, co
     const float* const fv = reinterpret_cast<const float*>(v);
     const float* const fd = reinterpret_cast<const float*>(d);
     float* const fz = reinterpret_cast<float*>(z);
-#pragma omp simd
+PCBCORE_OMP_SIMD
     for (py::ssize_t i = 0; i < n; ++i) {
         const float vr = fv[2 * i];
         const float vi = fv[(2 * i) + 1];

@@ -42,6 +42,7 @@
 #include <omp.h>
 #endif
 #include "pcbcore/flush_subnormals.hpp"
+#include "pcbcore/pragmas.hpp"
 
 #include "pcbcore/fem/layered_dc.hpp"
 #include "pcbcore/lane_sum.hpp"
@@ -166,7 +167,7 @@ struct LayeredOperatorT final {
                 const T* const ax = coef + e_row;
                 const T* const ay = coef + ne + e_row;
                 const py::ssize_t corner_row = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(nr) + static_cast<py::ssize_t>(ey)) * static_cast<py::ssize_t>(nc);
-#pragma omp simd
+PCBCORE_OMP_SIMD
                 for (int xi = 1; xi < cols; ++xi) {
                     T acc{static_cast<T>(0)};
 #pragma GCC unroll 2
@@ -192,7 +193,7 @@ struct LayeredOperatorT final {
                     o[xi] += via_terms(x, node);
                 }
             }
-#pragma omp simd
+PCBCORE_OMP_SIMD
             for (int xi = 1; xi < cols; ++xi) {
                 const py::ssize_t node = base + static_cast<py::ssize_t>(xi);
                 const T f = free_mask[node];
