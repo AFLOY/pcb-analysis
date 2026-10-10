@@ -53,9 +53,6 @@ Homepage = "https://github.com/AFLOY/pcb-analysis"
 Repository = "https://github.com/AFLOY/pcb-analysis"
 Issues = "https://github.com/AFLOY/pcb-analysis/issues"
 
-[project.scripts]
-pcb-analysis-calibrate = "electrical.dice_peec.cli.calibrate:main"
-
 [tool.setuptools]
 package-dir = {"" = "src"}
 
