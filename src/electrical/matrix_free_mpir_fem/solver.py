@@ -99,6 +99,22 @@ class MPIRResult:
     history: tuple[MPIRStep, ...]
 
 
+def mpir_result_from_core(result: dict, low_runtime: str) -> MPIRResult:
+    """An :class:`MPIRResult` from the C++ core's result dictionary."""
+
+    return MPIRResult(
+        solution=result["solution"],
+        converged=bool(result["converged"]),
+        outer_iterations=int(result["outer_iterations"]),
+        inner_iterations=int(result["inner_iterations"]),
+        relative_residual=float(result["relative_residual"]),
+        high_operator_applications=int(result["high_operator_applications"]),
+        low_operator_applications=int(result["low_operator_applications"]),
+        low_runtime=low_runtime,
+        history=tuple(MPIRStep(*step) for step in result["history"]),
+    )
+
+
 def _inner_pcg(
     system: MatrixFreeMPIRSystem,
     rhs_high: np.ndarray,

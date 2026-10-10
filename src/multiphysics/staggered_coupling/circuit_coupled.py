@@ -362,13 +362,35 @@ def run_circuit_coupled(
 ) -> CircuitCoupledResult:
     """Iterate N-port, circuit and thermal solves to a self-consistent ρ(T) state.
 
-    Every solve draws on the process-wide thread budget
+    With the C++ core built (``native=None`` or ``True``, CPU backend) the
+    loop runs in the core and calls ``scenario.circuit.excite`` once per
+    iteration, as here (:mod:`.native_loops`).  Every solve draws on the
+    process-wide thread budget
     (:func:`electrical.threads.set_thread_budget`); how an N-port basis splits
     it between concurrent unit solves and their OpenMP teams is decided inside
     :func:`electrical.matrix_free_mpir_fem.dc_port_basis`.
     """
 
     config = config or CouplingConfig()
+    from .native_loops import coupling_core
+
+    core = coupling_core(native, backend)
+    if core is not None:
+        return _native_circuit_coupled(core, scenario, config)
+    return _python_circuit_coupled(scenario, config, backend=backend, device_id=device_id, native=native)
+
+
+def _python_circuit_coupled(
+    scenario: CircuitCoupledScenario,
+    config: CouplingConfig,
+    *,
+    backend: RuntimeBackend | None,
+    device_id: int,
+    native: bool | None,
+) -> CircuitCoupledResult:
+    """The loop solve by solve; the reference of the C++ loop (``native=True``
+    here runs it on the C++ solvers)."""
+
     fixed_point = TemperatureFixedPoint(scenario, config)
     history: list[CircuitCoupledStep] = []
     bases: dict[str, DCPortBasis | None] = {c.name: None for c in scenario.conductors}
@@ -507,4 +529,121 @@ def run_circuit_coupled(
         iterations=len(history),
         history=tuple(history),
         cold_joule_loss_w=cold_loss,
+    )
+
+
+def _native_circuit_coupled(core: Any, scenario: CircuitCoupledScenario, config: CouplingConfig) -> CircuitCoupledResult:
+    """run_circuit_coupled in ``electrical._pcbcore.coupling``."""
+
+    from electrical.matrix_free_mpir_fem import MatrixFreePCBOperator, PCBConductionProblem
+    from electrical.matrix_free_mpir_fem.native_problem import LOW_RUNTIME_NAME, dc_problem
+    from electrical.matrix_free_mpir_fem.ports import port_pool, reduce_correlation
+    from electrical.matrix_free_mpir_fem.solver import mpir_result_from_core
+    from electrical.threads import thread_budget
+    from thermal.matrix_free_mpir_fem.native_system import solution_from as thermal_solution_from
+
+    from .native_loops import board_arguments, fixed_point_arguments, thermal_arguments
+
+    budget = thread_budget()
+    pools = [port_pool(budget, conductor.ports.count - 1) for conductor in scenario.conductors]
+    conductors = [
+        (
+            dc_problem(
+                core,
+                PCBConductionProblem(
+                    conductor.mesh,
+                    voltage_terminals=conductor.ports.voltage_terminals(np.zeros(conductor.ports.count)),
+                    vias=conductor.vias,
+                ),
+                config=config.electrical,
+            ),
+            conductor.ports.reference,
+            list(conductor.layer_slabs),
+            width,
+            team,
+        )
+        for conductor, (width, team) in zip(scenario.conductors, pools)
+    ]
+    excitations: dict[str, PortExcitation] = {}
+
+    def circuit(conductances: list[np.ndarray]) -> list[tuple[np.ndarray, float]]:
+        networks = {
+            conductor.name: PortNetwork(conductor.name, conductor.ports.names, conductor.ports.reference, conductance)
+            for conductor, conductance in zip(scenario.conductors, conductances)
+        }
+        answer = scenario.circuit.excite(networks)
+        missing = sorted(set(networks) - set(answer))
+        if missing:
+            raise ValueError(f"the circuit returned no excitation for conductors {missing}")
+        reduced = []
+        for conductor in scenario.conductors:
+            excitation = answer[conductor.name]
+            if excitation.correlation_a2.shape != (conductor.ports.count,) * 2:
+                raise ValueError(
+                    f"{conductor.name}: the circuit returned a {excitation.correlation_a2.shape} "
+                    f"correlation for {conductor.ports.count} ports"
+                )
+            excitations[conductor.name] = excitation
+            reduced.append(reduce_correlation(conductor.ports, excitation.correlation_a2))
+        return reduced
+
+    result = core.coupling.run_circuit_coupled(
+        conductors,
+        float(scenario.conductivity_reference_temperature_k),
+        float(scenario.temperature_coefficient_per_k),
+        **board_arguments(
+            core,
+            scenario.thermal_mesh,
+            convection=scenario.convection,
+            fixed_temperature_mask=scenario.fixed_temperature_mask,
+            fixed_temperature_k=scenario.fixed_temperature_k,
+            radiation=scenario.radiation,
+            extra_heat_sources=scenario.extra_heat_sources,
+            extra_element_heat_w=scenario.extra_element_heat_w,
+        ),
+        circuit=circuit,
+        **fixed_point_arguments(config),
+        **{key: value for key, value in thermal_arguments(config).items() if key != "threads"},
+        threads=budget,
+    )
+    states: dict[str, ConductorState] = {}
+    for conductor, record, (width, team) in zip(scenario.conductors, result["conductors"], pools):
+        mesh = dataclasses.replace(conductor.mesh, conductivity_s_per_m=record["conductivity"])
+        vias = tuple(
+            dataclasses.replace(via, resistance_ohm=float(resistance))
+            for via, resistance in zip(conductor.vias, record["via_resistance"])
+        )
+        unit_voltage = record["unit_voltage"]
+        solves = []
+        for column, solve in enumerate(record["solves"]):
+            solve["solution"] = unit_voltage[column].reshape(-1)
+            solves.append(mpir_result_from_core(solve, LOW_RUNTIME_NAME))
+        basis = DCPortBasis(
+            mesh=mesh,
+            ports=conductor.ports,
+            operator=MatrixFreePCBOperator._from_system(mesh, vias, record["system"], core, team=team),
+            conductance_s=record["conductance"],
+            unit_voltage_potential_v=unit_voltage,
+            unit_current_potential_v=record["unit_current"],
+            solves=tuple(solves),
+            workers=width,
+        )
+        states[conductor.name] = ConductorState(
+            basis=basis,
+            excitation=excitations[conductor.name],
+            element_loss_w=record["element_loss"],
+            via_loss_w=record["via_loss"],
+            rms_current_density_a_per_m2=record["rms_current_density"],
+            conductivity_s_per_m=record["conductivity"],
+            via_resistance_ohm=record["via_resistance"],
+            element_temperature_k=record["element_temperature"],
+        )
+    history = tuple(CircuitCoupledStep(**step) for step in result["history"])
+    return CircuitCoupledResult(
+        conductors=states,
+        thermal=thermal_solution_from(result["thermal"]),
+        converged=bool(result["converged"]),
+        iterations=len(history),
+        history=history,
+        cold_joule_loss_w=float(result["cold_loss"]),
     )

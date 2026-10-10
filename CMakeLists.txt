@@ -121,6 +121,7 @@ add_library(pcbcore STATIC
   cpp/src/fem/two_level.cpp
   cpp/src/fem/scalar_maxwell_system.cpp
   cpp/src/emc/post.cpp
+  cpp/src/coupling/coupling.cpp
   cpp/src/thermal/thermal_system.cpp
   cpp/src/thermal/thermal_solve.cpp)
 target_include_directories(pcbcore PUBLIC cpp/include)
@@ -141,7 +142,7 @@ if(PCB_NATIVE_OPENMP)
   target_link_libraries(pcbcore PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
-pybind11_add_module(_pcbcore MODULE cpp/bindings/module.cpp cpp/bindings/fem.cpp cpp/bindings/thermal.cpp cpp/bindings/emc.cpp)
+pybind11_add_module(_pcbcore MODULE cpp/bindings/module.cpp cpp/bindings/fem.cpp cpp/bindings/thermal.cpp cpp/bindings/emc.cpp cpp/bindings/coupling.cpp)
 target_compile_options(_pcbcore PRIVATE -O3 -DNDEBUG)
 target_link_libraries(_pcbcore PRIVATE pcbcore pcbcore_kernels)
 set_target_properties(_pcbcore PROPERTIES

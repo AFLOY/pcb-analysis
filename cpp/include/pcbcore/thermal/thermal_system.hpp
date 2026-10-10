@@ -205,8 +205,10 @@ struct SolveOptions {
 // Steady solve, or one backward-Euler step with ``capacity_per_s``
 // (C / dt per node) and ``previous`` (T_n); radiation by Newton iteration.
 // ``cache`` keeps the system of a problem without radiation between calls
-// with the same capacity.
+// on the same problem object with the same capacity (the load may change).
 struct SystemCache {
+    const ThermalProblem* problem{nullptr};
+    bool transient{false};
     std::vector<double> capacity;
     std::shared_ptr<ThermalSystem> system;
 };

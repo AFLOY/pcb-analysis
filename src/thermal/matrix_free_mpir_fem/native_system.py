@@ -17,7 +17,7 @@ import numpy as np
 
 from electrical import _backend
 from electrical.matrix_free_mpir_fem.runtime import LowPrecisionRuntime, RuntimeBackend
-from electrical.matrix_free_mpir_fem.solver import MPIRConfig, MPIRResult, MPIRStep
+from electrical.matrix_free_mpir_fem.solver import MPIRConfig, MPIRResult, mpir_result_from_core
 from electrical.threads import thread_budget
 
 from .boundaries import ConvectionBoundary, ExposedFaceConvection
@@ -107,17 +107,7 @@ def native_problem(core: Any, problem: ThermalConductionProblem) -> Any:
 
 
 def mpir_result(result: dict, low_runtime: str = LOW_RUNTIME_NAME) -> MPIRResult:
-    return MPIRResult(
-        solution=result["solution"],
-        converged=bool(result["converged"]),
-        outer_iterations=int(result["outer_iterations"]),
-        inner_iterations=int(result["inner_iterations"]),
-        relative_residual=float(result["relative_residual"]),
-        high_operator_applications=int(result["high_operator_applications"]),
-        low_operator_applications=int(result["low_operator_applications"]),
-        low_runtime=low_runtime,
-        history=tuple(MPIRStep(*step) for step in result["history"]),
-    )
+    return mpir_result_from_core(result, low_runtime)
 
 
 def solution_from(result: dict) -> Any:

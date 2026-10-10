@@ -169,15 +169,19 @@ ThermalSolution solve_steady(const ThermalProblem& problem, const SolveOptions& 
     const int threads = std::max(1, options.threads);
     if (problem.radiation.empty()) {
         std::shared_ptr<ThermalSystem> system;
-        if (cache != nullptr && cache->system != nullptr && capacity_per_s != nullptr &&
-            std::equal(cache->capacity.begin(), cache->capacity.end(), capacity_per_s) &&
-            static_cast<Index>(cache->capacity.size()) == n) {
+        const bool transient = capacity_per_s != nullptr;
+        if (cache != nullptr && cache->system != nullptr && cache->problem == &problem &&
+            cache->transient == transient &&
+            (!transient || (static_cast<Index>(cache->capacity.size()) == n &&
+                            std::equal(cache->capacity.begin(), cache->capacity.end(), capacity_per_s)))) {
             system = cache->system;
         } else {
             system = std::make_shared<ThermalSystem>(problem, lump_all(mesh, problem.convection), capacity_per_s,
                                                      options.two_level, options.block, threads);
-            if (cache != nullptr && capacity_per_s != nullptr) {
-                cache->capacity.assign(capacity_per_s, capacity_per_s + n);
+            if (cache != nullptr) {
+                cache->problem = &problem;
+                cache->transient = transient;
+                cache->capacity.assign(capacity_per_s, capacity_per_s + (transient ? n : 0));
                 cache->system = system;
             }
         }

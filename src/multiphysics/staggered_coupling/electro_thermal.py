@@ -361,13 +361,34 @@ def run_electro_thermal(
 ) -> ElectroThermalResult:
     """Iterate electrical and thermal solves to a self-consistent ρ(T) state.
 
-    ``native`` selects the fused C++ host paths of both solvers
-    (``solve_pcb_dc`` and ``solve_thermal_conduction``); ``None`` leaves each
-    to its own environment flag.  Their threads come from the process-wide
-    budget (:func:`electrical.threads.set_thread_budget`).
+    With the C++ core built (``native=None`` or ``True``, CPU backend) the
+    whole loop runs in the core (:mod:`.native_loops`); ``native=False`` or a
+    CUDA backend iterate here, solve by solve.  The two take the same steps;
+    the Aitken factor's dot products round differently, so later iterates
+    agree to the solver tolerance.  Threads come from the process-wide budget
+    (:func:`electrical.threads.set_thread_budget`).
     """
 
     config = config or CouplingConfig()
+    from .native_loops import coupling_core
+
+    core = coupling_core(native, backend)
+    if core is not None:
+        return _native_electro_thermal(core, scenario, config)
+    return _python_electro_thermal(scenario, config, backend=backend, device_id=device_id, native=native)
+
+
+def _python_electro_thermal(
+    scenario: ElectroThermalScenario,
+    config: CouplingConfig,
+    *,
+    backend: RuntimeBackend | None,
+    device_id: int,
+    native: bool | None,
+) -> ElectroThermalResult:
+    """The loop solve by solve; the reference of the C++ loop (``native=True``
+    here runs it on the C++ solvers)."""
+
     problem = scenario.electrical
     fixed_point = TemperatureFixedPoint(scenario, config)
     history: list[CouplingStep] = []
@@ -454,4 +475,46 @@ def run_electro_thermal(
         iterations=len(history),
         history=tuple(history),
         cold_joule_loss_w=cold_loss,
+    )
+
+
+def _native_electro_thermal(core: Any, scenario: ElectroThermalScenario, config: CouplingConfig) -> ElectroThermalResult:
+    """run_electro_thermal in ``electrical._pcbcore.coupling``."""
+
+    from electrical.matrix_free_mpir_fem.native_problem import dc_problem, solution_from as dc_solution_from
+    from electrical.threads import thread_budget
+    from thermal.matrix_free_mpir_fem.native_system import solution_from as thermal_solution_from
+
+    from .native_loops import board_arguments, fixed_point_arguments, thermal_arguments
+
+    result = core.coupling.run_electro_thermal(
+        dc_problem(core, scenario.electrical, config=config.electrical),
+        list(scenario.layer_slabs),
+        float(scenario.conductivity_reference_temperature_k),
+        float(scenario.temperature_coefficient_per_k),
+        **board_arguments(
+            core,
+            scenario.thermal_mesh,
+            convection=scenario.convection,
+            fixed_temperature_mask=scenario.fixed_temperature_mask,
+            fixed_temperature_k=scenario.fixed_temperature_k,
+            radiation=scenario.radiation,
+            extra_heat_sources=scenario.extra_heat_sources,
+            extra_element_heat_w=scenario.extra_element_heat_w,
+        ),
+        **fixed_point_arguments(config),
+        **{key: value for key, value in thermal_arguments(config).items() if key != "threads"},
+        threads=thread_budget(),
+    )
+    history = tuple(CouplingStep(**step) for step in result["history"])
+    return ElectroThermalResult(
+        electrical=dc_solution_from(result["electrical"]),
+        thermal=thermal_solution_from(result["thermal"]),
+        conductivity_s_per_m=result["conductivity"],
+        via_resistance_ohm=result["via_resistance"],
+        element_temperature_k=result["element_temperature"],
+        converged=bool(result["converged"]),
+        iterations=len(history),
+        history=history,
+        cold_joule_loss_w=float(result["cold_loss"]),
     )
