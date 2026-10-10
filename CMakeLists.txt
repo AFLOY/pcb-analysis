@@ -119,7 +119,9 @@ add_library(pcbcore STATIC
 target_include_directories(pcbcore PUBLIC cpp/include)
 target_include_directories(pcbcore PRIVATE ${pocketfft_SOURCE_DIR})
 target_compile_definitions(pcbcore PRIVATE POCKETFFT_NO_MULTITHREADING POCKETFFT_CACHE_SIZE=16)
-target_compile_options(pcbcore PRIVATE -O3 -fcx-limited-range -fno-math-errno -DNDEBUG)
+# No FMA contraction: a*b + c*d rounds twice, as in NumPy, whatever the ISA,
+# so results do not change with -march (or between wheels for different CPUs).
+target_compile_options(pcbcore PRIVATE -O3 -ffp-contract=off -fcx-limited-range -fno-math-errno -DNDEBUG)
 if(PCB_NATIVE_MARCH)
   target_compile_options(pcbcore PRIVATE "-march=${PCB_NATIVE_MARCH}")
 endif()
