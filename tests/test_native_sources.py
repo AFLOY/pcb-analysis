@@ -53,6 +53,19 @@ def test_nothing_changes_the_runtime_defaults() -> None:
     assert not offenders, "calls that change OpenMP or Eigen process defaults:\n" + "\n".join(offenders)
 
 
+def test_no_reduction_is_left_to_the_vectoriser() -> None:
+    # An ``omp simd reduction`` splits its terms by the alignment of the first
+    # one, which changes with every allocation: the same solve rounds
+    # differently from run to run.  Sums go through pcbcore::lane_sum.
+    offenders = [
+        f"{path.relative_to(ROOT)}: {pragma}"
+        for path in SOURCES
+        for pragma in _pragmas(path.read_text())
+        if re.search(r"\bsimd\b", pragma) and "reduction" in pragma
+    ]
+    assert not offenders, "vectoriser reductions:\n" + "\n".join(offenders)
+
+
 def test_eigen_is_built_without_its_own_parallelism() -> None:
     cmake = (ROOT / "CMakeLists.txt").read_text()
     script = (ROOT / "src/electrical/matrix_free_mpir_fem/native/build.py").read_text()

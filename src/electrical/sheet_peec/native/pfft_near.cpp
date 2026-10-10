@@ -91,7 +91,6 @@ using ArrI32 = py::array_t<std::int32_t, py::array::c_style | py::array::forceca
                 const double wa = wgt[a];
                 double inner{0.0};
 
-#pragma omp simd reduction(+ : inner)
                 for (std::int32_t b = b_start; b < b_end; ++b) {
                     const std::int64_t node_b = idx[b];
                     const std::int64_t yb = node_b / static_cast<std::int64_t>(nodes_x);

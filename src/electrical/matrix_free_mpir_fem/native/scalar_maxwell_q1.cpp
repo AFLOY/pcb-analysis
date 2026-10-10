@@ -34,6 +34,9 @@
 #endif
 #include <xmmintrin.h>
 
+#include "pcbcore/fem/scalar_maxwell.hpp"
+#include "pcbcore/lane_sum.hpp"
+
 namespace py = pybind11;
 
 // Registered as electrical._pcbcore.scalar_maxwell; built on its own as _scalar_maxwell_native
@@ -249,17 +252,80 @@ template <typename T>
     return op;
 }
 
+// The same operator over the non-owning arrays of the C++ interface.
+template <typename T>
+[[nodiscard]] Q1OperatorT<T> operator_from(const pcbcore::fem::scalar_maxwell::OperatorView<T>& v, const int threads) {
+    if (v.element_rows < 1 || v.element_columns < 1) {
+        throw std::invalid_argument("element shape must be positive");
+    }
+    if (v.inverse_mu == nullptr || v.reaction == nullptr || v.stiffness == nullptr || v.mass == nullptr ||
+        v.free_nodes == nullptr || v.free_mask == nullptr) {
+        throw std::invalid_argument("operator arrays are missing");
+    }
+    Q1OperatorT<T> op;
+    op.inverse_mu = v.inverse_mu;
+    op.reaction = v.reaction;
+    op.stiffness = v.stiffness;
+    op.mass = v.mass;
+    op.free_nodes = v.free_nodes;
+    op.free_mask = v.free_mask;
+    op.element_rows = v.element_rows;
+    op.element_columns = v.element_columns;
+    op.threads = (threads < 1) ? 1 : threads;
+    return op;
+}
+
+template <typename T>
+[[nodiscard]] pcbcore::fem::scalar_maxwell::OperatorView<T> view_of(const Q1OperatorT<T>& op) {
+    pcbcore::fem::scalar_maxwell::OperatorView<T> v;
+    v.inverse_mu = op.inverse_mu;
+    v.reaction = op.reaction;
+    v.stiffness = op.stiffness;
+    v.mass = op.mass;
+    v.free_nodes = op.free_nodes;
+    v.free_mask = op.free_mask;
+    v.element_rows = op.element_rows;
+    v.element_columns = op.element_columns;
+    return v;
+}
+
+// Element-wise vector updates written out: Eigen's complex expressions take
+// the leading elements up to an aligned address with a scalar formula and the
+// rest with a SIMD one, which round complex products differently, so where the
+// vector happened to be allocated changed the bits.  One formula per element
+// here, vectorised or not.
 inline void axpy_neg(const c64 h, const c64* const v, c64* const w, const py::ssize_t n) noexcept {
-    Eigen::Map<Eigen::VectorXcf>(w, n) -= h * Eigen::Map<const Eigen::VectorXcf>(v, n);
+    const float hr = h.real();
+    const float hi = h.imag();
+    const float* const fv = reinterpret_cast<const float*>(v);
+    float* const fw = reinterpret_cast<float*>(w);
+    for (py::ssize_t i = 0; i < n; ++i) {
+        const float vr = fv[2 * i];
+        const float vi = fv[(2 * i) + 1];
+        fw[2 * i] -= (hr * vr) - (hi * vi);
+        fw[(2 * i) + 1] -= (hr * vi) + (hi * vr);
+    }
 }
 
 inline void axpy_add(const c64 h, const c64* const v, c64* const w, const py::ssize_t n) noexcept {
-    Eigen::Map<Eigen::VectorXcf>(w, n) += h * Eigen::Map<const Eigen::VectorXcf>(v, n);
+    const float hr = h.real();
+    const float hi = h.imag();
+    const float* const fv = reinterpret_cast<const float*>(v);
+    float* const fw = reinterpret_cast<float*>(w);
+    for (py::ssize_t i = 0; i < n; ++i) {
+        const float vr = fv[2 * i];
+        const float vi = fv[(2 * i) + 1];
+        fw[2 * i] += (hr * vr) - (hi * vi);
+        fw[(2 * i) + 1] += (hr * vi) + (hi * vr);
+    }
 }
 
 inline void scale_into(const float s, const c64* const v, c64* const out, const py::ssize_t n) noexcept {
-    Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, 1>>(reinterpret_cast<float*>(out), 2 * n) =
-        s * Eigen::Map<const Eigen::Matrix<float, Eigen::Dynamic, 1>>(reinterpret_cast<const float*>(v), 2 * n);
+    const float* const fv = reinterpret_cast<const float*>(v);
+    float* const fo = reinterpret_cast<float*>(out);
+    for (py::ssize_t i = 0; i < 2 * n; ++i) {
+        fo[i] = s * fv[i];
+    }
 }
 
 inline void divide_into(const c64* const v, const c64* const d, c64* const z, const py::ssize_t n) noexcept {
@@ -279,35 +345,6 @@ inline void divide_into(const c64* const v, const c64* const d, c64* const z, co
 }
 
 constexpr py::ssize_t kBlock = 1024;
-
-void block_dots(const c64* const basis, const py::ssize_t n, const c64* const w, const int rows,
-                const py::ssize_t lo, const py::ssize_t len,
-                std::vector<double>& re, std::vector<double>& im) noexcept {
-    for (int k = 0; k < rows; ++k) {
-        re[static_cast<size_t>(k)] = 0.0;
-        im[static_cast<size_t>(k)] = 0.0;
-    }
-    for (py::ssize_t i0 = lo; i0 < lo + len; i0 += kBlock) {
-        const py::ssize_t m = std::min(kBlock, lo + len - i0);
-        const float* const fb = reinterpret_cast<const float*>(w + i0);
-        for (int k = 0; k < rows; ++k) {
-            const float* const fa = reinterpret_cast<const float*>(basis + (static_cast<size_t>(k) * static_cast<size_t>(n)) + static_cast<size_t>(i0));
-            double sr{0.0};
-            double si{0.0};
-#pragma omp simd reduction(+ : sr, si)
-            for (py::ssize_t i = 0; i < m; ++i) {
-                const double ar = fa[2 * i];
-                const double ai = fa[(2 * i) + 1];
-                const double br = fb[2 * i];
-                const double bi = fb[(2 * i) + 1];
-                sr += (ar * br) + (ai * bi);
-                si += (ar * bi) - (ai * br);
-            }
-            re[static_cast<size_t>(k)] += sr;
-            im[static_cast<size_t>(k)] += si;
-        }
-    }
-}
 
 void block_axpy_neg(const c64* const basis, const py::ssize_t n, const c64* const h, const int rows,
                     c64* const w, const py::ssize_t lo, const py::ssize_t len) noexcept {
@@ -351,7 +388,9 @@ void gmres_q1_core(
     std::vector<c64> zbasis(static_cast<size_t>(max_cycle) * static_cast<size_t>(n), c64(0.0f, 0.0f));
     const int second_pass_slot = max_cycle + 2;
     const int norm_slot = (2 * max_cycle) + 3;
-    std::vector<Partial> partials(static_cast<size_t>(norm_slot + 1) * static_cast<size_t>(team));
+    // One (re, im) partial per slot and node row, summed in row order: the
+    // inner products do not depend on the team size or on where the vectors sit.
+    std::vector<double> row_partials(static_cast<size_t>(norm_slot + 1) * static_cast<size_t>(node_rows) * 2U, 0.0);
     auto V = [&](const int k) noexcept -> c64* { return basis.data() + (static_cast<size_t>(k) * static_cast<size_t>(n)); };
     auto Z = [&](const int k) noexcept -> c64* { return zbasis.data() + (static_cast<size_t>(k) * static_cast<size_t>(n)); };
 
@@ -370,65 +409,66 @@ void gmres_q1_core(
         Q1Operator::thread_rows(node_rows, row_begin, row_end);
         const py::ssize_t lo = static_cast<py::ssize_t>(row_begin) * static_cast<py::ssize_t>(ncols);
         const py::ssize_t len = static_cast<py::ssize_t>(row_end - row_begin) * static_cast<py::ssize_t>(ncols);
-        auto slot = [&](const int s) noexcept -> Partial& {
-            return partials[static_cast<size_t>(s) * static_cast<size_t>(nt) + static_cast<size_t>(tid)];
+        auto partial = [&](const int s, const int row) noexcept -> double* {
+            return row_partials.data() + (static_cast<size_t>(s) * static_cast<size_t>(node_rows) + static_cast<size_t>(row)) * 2U;
         };
         auto reduce = [&](const int s, double& a, double& b) noexcept {
-            a = 0.0;
-            b = 0.0;
-            for (int t = 0; t < nt; ++t) {
-                a += partials[static_cast<size_t>(s) * static_cast<size_t>(nt) + static_cast<size_t>(t)].a;
-                b += partials[static_cast<size_t>(s) * static_cast<size_t>(nt) + static_cast<size_t>(t)].b;
+            a = pcbcore::ordered_sum(node_rows, [&](const std::ptrdiff_t row) { return partial(s, static_cast<int>(row))[0]; });
+            b = pcbcore::ordered_sum(node_rows, [&](const std::ptrdiff_t row) { return partial(s, static_cast<int>(row))[1]; });
+        };
+        auto store_norm2 = [&](const int s, const c64* const v) noexcept {
+            for (int row = row_begin; row < row_end; ++row) {
+                const float* const f = reinterpret_cast<const float*>(v + static_cast<py::ssize_t>(row) * ncols);
+                double* const out = partial(s, row);
+                out[0] = pcbcore::lane_sum(2 * static_cast<std::ptrdiff_t>(ncols), [f](const std::ptrdiff_t i) {
+                    return static_cast<double>(f[i]) * static_cast<double>(f[i]);
+                });
+                out[1] = 0.0;
             }
         };
-        auto local_norm2 = [&](const c64* const v) noexcept -> double {
-            const float* const f = reinterpret_cast<const float*>(v + lo);
-            double acc{0.0};
-#pragma omp simd reduction(+ : acc)
-            for (py::ssize_t i = 0; i < 2 * len; ++i) {
-                acc += static_cast<double>(f[i]) * static_cast<double>(f[i]);
-            }
-            return acc;
-        };
-        auto local_vdot = [&](const c64* const a, const c64* const b, double& re, double& im) noexcept {
-            const float* const fa = reinterpret_cast<const float*>(a + lo);
-            const float* const fb = reinterpret_cast<const float*>(b + lo);
+        // conj(a) . b over one node row.
+        auto row_vdot = [&](const c64* const a, const c64* const b, const int row, double& re, double& im) noexcept {
+            const float* const fa = reinterpret_cast<const float*>(a + static_cast<py::ssize_t>(row) * ncols);
+            const float* const fb = reinterpret_cast<const float*>(b + static_cast<py::ssize_t>(row) * ncols);
             if (!float_dots) {
-                double sr{0.0};
-                double si{0.0};
-#pragma omp simd reduction(+ : sr, si)
-                for (py::ssize_t i = 0; i < len; ++i) {
-                    const double ar = fa[2 * i];
-                    const double ai = fa[(2 * i) + 1];
-                    const double br = fb[2 * i];
-                    const double bi = fb[(2 * i) + 1];
-                    sr += (ar * br) + (ai * bi);
-                    si += (ar * bi) - (ai * br);
-                }
-                re = sr;
-                im = si;
+                re = pcbcore::lane_sum(ncols, [fa, fb](const std::ptrdiff_t i) {
+                    return (static_cast<double>(fa[2 * i]) * static_cast<double>(fb[2 * i])) +
+                           (static_cast<double>(fa[2 * i + 1]) * static_cast<double>(fb[2 * i + 1]));
+                });
+                im = pcbcore::lane_sum(ncols, [fa, fb](const std::ptrdiff_t i) {
+                    return (static_cast<double>(fa[2 * i]) * static_cast<double>(fb[2 * i + 1])) -
+                           (static_cast<double>(fa[2 * i + 1]) * static_cast<double>(fb[2 * i]));
+                });
                 return;
             }
+            // Float lanes inside blocks of kBlock nodes, the blocks summed in double.
             double sr{0.0};
             double si{0.0};
-            for (py::ssize_t i0 = 0; i0 < len; i0 += kBlock) {
-                const py::ssize_t m = std::min(kBlock, len - i0);
-                float br_acc{0.0f};
-                float bi_acc{0.0f};
-#pragma omp simd reduction(+ : br_acc, bi_acc)
+            for (py::ssize_t i0 = 0; i0 < ncols; i0 += kBlock) {
+                const py::ssize_t m = std::min(kBlock, static_cast<py::ssize_t>(ncols) - i0);
+                float lr[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+                float li[8] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
                 for (py::ssize_t i = 0; i < m; ++i) {
                     const float ar = fa[2 * (i0 + i)];
                     const float ai = fa[(2 * (i0 + i)) + 1];
                     const float br = fb[2 * (i0 + i)];
                     const float bi = fb[(2 * (i0 + i)) + 1];
-                    br_acc += (ar * br) + (ai * bi);
-                    bi_acc += (ar * bi) - (ai * br);
+                    lr[i % 8] += (ar * br) + (ai * bi);
+                    li[i % 8] += (ar * bi) - (ai * br);
                 }
-                sr += static_cast<double>(br_acc);
-                si += static_cast<double>(bi_acc);
+                sr += ((static_cast<double>(lr[0]) + lr[1]) + (static_cast<double>(lr[2]) + lr[3])) +
+                      ((static_cast<double>(lr[4]) + lr[5]) + (static_cast<double>(lr[6]) + lr[7]));
+                si += ((static_cast<double>(li[0]) + li[1]) + (static_cast<double>(li[2]) + li[3])) +
+                      ((static_cast<double>(li[4]) + li[5]) + (static_cast<double>(li[6]) + li[7]));
             }
             re = sr;
             im = si;
+        };
+        auto store_vdot = [&](const int s, const c64* const a, const c64* const b) noexcept {
+            for (int row = row_begin; row < row_end; ++row) {
+                double* const out = partial(s, row);
+                row_vdot(a, b, row, out[0], out[1]);
+            }
         };
 
         std::vector<c128> hess(static_cast<size_t>(max_cycle + 1) * static_cast<size_t>(max_cycle), c128(0.0, 0.0));
@@ -452,12 +492,15 @@ void gmres_q1_core(
             correction[i] = c64(0.0f, 0.0f);
             residual[static_cast<size_t>(i)] = rhs[static_cast<size_t>(i)];
         }
-        slot(0).a = local_norm2(rhs.data());
-        slot(0).b = 0.0;
+        store_norm2(0, rhs.data());
 #pragma omp barrier
         double rhs_sq{0.0};
         double unused{0.0};
         reduce(0, rhs_sq, unused);
+        // Every thread has read slot 0 before any writes the residual norm
+        // into it below; without this barrier a fast thread could overwrite
+        // it while a slow one still read the right-hand side's norm.
+#pragma omp barrier
         const double rhs_norm = std::sqrt(rhs_sq);
         if (rhs_norm == 0.0) {
             rel = 0.0;
@@ -467,11 +510,11 @@ void gmres_q1_core(
                 if (iterations != 0) {
                     op.apply_rows(correction, w.data(), row_begin, row_end);
                     ++applied;
-                    Eigen::Map<Eigen::VectorXcf>(residual.data() + lo, len) =
-                        Eigen::Map<const Eigen::VectorXcf>(rhs.data() + lo, len) -
-                        Eigen::Map<const Eigen::VectorXcf>(w.data() + lo, len);
+                    for (py::ssize_t i = lo; i < lo + len; ++i) {
+                        residual[static_cast<size_t>(i)] = rhs[static_cast<size_t>(i)] - w[static_cast<size_t>(i)];
+                    }
                 }
-                slot(0).a = local_norm2(residual.data());
+                store_norm2(0, residual.data());
 #pragma omp barrier
                 double beta_sq{0.0};
                 reduce(0, beta_sq, unused);
@@ -500,7 +543,7 @@ void gmres_q1_core(
 
                     if (!cgs2) {
                         for (int row = 0; row <= col; ++row) {
-                            local_vdot(V(row), w.data(), slot(1 + row).a, slot(1 + row).b);
+                            store_vdot(1 + row, V(row), w.data());
 #pragma omp barrier
                             double re{0.0};
                             double im{0.0};
@@ -512,10 +555,8 @@ void gmres_q1_core(
                     } else {
                         for (int pass = 0; pass < 2; ++pass) {
                             const int base = (pass == 0) ? 1 : second_pass_slot;
-                            block_dots(basis.data(), n, w.data(), col + 1, lo, len, hre, him);
                             for (int row = 0; row <= col; ++row) {
-                                slot(base + row).a = hre[static_cast<size_t>(row)];
-                                slot(base + row).b = him[static_cast<size_t>(row)];
+                                store_vdot(base + row, V(row), w.data());
                             }
 #pragma omp barrier
                             for (int row = 0; row <= col; ++row) {
@@ -528,7 +569,7 @@ void gmres_q1_core(
                             block_axpy_neg(basis.data(), n, hcoef.data(), col + 1, w.data(), lo, len);
                         }
                     }
-                    slot(norm_slot).a = local_norm2(w.data());
+                    store_norm2(norm_slot, w.data());
 #pragma omp barrier
                     double next_sq{0.0};
                     reduce(norm_slot, next_sq, unused);
@@ -664,9 +705,8 @@ py::tuple gmres_q1(ArrC128 rhs_high, ArrC64 diagonal, ArrC64 inverse_mu, ArrC64 
     return py::make_tuple(correction_out, total_iterations, relative_residual, applications);
 }
 
-// Complete C++ End-to-End MPIR Solver for Scalar Maxwell Q1.
-// Executes the outer MPIR iterations, complex128 residuals, inner GMRES,
-// and convergence checks entirely within C++ without returning to Python.
+// The end-to-end MPIR solve of pcbcore::fem::scalar_maxwell::solve_mpir,
+// behind array checks.
 py::tuple solve_mpir_scalar_maxwell_q1(
     ArrC128 rhs_high, ArrC128 initial_guess, ArrC64 diagonal,
     ArrC64 inverse_mu_f32, ArrC64 reaction_f32, ArrC64 stiffness_f32, ArrC64 mass_f32,
@@ -697,7 +737,103 @@ py::tuple solve_mpir_scalar_maxwell_q1(
     } else {
         std::fill(sol, sol + n, c128(0.0, 0.0));
     }
+    pcbcore::fem::MpirConfig config;
+    config.relative_tolerance = relative_tolerance;
+    config.absolute_tolerance = absolute_tolerance;
+    config.inner_relative_tolerance = inner_relative_tolerance;
+    config.max_outer_iterations = max_outer_iterations;
+    config.max_inner_iterations = max_inner_iterations;
+    pcbcore::fem::scalar_maxwell::GmresOptions gmres;
+    gmres.restart = restart;
+    gmres.cgs2 = cgs2;
+    gmres.float_dots = float_dots;
+    pcbcore::fem::MpirResult result;
+    {
+        py::gil_scoped_release release;
+        result = pcbcore::fem::scalar_maxwell::solve_mpir(view_of(op_low), view_of(op_high), rhs_in, sol, diag,
+                                                          config, gmres, op_low.threads);
+    }
+    std::vector<std::tuple<int, double, int, double>> history;
+    for (const auto& step : result.history) {
+        history.emplace_back(step.outer_iteration, step.high_relative_residual, step.inner_iterations,
+                             step.inner_relative_residual);
+    }
+    return py::make_tuple(
+        solution_out, result.converged, result.outer_iterations, result.inner_iterations,
+        result.relative_residual, result.high_operator_applications, result.low_operator_applications,
+        py::cast(history));
+}
 
+int default_threads() noexcept {
+#ifdef _OPENMP
+    return omp_get_max_threads();
+#else
+    return 1;
+#endif
+}
+
+void register_module(py::module_& m) {
+    m.doc() = "Fused C++ Q1 scalar Maxwell operator, complex64 inner GMRES and end-to-end MPIR solver";
+    m.def("apply_q1", &apply_q1, py::arg("vector"), py::arg("inverse_mu"), py::arg("reaction"),
+          py::arg("stiffness"), py::arg("mass"), py::arg("free_nodes"), py::arg("free_mask"),
+          py::arg("element_rows"), py::arg("element_columns"), py::arg("threads") = 1);
+    m.def("apply_q1_f64", &apply_q1_f64, py::arg("vector"), py::arg("inverse_mu"), py::arg("reaction"),
+          py::arg("stiffness"), py::arg("mass"), py::arg("free_nodes"), py::arg("free_mask"),
+          py::arg("element_rows"), py::arg("element_columns"), py::arg("threads") = 1);
+    m.def("gmres_q1", &gmres_q1, py::arg("rhs_high"), py::arg("diagonal"), py::arg("inverse_mu"),
+          py::arg("reaction"), py::arg("stiffness"), py::arg("mass"), py::arg("free_nodes"),
+          py::arg("free_mask"), py::arg("element_rows"), py::arg("element_columns"),
+          py::arg("inner_relative_tolerance"), py::arg("max_inner_iterations"),
+          py::arg("restart"), py::arg("threads") = 1, py::arg("cgs2") = false,
+          py::arg("float_dots") = false);
+    m.def("solve_mpir_scalar_maxwell_q1", &solve_mpir_scalar_maxwell_q1,
+          py::arg("rhs_high"), py::arg("initial_guess"), py::arg("diagonal"),
+          py::arg("inverse_mu_f32"), py::arg("reaction_f32"), py::arg("stiffness_f32"), py::arg("mass_f32"),
+          py::arg("free_nodes"), py::arg("free_mask_f32"),
+          py::arg("inverse_mu_f64"), py::arg("reaction_f64"), py::arg("stiffness_f64"), py::arg("mass_f64"),
+          py::arg("free_mask_f64"),
+          py::arg("element_rows"), py::arg("element_columns"),
+          py::arg("relative_tolerance"), py::arg("absolute_tolerance"), py::arg("inner_relative_tolerance"),
+          py::arg("max_outer_iterations"), py::arg("max_inner_iterations"), py::arg("restart"),
+          py::arg("threads") = 1, py::arg("cgs2") = false, py::arg("float_dots") = false);
+    m.def("default_threads", &default_threads);
+    m.attr("openmp") =
+#ifdef _OPENMP
+        true;
+#else
+        false;
+#endif
+}
+
+}  // namespace pcb_scalar_maxwell
+
+namespace pcbcore::fem::scalar_maxwell {
+
+using pcb_scalar_maxwell::Q1OperatorT;
+
+void apply_high(const OperatorView<double>& view, const std::complex<double>* const x, std::complex<double>* const y,
+                const int threads) {
+    const Q1OperatorT<double> op = pcb_scalar_maxwell::operator_from(view, threads);
+    op.apply(x, y);
+}
+
+MpirResult solve_mpir(const OperatorView<float>& low_view, const OperatorView<double>& high_view,
+                      const std::complex<double>* const rhs_in, std::complex<double>* const sol,
+                      const std::complex<float>* const diag, const MpirConfig& config, const GmresOptions& options,
+                      const int threads) {
+    using pcb_scalar_maxwell::c128;
+    using pcb_scalar_maxwell::c64;
+    const Q1OperatorT<float> op_low = pcb_scalar_maxwell::operator_from(low_view, threads);
+    const Q1OperatorT<double> op_high = pcb_scalar_maxwell::operator_from(high_view, threads);
+    const py::ssize_t n = op_low.node_count();
+    const double relative_tolerance = config.relative_tolerance;
+    const double absolute_tolerance = config.absolute_tolerance;
+    const double inner_relative_tolerance = config.inner_relative_tolerance;
+    const int max_outer_iterations = config.max_outer_iterations;
+    const int max_inner_iterations = config.max_inner_iterations;
+    const int restart = options.restart;
+    const bool cgs2 = options.cgs2;
+    const bool float_dots = options.float_dots;
     int outer_iterations{0};
     int total_inner_iterations{0};
     // One (outer step, FP64 relative residual before it, inner iterations,
@@ -709,7 +845,6 @@ py::tuple solve_mpir_scalar_maxwell_q1(
     bool converged{false};
 
     {
-        py::gil_scoped_release release;
         double rhs_sq{0.0};
         for (py::ssize_t i = 0; i < n; ++i) {
             const double r = rhs_in[i].real();
@@ -766,53 +901,20 @@ py::tuple solve_mpir_scalar_maxwell_q1(
         }
     }
 
-    return py::make_tuple(
-        solution_out, converged, outer_iterations, total_inner_iterations,
-        relative_residual, total_high_apps, total_low_apps, py::cast(history));
+    MpirResult result;
+    result.converged = converged;
+    result.outer_iterations = outer_iterations;
+    result.inner_iterations = total_inner_iterations;
+    result.relative_residual = relative_residual;
+    result.high_operator_applications = total_high_apps;
+    result.low_operator_applications = total_low_apps;
+    for (const auto& [step, high, inner, inner_rel] : history) {
+        result.history.push_back(MpirStep{step, high, inner, inner_rel});
+    }
+    return result;
 }
 
-int default_threads() noexcept {
-#ifdef _OPENMP
-    return omp_get_max_threads();
-#else
-    return 1;
-#endif
-}
-
-void register_module(py::module_& m) {
-    m.doc() = "Fused C++ Q1 scalar Maxwell operator, complex64 inner GMRES and end-to-end MPIR solver";
-    m.def("apply_q1", &apply_q1, py::arg("vector"), py::arg("inverse_mu"), py::arg("reaction"),
-          py::arg("stiffness"), py::arg("mass"), py::arg("free_nodes"), py::arg("free_mask"),
-          py::arg("element_rows"), py::arg("element_columns"), py::arg("threads") = 1);
-    m.def("apply_q1_f64", &apply_q1_f64, py::arg("vector"), py::arg("inverse_mu"), py::arg("reaction"),
-          py::arg("stiffness"), py::arg("mass"), py::arg("free_nodes"), py::arg("free_mask"),
-          py::arg("element_rows"), py::arg("element_columns"), py::arg("threads") = 1);
-    m.def("gmres_q1", &gmres_q1, py::arg("rhs_high"), py::arg("diagonal"), py::arg("inverse_mu"),
-          py::arg("reaction"), py::arg("stiffness"), py::arg("mass"), py::arg("free_nodes"),
-          py::arg("free_mask"), py::arg("element_rows"), py::arg("element_columns"),
-          py::arg("inner_relative_tolerance"), py::arg("max_inner_iterations"),
-          py::arg("restart"), py::arg("threads") = 1, py::arg("cgs2") = false,
-          py::arg("float_dots") = false);
-    m.def("solve_mpir_scalar_maxwell_q1", &solve_mpir_scalar_maxwell_q1,
-          py::arg("rhs_high"), py::arg("initial_guess"), py::arg("diagonal"),
-          py::arg("inverse_mu_f32"), py::arg("reaction_f32"), py::arg("stiffness_f32"), py::arg("mass_f32"),
-          py::arg("free_nodes"), py::arg("free_mask_f32"),
-          py::arg("inverse_mu_f64"), py::arg("reaction_f64"), py::arg("stiffness_f64"), py::arg("mass_f64"),
-          py::arg("free_mask_f64"),
-          py::arg("element_rows"), py::arg("element_columns"),
-          py::arg("relative_tolerance"), py::arg("absolute_tolerance"), py::arg("inner_relative_tolerance"),
-          py::arg("max_outer_iterations"), py::arg("max_inner_iterations"), py::arg("restart"),
-          py::arg("threads") = 1, py::arg("cgs2") = false, py::arg("float_dots") = false);
-    m.def("default_threads", &default_threads);
-    m.attr("openmp") =
-#ifdef _OPENMP
-        true;
-#else
-        false;
-#endif
-}
-
-}  // namespace pcb_scalar_maxwell
+}  // namespace pcbcore::fem::scalar_maxwell
 
 #ifdef PCB_STANDALONE_MODULE
 PYBIND11_MODULE(_scalar_maxwell_native, m) { pcb_scalar_maxwell::register_module(m); }

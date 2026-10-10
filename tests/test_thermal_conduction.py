@@ -125,15 +125,14 @@ def test_fixed_faces_give_a_linear_profile_and_the_exact_flux() -> None:
     # the temperatures are exact only to that times the conditioning.
     for face, temperature in zip(expected, solution.temperature_k):
         np.testing.assert_allclose(temperature, face, rtol=iterative_rtol(1.0e-10))
-    np.testing.assert_allclose(
-        solution.heat_flux_w_per_m2[..., 2], -50.0 / 2.0e-3, rtol=1.0e-7
-    )
-    # In-plane flux is a difference of nodal temperatures over a 0.5 mm cell
-    # (k = 1 W/m/K): two temperature errors of the size allowed above.
+    # Flux is a difference of nodal temperatures over a 0.5 mm cell (k = 1
+    # W/m/K): at most two temperature errors of the size allowed above.
     temperature_error_k = iterative_rtol(1.0e-10) * 350.0
+    flux_error = 2.0 * temperature_error_k / 0.5e-3
     np.testing.assert_allclose(
-        solution.heat_flux_w_per_m2[..., :2], 0.0, atol=2.0 * temperature_error_k / 0.5e-3
+        solution.heat_flux_w_per_m2[..., 2], -50.0 / 2.0e-3, rtol=0, atol=flux_error
     )
+    np.testing.assert_allclose(solution.heat_flux_w_per_m2[..., :2], 0.0, atol=flux_error)
     # The two fixed faces exchange equal and opposite heat.
     assert solution.fixed_temperature_heat_w == pytest.approx(0.0, abs=1.0e-9)
     assert solution.heat_balance_error_w == pytest.approx(0.0, abs=1.0e-9)

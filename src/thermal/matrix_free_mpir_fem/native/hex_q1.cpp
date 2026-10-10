@@ -36,6 +36,9 @@
 #endif
 #include <xmmintrin.h>
 
+#include "pcbcore/fem/thermal_hex.hpp"
+#include "pcbcore/lane_sum.hpp"
+
 namespace py = pybind11;
 
 // Registered as electrical._pcbcore.thermal_hex; built on its own as _thermal_native
@@ -244,6 +247,43 @@ template <typename T>
     return op;
 }
 
+// The same operator over the non-owning arrays of the C++ interface.
+template <typename T>
+[[nodiscard]] HexOperatorT<T> operator_from(const pcbcore::fem::thermal_hex::OperatorView<T>& v, const int threads) {
+    if (v.slabs < 1 || v.rows < 1 || v.cols < 1) {
+        throw std::invalid_argument("element grid must be positive");
+    }
+    if (v.coef == nullptr || v.unit == nullptr || v.robin == nullptr || v.free_nodes == nullptr ||
+        v.free_mask == nullptr) {
+        throw std::invalid_argument("operator arrays are missing");
+    }
+    HexOperatorT<T> op;
+    op.coef = v.coef;
+    op.unit = v.unit;
+    op.robin = v.robin;
+    op.free_nodes = v.free_nodes;
+    op.free_mask = v.free_mask;
+    op.slabs = v.slabs;
+    op.rows = v.rows;
+    op.cols = v.cols;
+    op.threads = (threads < 1) ? 1 : threads;
+    return op;
+}
+
+template <typename T>
+[[nodiscard]] pcbcore::fem::thermal_hex::OperatorView<T> view_of(const HexOperatorT<T>& op) {
+    pcbcore::fem::thermal_hex::OperatorView<T> v;
+    v.coef = op.coef;
+    v.unit = op.unit;
+    v.robin = op.robin;
+    v.free_nodes = op.free_nodes;
+    v.free_mask = op.free_mask;
+    v.slabs = op.slabs;
+    v.rows = op.rows;
+    v.cols = op.cols;
+    return v;
+}
+
 struct alignas(64) Partial final {
     double a{0.0};
     double pad[7]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
@@ -325,10 +365,11 @@ void pcg_hex_q1_core(
     std::vector<float> z(static_cast<size_t>(n), 0.0f);
     std::vector<float> p(static_cast<size_t>(n), 0.0f);
     std::vector<float> q(static_cast<size_t>(n), 0.0f);
-    std::vector<double> coarse_part(static_cast<size_t>(team) * static_cast<size_t>(two_level ? ncoarse : 0), 0.0);
     std::vector<float> coarse_r(static_cast<size_t>(two_level ? ncoarse : 0), 0.0f);
     std::vector<float> coarse_z(static_cast<size_t>(two_level ? ncoarse : 0), 0.0f);
-    std::vector<Partial> partials(3U * static_cast<size_t>(team));
+    // One partial per slot and node line, summed in line order: the inner
+    // products do not depend on the team size or on where the vectors sit.
+    std::vector<double> line_partials(3U * static_cast<size_t>(lines), 0.0);
 
 #pragma omp parallel num_threads(team) if (team > 1)
     {
@@ -345,23 +386,19 @@ void pcg_hex_q1_core(
         HexOperator::thread_lines(lines, lb, le);
         const py::ssize_t lo = static_cast<py::ssize_t>(lb) * static_cast<py::ssize_t>(nc);
         const py::ssize_t len = static_cast<py::ssize_t>(le - lb) * static_cast<py::ssize_t>(nc);
-        auto slot = [&](const int s) noexcept -> double& {
-            return partials[static_cast<size_t>(s) * static_cast<size_t>(nt) + static_cast<size_t>(tid)].a;
+        auto store = [&](const int s, const float* const a, const float* const b) noexcept {
+            for (int line = lb; line < le; ++line) {
+                const float* const al = a + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
+                const float* const bl = b + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
+                line_partials[static_cast<size_t>(s) * static_cast<size_t>(lines) + static_cast<size_t>(line)] =
+                    pcbcore::lane_sum(nc, [al, bl](const std::ptrdiff_t i) {
+                        return static_cast<double>(al[i]) * static_cast<double>(bl[i]);
+                    });
+            }
         };
         auto reduce = [&](const int s) noexcept -> double {
-            double acc{0.0};
-            for (int t = 0; t < nt; ++t) {
-                acc += partials[static_cast<size_t>(s) * static_cast<size_t>(nt) + static_cast<size_t>(t)].a;
-            }
-            return acc;
-        };
-        auto local_dot = [&](const float* const a, const float* const b) noexcept -> double {
-            double acc{0.0};
-#pragma omp simd reduction(+ : acc)
-            for (py::ssize_t i = lo; i < lo + len; ++i) {
-                acc += static_cast<double>(a[i]) * static_cast<double>(b[i]);
-            }
-            return acc;
+            const double* const part = line_partials.data() + static_cast<size_t>(s) * static_cast<size_t>(lines);
+            return pcbcore::ordered_sum(lines, [part](const std::ptrdiff_t line) { return part[line]; });
         };
         auto precondition = [&]() noexcept {
             Eigen::Map<Eigen::VectorXf>(z.data() + lo, len) =
@@ -371,36 +408,30 @@ void pcg_hex_q1_core(
             if (!two_level) {
                 return;
             }
-            double* const part = coarse_part.data() + static_cast<size_t>(tid) * static_cast<size_t>(ncoarse);
-            std::fill(part, part + ncoarse, 0.0);
-            for (int line = lb; line < le; ++line) {
-                const int zz = line / nr;
-                const int yy = line - (zz * nr);
-                const py::ssize_t cbase = (static_cast<py::ssize_t>(zz) * static_cast<py::ssize_t>(coarse_rows) + static_cast<py::ssize_t>(yy / block)) * static_cast<py::ssize_t>(coarse_cols);
-                const float* const rl = r.data() + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
-                const float* const ml = op.free_mask + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
-                for (int xi = 0; xi < nc; ++xi) {
-                    part[cbase + static_cast<py::ssize_t>(xi / block)] += static_cast<double>(rl[xi] * ml[xi]);
-                }
-            }
-#pragma omp barrier
+            // Restriction patch by patch: each coarse value is one thread's sum
+            // over its patch in node order, whichever thread owns it.
             const py::ssize_t cb = (ncoarse * static_cast<py::ssize_t>(tid)) / static_cast<py::ssize_t>(nt);
             const py::ssize_t ce = (ncoarse * static_cast<py::ssize_t>(tid + 1)) / static_cast<py::ssize_t>(nt);
+            const py::ssize_t per_layer = static_cast<py::ssize_t>(coarse_rows) * static_cast<py::ssize_t>(coarse_cols);
             for (py::ssize_t i = cb; i < ce; ++i) {
+                const int zz = static_cast<int>(i / per_layer);
+                const int yc = static_cast<int>((i - static_cast<py::ssize_t>(zz) * per_layer) / coarse_cols);
+                const int xc = static_cast<int>(i - static_cast<py::ssize_t>(zz) * per_layer - static_cast<py::ssize_t>(yc) * coarse_cols);
                 double acc{0.0};
-                for (int t = 0; t < nt; ++t) {
-                    acc += coarse_part[static_cast<size_t>(t) * static_cast<size_t>(ncoarse) + static_cast<size_t>(i)];
+                for (int yy = yc * block; yy < std::min(nr, (yc + 1) * block); ++yy) {
+                    const py::ssize_t row = (static_cast<py::ssize_t>(zz) * nr + yy) * static_cast<py::ssize_t>(nc);
+                    for (int xi = xc * block; xi < std::min(nc, (xc + 1) * block); ++xi) {
+                        acc += static_cast<double>(r[static_cast<size_t>(row + xi)] * op.free_mask[row + xi]);
+                    }
                 }
-                coarse_r[i] = static_cast<float>(acc);
+                coarse_r[static_cast<size_t>(i)] = static_cast<float>(acc);
             }
 #pragma omp barrier
-            // Eigen GEMV acceleration for dense coarse-space solve:
-            // coarse_z[cb..ce) = cinv[cb..ce, :] * coarse_r[:]
-            if (ce > cb) {
-                const auto cinv_block = Eigen::Map<const Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
-                    cinv + cb * ncoarse, ce - cb, ncoarse);
-                const auto cr_vec = Eigen::Map<const Eigen::VectorXf>(coarse_r.data(), ncoarse);
-                Eigen::Map<Eigen::VectorXf>(coarse_z.data() + cb, ce - cb) = cinv_block * cr_vec;
+            for (py::ssize_t i = cb; i < ce; ++i) {
+                const float* const ci = cinv + i * ncoarse;
+                coarse_z[static_cast<size_t>(i)] = static_cast<float>(pcbcore::lane_sum(ncoarse, [ci, &coarse_r](const std::ptrdiff_t j) {
+                    return static_cast<double>(ci[j]) * static_cast<double>(coarse_r[static_cast<size_t>(j)]);
+                }));
             }
 #pragma omp barrier
             for (int line = lb; line < le; ++line) {
@@ -424,7 +455,7 @@ void pcg_hex_q1_core(
             xsol[i] = 0.0f;
             r[i] = rhs[i];
         }
-        slot(0) = local_dot(rhs.data(), rhs.data());
+        store(0, rhs.data(), rhs.data());
 #pragma omp barrier
         const double rhs_norm = std::sqrt(reduce(0));
         if (rhs_norm == 0.0) {
@@ -432,13 +463,13 @@ void pcg_hex_q1_core(
         } else {
             precondition();
             Eigen::Map<Eigen::VectorXf>(p.data() + lo, len) = Eigen::Map<const Eigen::VectorXf>(z.data() + lo, len);
-            slot(2) = local_dot(r.data(), z.data());
+            store(2, r.data(), z.data());
 #pragma omp barrier
             double rz = reduce(2);
             while (iterations < max_inner_iterations) {
                 op.apply_lines(p.data(), q.data(), lb, le);
                 ++applied;
-                slot(1) = local_dot(p.data(), q.data());
+                store(1, p.data(), q.data());
 #pragma omp barrier
                 const double curvature = reduce(1);
                 if (!std::isfinite(curvature) || curvature <= 0.0) {
@@ -449,7 +480,7 @@ void pcg_hex_q1_core(
                 Eigen::Map<Eigen::VectorXf>(xsol + lo, len) += alpha * Eigen::Map<const Eigen::VectorXf>(p.data() + lo, len);
                 Eigen::Map<Eigen::VectorXf>(r.data() + lo, len) -= alpha * Eigen::Map<const Eigen::VectorXf>(q.data() + lo, len);
 
-                slot(0) = local_dot(r.data(), r.data());
+                store(0, r.data(), r.data());
 #pragma omp barrier
                 rel = std::sqrt(reduce(0)) / rhs_norm;
                 ++iterations;
@@ -457,7 +488,7 @@ void pcg_hex_q1_core(
                     break;
                 }
                 precondition();
-                slot(2) = local_dot(r.data(), z.data());
+                store(2, r.data(), z.data());
 #pragma omp barrier
                 const double next_rz = reduce(2);
                 if (!std::isfinite(next_rz) || rz == 0.0) {
@@ -545,14 +576,143 @@ py::tuple pcg_hex_q1(ArrF64 rhs_high, ArrF32 diagonal, ArrF32 coef, ArrF32 unit,
     return py::make_tuple(correction_out, total_iterations, relative_residual, applications);
 }
 
-// Full C++ Two-Level Coarse Matrix Assembly & Inversion for Thermal Hexahedral Operator.
+// The two-level coarse matrix Z^T A Z and its inverse; the work is
+// pcbcore::fem::thermal_hex::assemble_coarse.
 py::tuple assemble_coarse_hex(
     ArrF64 coef, ArrF64 unit, ArrF64 robin, ArrU8 free_nodes, ArrF64 free_mask,
     int slabs, int rows, int cols, int block, int threads) {
 
     const HexOperatorHigh op = make_operator_t<double>(
         coef, unit, robin, free_nodes, free_mask, slabs, rows, cols, threads);
+    if (block < 1) {
+        throw std::invalid_argument("block must be positive");
+    }
+    pcbcore::fem::CoarseSpace coarse;
+    {
+        py::gil_scoped_release release;
+        coarse = pcbcore::fem::thermal_hex::assemble_coarse(view_of(op), block, op.threads);
+    }
+    ArrF64 matrix_out(static_cast<py::ssize_t>(coarse.matrix.size()));
+    std::copy(coarse.matrix.begin(), coarse.matrix.end(), matrix_out.mutable_data());
+    ArrF64 out(static_cast<py::ssize_t>(coarse.inverse.size()));
+    std::copy(coarse.inverse.begin(), coarse.inverse.end(), out.mutable_data());
+    return py::make_tuple(matrix_out, out);
+}
 
+// The end-to-end MPIR solve of pcbcore::fem::thermal_hex::solve_mpir, behind
+// array checks.
+py::tuple solve_mpir_thermal_hex(
+    ArrF64 rhs_high, ArrF64 initial_guess, ArrF32 diagonal,
+    ArrF32 coef_f32, ArrF32 unit_f32, ArrF32 robin_f32, ArrU8 free_nodes, ArrF32 free_mask_f32,
+    ArrF64 coef_f64, ArrF64 unit_f64, ArrF64 robin_f64, ArrF64 free_mask_f64,
+    int slabs, int rows, int cols, int block, ArrF32 coarse_inverse,
+    double relative_tolerance, double absolute_tolerance,
+    double inner_relative_tolerance, int max_outer_iterations,
+    int max_inner_iterations, int threads) {
+
+    const HexOperator op_low = make_operator_t<float>(
+        coef_f32, unit_f32, robin_f32, free_nodes, free_mask_f32, slabs, rows, cols, threads);
+    const HexOperatorHigh op_high = make_operator_t<double>(
+        coef_f64, unit_f64, robin_f64, free_nodes, free_mask_f64, slabs, rows, cols, threads);
+
+    const py::ssize_t n = op_low.node_count();
+    const double* const rhs_in = data_of(rhs_high, n, "rhs_high");
+    const float* const diag = data_of(diagonal, n, "diagonal");
+    if (block < 1) {
+        throw std::invalid_argument("block must be positive");
+    }
+    const int coarse_rows = (op_low.node_rows() + block - 1) / block;
+    const int coarse_cols = (op_low.node_cols() + block - 1) / block;
+    const py::ssize_t ncoarse = static_cast<py::ssize_t>(op_low.node_layers()) * static_cast<py::ssize_t>(coarse_rows) * static_cast<py::ssize_t>(coarse_cols);
+    const float* cinv{nullptr};
+    if (coarse_inverse.size() > 0) {
+        cinv = data_of(coarse_inverse, ncoarse * ncoarse, "coarse_inverse");
+    }
+
+    ArrF64 solution_out(n);
+    double* const sol = solution_out.mutable_data();
+    if (initial_guess.size() == n) {
+        const double* const init_ptr = initial_guess.data();
+        std::copy(init_ptr, init_ptr + n, sol);
+    } else {
+        std::fill(sol, sol + n, 0.0);
+    }
+    pcbcore::fem::MpirConfig config;
+    config.relative_tolerance = relative_tolerance;
+    config.absolute_tolerance = absolute_tolerance;
+    config.inner_relative_tolerance = inner_relative_tolerance;
+    config.max_outer_iterations = max_outer_iterations;
+    config.max_inner_iterations = max_inner_iterations;
+    pcbcore::fem::MpirResult result;
+    {
+        py::gil_scoped_release release;
+        result = pcbcore::fem::thermal_hex::solve_mpir(view_of(op_low), view_of(op_high), rhs_in, sol, diag, block,
+                                                       cinv, config, op_low.threads);
+    }
+    std::vector<std::tuple<int, double, int, double>> history;
+    for (const auto& step : result.history) {
+        history.emplace_back(step.outer_iteration, step.high_relative_residual, step.inner_iterations,
+                             step.inner_relative_residual);
+    }
+    return py::make_tuple(
+        solution_out, result.converged, result.outer_iterations, result.inner_iterations,
+        result.relative_residual, result.high_operator_applications, result.low_operator_applications,
+        py::cast(history));
+}
+
+void register_module(py::module_& m) {
+    m.doc() = "Fused C++ hexahedral Q1 conduction operator (float32 and float64), coarse assembly and full MPIR solver";
+    m.def("apply_hex_q1", &apply_hex_q1, py::arg("vector"), py::arg("coefficients"), py::arg("unit"),
+          py::arg("robin"), py::arg("free_nodes"),
+          py::arg("free_mask"), py::arg("slabs"), py::arg("rows"), py::arg("cols"),
+          py::arg("threads") = 1);
+    m.def("apply_hex_q1_f64", &apply_hex_q1_f64, py::arg("vector"), py::arg("coefficients"),
+          py::arg("unit"), py::arg("robin"), py::arg("free_nodes"), py::arg("free_mask"),
+          py::arg("slabs"), py::arg("rows"), py::arg("cols"), py::arg("threads") = 1);
+    m.def("pcg_hex_q1", &pcg_hex_q1, py::arg("rhs_high"), py::arg("diagonal"), py::arg("coefficients"),
+          py::arg("unit"), py::arg("robin"),
+          py::arg("free_nodes"), py::arg("free_mask"), py::arg("slabs"), py::arg("rows"),
+          py::arg("cols"), py::arg("block"), py::arg("coarse_inverse"),
+          py::arg("inner_relative_tolerance"), py::arg("max_inner_iterations"),
+          py::arg("threads") = 1);
+    m.def("assemble_coarse_hex", &assemble_coarse_hex,
+          py::arg("coefficients"), py::arg("unit"), py::arg("robin"),
+          py::arg("free_nodes"), py::arg("free_mask"),
+          py::arg("slabs"), py::arg("rows"), py::arg("cols"), py::arg("block"), py::arg("threads") = 1);
+    m.def("solve_mpir_thermal_hex", &solve_mpir_thermal_hex,
+          py::arg("rhs_high"), py::arg("initial_guess"), py::arg("diagonal"),
+          py::arg("coefficients_f32"), py::arg("unit_f32"), py::arg("robin_f32"),
+          py::arg("free_nodes"), py::arg("free_mask_f32"),
+          py::arg("coefficients_f64"), py::arg("unit_f64"), py::arg("robin_f64"),
+          py::arg("free_mask_f64"),
+          py::arg("slabs"), py::arg("rows"), py::arg("cols"), py::arg("block"), py::arg("coarse_inverse"),
+          py::arg("relative_tolerance"), py::arg("absolute_tolerance"),
+          py::arg("inner_relative_tolerance"), py::arg("max_outer_iterations"),
+          py::arg("max_inner_iterations"), py::arg("threads") = 1);
+    m.attr("openmp") =
+#ifdef _OPENMP
+        true;
+#else
+        false;
+#endif
+}
+
+}  // namespace pcb_thermal_hex
+
+namespace pcbcore::fem::thermal_hex {
+
+using pcb_thermal_hex::HexOperatorT;
+
+void apply_high(const OperatorView<double>& view, const double* const x, double* const y, const int threads) {
+    const HexOperatorT<double> op = pcb_thermal_hex::operator_from(view, threads);
+    pcb_thermal_hex::apply_parallel(op, x, y);
+}
+
+CoarseSpace assemble_coarse(const OperatorView<double>& view, const int block, const int threads) {
+    if (block < 1) {
+        throw std::invalid_argument("block must be positive");
+    }
+    const HexOperatorT<double> op = pcb_thermal_hex::operator_from(view, threads);
     const int nl = op.node_layers();
     const int nr = op.node_rows();
     const int nc = op.node_cols();
@@ -583,7 +743,6 @@ py::tuple assemble_coarse_hex(
     }
 
     {
-        py::gil_scoped_release release;
         for (int colour = 0; colour < 27; ++colour) {
             bool has_colour{false};
             std::fill(fine.begin(), fine.end(), 0.0);
@@ -672,55 +831,31 @@ py::tuple assemble_coarse_hex(
     Eigen::MatrixXd inv = llt.solve(Eigen::MatrixXd::Identity(ncoarse, ncoarse));
     inv = 0.5 * (inv + inv.transpose());
 
-    ArrF64 matrix_out(ncoarse * ncoarse);
+    CoarseSpace out;
+    out.size = static_cast<std::int64_t>(ncoarse);
+    out.matrix.resize(static_cast<std::size_t>(ncoarse * ncoarse));
+    out.inverse.resize(static_cast<std::size_t>(ncoarse * ncoarse));
     Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
-        matrix_out.mutable_data(), ncoarse, ncoarse) = matrix;
-    ArrF64 out(ncoarse * ncoarse);
+        out.matrix.data(), ncoarse, ncoarse) = matrix;
     Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
-        out.mutable_data(), ncoarse, ncoarse) = inv;
-    return py::make_tuple(matrix_out, out);
+        out.inverse.data(), ncoarse, ncoarse) = inv;
+    return out;
 }
 
-// Complete C++ End-to-End MPIR Solver for Thermal Hexahedral Q1 Conduction.
-py::tuple solve_mpir_thermal_hex(
-    ArrF64 rhs_high, ArrF64 initial_guess, ArrF32 diagonal,
-    ArrF32 coef_f32, ArrF32 unit_f32, ArrF32 robin_f32, ArrU8 free_nodes, ArrF32 free_mask_f32,
-    ArrF64 coef_f64, ArrF64 unit_f64, ArrF64 robin_f64, ArrF64 free_mask_f64,
-    int slabs, int rows, int cols, int block, ArrF32 coarse_inverse,
-    double relative_tolerance, double absolute_tolerance,
-    double inner_relative_tolerance, int max_outer_iterations,
-    int max_inner_iterations, int threads) {
-
-    const HexOperator op_low = make_operator_t<float>(
-        coef_f32, unit_f32, robin_f32, free_nodes, free_mask_f32, slabs, rows, cols, threads);
-    const HexOperatorHigh op_high = make_operator_t<double>(
-        coef_f64, unit_f64, robin_f64, free_nodes, free_mask_f64, slabs, rows, cols, threads);
-
+MpirResult solve_mpir(const OperatorView<float>& low_view, const OperatorView<double>& high_view,
+                      const double* const rhs_in, double* const sol, const float* const diag, const int block,
+                      const float* const cinv, const MpirConfig& config, const int threads) {
+    const HexOperatorT<float> op_low = pcb_thermal_hex::operator_from(low_view, threads);
+    const HexOperatorT<double> op_high = pcb_thermal_hex::operator_from(high_view, threads);
+    if (block < 1) {
+        throw std::invalid_argument("block must be positive");
+    }
     const py::ssize_t n = op_low.node_count();
-    const double* const rhs_in = data_of(rhs_high, n, "rhs_high");
-    const float* const diag = data_of(diagonal, n, "diagonal");
-
-    const int nl = op_low.node_layers();
-    const int nr = op_low.node_rows();
-    const int nc = op_low.node_cols();
-    const int coarse_rows = (nr + block - 1) / block;
-    const int coarse_cols = (nc + block - 1) / block;
-    const py::ssize_t ncoarse = static_cast<py::ssize_t>(nl) * static_cast<py::ssize_t>(coarse_rows) * static_cast<py::ssize_t>(coarse_cols);
-    const bool two_level = (coarse_inverse.size() > 0);
-    const float* cinv{nullptr};
-    if (two_level) {
-        cinv = data_of(coarse_inverse, ncoarse * ncoarse, "coarse_inverse");
-    }
-
-    ArrF64 solution_out(n);
-    double* const sol = solution_out.mutable_data();
-    if (initial_guess.size() == n) {
-        const double* const init_ptr = initial_guess.data();
-        std::copy(init_ptr, init_ptr + n, sol);
-    } else {
-        std::fill(sol, sol + n, 0.0);
-    }
-
+    const double relative_tolerance = config.relative_tolerance;
+    const double absolute_tolerance = config.absolute_tolerance;
+    const double inner_relative_tolerance = config.inner_relative_tolerance;
+    const int max_outer_iterations = config.max_outer_iterations;
+    const int max_inner_iterations = config.max_inner_iterations;
     int outer_iterations{0};
     int total_inner_iterations{0};
     // One (outer step, FP64 relative residual before it, inner iterations,
@@ -732,8 +867,7 @@ py::tuple solve_mpir_thermal_hex(
     bool converged{false};
 
     {
-        py::gil_scoped_release release;
-        const double rhs_norm = Eigen::Map<const Eigen::VectorXd>(rhs_in, n).norm();
+        const double rhs_norm = std::sqrt(pcbcore::lane_sum(n, [rhs_in](const std::ptrdiff_t i) { return rhs_in[i] * rhs_in[i]; }));
         const double scale = (rhs_norm > 0.0) ? rhs_norm : 1.0;
         const double target = absolute_tolerance + (relative_tolerance * scale);
 
@@ -749,7 +883,9 @@ py::tuple solve_mpir_thermal_hex(
             for (py::ssize_t i = 0; i < n; ++i) {
                 residual[static_cast<size_t>(i)] = rhs_in[i] - Ax[static_cast<size_t>(i)];
             }
-            const double res_norm = Eigen::Map<const Eigen::VectorXd>(residual.data(), n).norm();
+            const double res_norm = std::sqrt(pcbcore::lane_sum(n, [&residual](const std::ptrdiff_t i) {
+                return residual[static_cast<size_t>(i)] * residual[static_cast<size_t>(i)];
+            }));
             relative_residual = res_norm / scale;
 
             if (res_norm <= target) {
@@ -783,49 +919,20 @@ py::tuple solve_mpir_thermal_hex(
         }
     }
 
-    return py::make_tuple(
-        solution_out, converged, outer_iterations, total_inner_iterations,
-        relative_residual, total_high_apps, total_low_apps, py::cast(history));
+    MpirResult result;
+    result.converged = converged;
+    result.outer_iterations = outer_iterations;
+    result.inner_iterations = total_inner_iterations;
+    result.relative_residual = relative_residual;
+    result.high_operator_applications = total_high_apps;
+    result.low_operator_applications = total_low_apps;
+    for (const auto& [step, high, inner, inner_rel] : history) {
+        result.history.push_back(MpirStep{step, high, inner, inner_rel});
+    }
+    return result;
 }
 
-void register_module(py::module_& m) {
-    m.doc() = "Fused C++ hexahedral Q1 conduction operator (float32 and float64), coarse assembly and full MPIR solver";
-    m.def("apply_hex_q1", &apply_hex_q1, py::arg("vector"), py::arg("coefficients"), py::arg("unit"),
-          py::arg("robin"), py::arg("free_nodes"),
-          py::arg("free_mask"), py::arg("slabs"), py::arg("rows"), py::arg("cols"),
-          py::arg("threads") = 1);
-    m.def("apply_hex_q1_f64", &apply_hex_q1_f64, py::arg("vector"), py::arg("coefficients"),
-          py::arg("unit"), py::arg("robin"), py::arg("free_nodes"), py::arg("free_mask"),
-          py::arg("slabs"), py::arg("rows"), py::arg("cols"), py::arg("threads") = 1);
-    m.def("pcg_hex_q1", &pcg_hex_q1, py::arg("rhs_high"), py::arg("diagonal"), py::arg("coefficients"),
-          py::arg("unit"), py::arg("robin"),
-          py::arg("free_nodes"), py::arg("free_mask"), py::arg("slabs"), py::arg("rows"),
-          py::arg("cols"), py::arg("block"), py::arg("coarse_inverse"),
-          py::arg("inner_relative_tolerance"), py::arg("max_inner_iterations"),
-          py::arg("threads") = 1);
-    m.def("assemble_coarse_hex", &assemble_coarse_hex,
-          py::arg("coefficients"), py::arg("unit"), py::arg("robin"),
-          py::arg("free_nodes"), py::arg("free_mask"),
-          py::arg("slabs"), py::arg("rows"), py::arg("cols"), py::arg("block"), py::arg("threads") = 1);
-    m.def("solve_mpir_thermal_hex", &solve_mpir_thermal_hex,
-          py::arg("rhs_high"), py::arg("initial_guess"), py::arg("diagonal"),
-          py::arg("coefficients_f32"), py::arg("unit_f32"), py::arg("robin_f32"),
-          py::arg("free_nodes"), py::arg("free_mask_f32"),
-          py::arg("coefficients_f64"), py::arg("unit_f64"), py::arg("robin_f64"),
-          py::arg("free_mask_f64"),
-          py::arg("slabs"), py::arg("rows"), py::arg("cols"), py::arg("block"), py::arg("coarse_inverse"),
-          py::arg("relative_tolerance"), py::arg("absolute_tolerance"),
-          py::arg("inner_relative_tolerance"), py::arg("max_outer_iterations"),
-          py::arg("max_inner_iterations"), py::arg("threads") = 1);
-    m.attr("openmp") =
-#ifdef _OPENMP
-        true;
-#else
-        false;
-#endif
-}
-
-}  // namespace pcb_thermal_hex
+}  // namespace pcbcore::fem::thermal_hex
 
 #ifdef PCB_STANDALONE_MODULE
 PYBIND11_MODULE(_thermal_native, m) { pcb_thermal_hex::register_module(m); }
