@@ -24,6 +24,20 @@ namespace pcb_dipole {
 
 namespace {
 
+// sin and cos of one angle: glibc's and Apple's fused routines where they
+// exist (the same values as sin and cos, computed once), else the two calls.
+inline void sin_cos(const double angle, double* const sine, double* const cosine) noexcept {
+#if defined(__GLIBC__)
+    ::sincos(angle, sine, cosine);
+#elif defined(__APPLE__)
+    __sincos(angle, sine, cosine);
+#else
+    *sine = std::sin(angle);
+    *cosine = std::cos(angle);
+#endif
+}
+
+
 using c128 = std::complex<double>;
 
 using ArrF64 = py::array_t<double, py::array::c_style | py::array::forcecast>;
@@ -64,8 +78,8 @@ py::tuple evaluate_fields_impl(
     }
 
     const std::int64_t count = static_cast<std::int64_t>(points.shape(0));
-    ArrC128 magnetic({count, static_cast<py::ssize_t>(kDim3)});
-    ArrC128 electric_field({electric ? count : static_cast<std::int64_t>(0), static_cast<py::ssize_t>(kDim3)});
+    ArrC128 magnetic({static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(kDim3)});
+    ArrC128 electric_field({static_cast<py::ssize_t>(electric ? count : 0), static_cast<py::ssize_t>(kDim3)});
 
     const double* const pts = points.data();
     const double* const pos = source_position.data();
@@ -130,7 +144,7 @@ py::tuple evaluate_fields_impl(
                 } else {
                     double sn = 0.0;
                     double cs = 0.0;
-                    ::sincos(-k * r, &sn, &cs);
+                    sin_cos(-k * r, &sn, &cs);
                     phase = c128(cs, sn);
                     h_scale = h_front * (1.0 + 1.0 / (jk * r)) * phase * inv_r;
                 }
@@ -191,7 +205,7 @@ ArrC128 far_field_pattern_impl(
     }
 
     const std::int64_t count = static_cast<std::int64_t>(directions.shape(0));
-    ArrC128 pattern({count, static_cast<py::ssize_t>(kDim3)});
+    ArrC128 pattern({static_cast<py::ssize_t>(count), static_cast<py::ssize_t>(kDim3)});
 
     const double* const dir = directions.data();
     const double* const pos = source_position.data();
@@ -219,7 +233,7 @@ ArrC128 far_field_pattern_impl(
                 const double dot = nx * pos_s[0] + ny * pos_s[1] + nz * pos_s[2];
                 double sn = 0.0;
                 double cs = 0.0;
-                ::sincos(k * dot, &sn, &cs);
+                sin_cos(k * dot, &sn, &cs);
                 const c128 phase(cs, sn);
                 wx += phase * mom_s[0];
                 wy += phase * mom_s[1];
