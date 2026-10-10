@@ -84,8 +84,10 @@ jobs:
 
       - name: Compiler prerequisites (macOS)
         if: runner.os == 'macOS'
+        # pypeec depends on rasterio, which builds from source here and
+        # needs GDAL.
         run: |
-          brew install libomp
+          brew install libomp gdal
           echo "OpenMP_ROOT=$(brew --prefix libomp)" >> "$GITHUB_ENV"
 
       - name: Install the package and its test dependencies
@@ -115,8 +117,8 @@ jobs:
           import electrical._pcbcore as core
           print('openmp', core.layered_dc.openmp)
           assert core.layered_dc.openmp == ('${{ matrix.openmp }}' == 'ON')
-          from electrical import _backend
-          assert _backend.native_available()
+          from electrical import backend
+          assert backend.native_available()
           "
 
       - name: Test suite
