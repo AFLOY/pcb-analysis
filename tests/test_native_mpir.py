@@ -99,3 +99,61 @@ def test_the_native_solve_gives_the_same_bits_at_every_thread_budget(build) -> N
             system, rhs = build(True)
             solutions.append(solve_mpir(system, rhs, config=CONFIG).solution.tobytes())
     assert all(solution == solutions[0] for solution in solutions)
+
+
+def _scramble_the_heap() -> list:
+    # Allocations of odd sizes move where the next vectors land, and with them
+    # the alignment a vectorised reduction would split its terms by.
+    rng = np.random.default_rng()
+    return [np.empty(int(rng.integers(1, 5000))) for _ in range(7)]
+
+
+@pytest.mark.parametrize("build", SYSTEMS)
+@pytest.mark.parametrize("shape", [(7, 11), (19, 13)])
+def test_the_native_solve_does_not_depend_on_where_its_vectors_land(build, shape) -> None:
+    import tests.test_native_dc as dc_fixtures
+    import tests.test_native_thermal as thermal_fixtures
+
+    def solve(threads: int) -> bytes:
+        with thread_budget_scope(threads):
+            if build is _dc_operator:
+                problem = dc_fixtures._board(*shape, graded=True)
+                system = MatrixFreePCBOperator(
+                    problem.mesh, reference_node=problem.reference_node, vias=problem.vias, native=True
+                )
+                rhs = system.build_rhs(problem.terminals)
+            else:
+                system = MatrixFreeThermalOperator(thermal_fixtures._stack(*shape, fixed=True), native=True)
+                rhs = system.build_rhs()
+            heap = _scramble_the_heap()
+            solution = solve_mpir(system, rhs, config=CONFIG).solution.tobytes()
+            del heap
+            return solution
+
+    assert len({solve(threads) for threads in (1, 1, 1, 2, 3, 8, 8)}) == 1
+
+
+@pytest.mark.skipif(not dc_available(), reason="Maxwell native not built")
+@pytest.mark.parametrize("orthogonalization, dot_accumulation", [("mgs", "float64"), ("cgs2", "float64"), ("mgs", "float32")])
+def test_the_native_maxwell_solve_does_not_depend_on_the_team_or_the_heap(orthogonalization, dot_accumulation) -> None:
+    from electrical.matrix_free_mpir_fem.frequency_domain import MatrixFreeScalarMaxwellOperator
+    from electrical.matrix_free_mpir_fem.runtime import NumpyComplex64Runtime
+    from tests.test_native_q1 import _problem
+
+    config = MPIRConfig(
+        relative_tolerance=1e-10, inner_relative_tolerance=2e-3, max_outer_iterations=12,
+        max_inner_iterations=300, gmres_restart=32,
+    )
+
+    def solve(threads: int) -> bytes:
+        with thread_budget_scope(threads):
+            system = MatrixFreeScalarMaxwellOperator(
+                _problem(12, 48, conductive=True), runtime=NumpyComplex64Runtime(), native=True,
+                native_orthogonalization=orthogonalization, native_dot_accumulation=dot_accumulation,
+            )
+            heap = _scramble_the_heap()
+            solution = solve_mpir(system, system.build_rhs(), config=config).solution.tobytes()
+            del heap
+            return solution
+
+    assert len({solve(threads) for threads in (1, 1, 2, 3, 8, 8)}) == 1
