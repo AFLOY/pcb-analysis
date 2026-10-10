@@ -68,5 +68,4 @@ def test_no_reduction_is_left_to_the_vectoriser() -> None:
 
 def test_eigen_is_built_without_its_own_parallelism() -> None:
     cmake = (ROOT / "CMakeLists.txt").read_text()
-    script = (ROOT / "src/electrical/matrix_free_mpir_fem/native/build.py").read_text()
-    assert "EIGEN_DONT_PARALLELIZE" in cmake and "EIGEN_DONT_PARALLELIZE" in script
+    assert "EIGEN_DONT_PARALLELIZE" in cmake

@@ -23,7 +23,7 @@ from electrical.matrix_free_mpir_fem.native_dc import native_available
 
 pytestmark = pytest.mark.skipif(
     not native_available(),
-    reason="layered DC native extension not built; run python -m electrical.matrix_free_mpir_fem.native.build",
+    reason="layered DC native extension not built; run cmake -S . -B build/native && cmake --build build/native",
 )
 
 

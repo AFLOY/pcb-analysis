@@ -32,15 +32,14 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
-#include <xmmintrin.h>
+#include "pcbcore/flush_subnormals.hpp"
 
 #include "pcbcore/fem/scalar_maxwell.hpp"
 #include "pcbcore/lane_sum.hpp"
 
 namespace py = pybind11;
 
-// Registered as electrical._pcbcore.scalar_maxwell; built on its own as _scalar_maxwell_native
-// when PCB_STANDALONE_MODULE is defined (native/build.py).
+// Registered as electrical._pcbcore.scalar_maxwell.
 namespace pcb_scalar_maxwell {
 
 using c64 = std::complex<float>;
@@ -191,22 +190,7 @@ struct Q1OperatorT final {
 using Q1Operator = Q1OperatorT<float>;
 using Q1OperatorHigh = Q1OperatorT<double>;
 
-class FlushSubnormals final {
-   public:
-    explicit FlushSubnormals() noexcept : saved_(_mm_getcsr()) {
-        _mm_setcsr(saved_ | 0x8040u);
-    }
-    ~FlushSubnormals() noexcept {
-        _mm_setcsr(saved_);
-    }
-    FlushSubnormals(const FlushSubnormals&) = delete;
-    FlushSubnormals& operator=(const FlushSubnormals&) = delete;
-    FlushSubnormals(FlushSubnormals&&) = delete;
-    FlushSubnormals& operator=(FlushSubnormals&&) = delete;
-
-   private:
-    unsigned int saved_{0U};
-};
+using pcbcore::FlushSubnormals;
 
 template <typename T>
 [[nodiscard]] const T* data_of(const py::array_t<T, py::array::c_style | py::array::forcecast>& a,
@@ -922,6 +906,3 @@ MpirResult solve_mpir(const OperatorView<float>& low_view, const OperatorView<do
 
 }  // namespace pcbcore::fem::scalar_maxwell
 
-#ifdef PCB_STANDALONE_MODULE
-PYBIND11_MODULE(_scalar_maxwell_native, m) { pcb_scalar_maxwell::register_module(m); }
-#endif

@@ -17,7 +17,7 @@ from electrical.threads import thread_budget_scope
 
 pytestmark = pytest.mark.skipif(
     not native_available(),
-    reason="emc native extension not built; run python -m emc.tiled_dipole_superposition.native.build",
+    reason="emc native extension not built; run cmake -S . -B build/native && cmake --build build/native",
 )
 
 

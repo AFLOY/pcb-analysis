@@ -28,8 +28,7 @@
 
 namespace py = pybind11;
 
-// Registered as electrical._pcbcore.sheet_pfft_near; built on its own as _sheet_pfft_native
-// when PCB_STANDALONE_MODULE is defined (native/build.py).
+// Registered as electrical._pcbcore.sheet_pfft_near.
 namespace pcb_sheet_pfft_near {
 
 namespace {
@@ -123,6 +122,3 @@ void register_module(py::module_& m) {
 
 }  // namespace pcb_sheet_pfft_near
 
-#ifdef PCB_STANDALONE_MODULE
-PYBIND11_MODULE(_sheet_pfft_native, m) { pcb_sheet_pfft_near::register_module(m); }
-#endif

@@ -405,7 +405,7 @@ NumPy vector calls, the patch restriction and a `(n_c × n_c)` matmul.  The
 opt-in native path (`MatrixFreeThermalOperator(native=True)` or
 `solve_thermal_conduction(native=True)`,
 `PCB_NATIVE_THERMAL=1` for the process, after
-`python -m thermal.matrix_free_mpir_fem.native.build`) moves the float32 inner
+`cmake -S . -B build/native && cmake --build build/native`) moves the float32 inner
 work into one pybind11 extension, run by an OpenMP team of the process-wide
 thread budget (`electrical.set_thread_budget`; until 0.9.3 `native_threads=`
 or `PCB_NATIVE_THREADS`, default one thread, whose swept counts below are

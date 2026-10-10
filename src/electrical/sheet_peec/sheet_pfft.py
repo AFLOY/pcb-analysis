@@ -46,14 +46,11 @@ from .sheet_peec import SheetMesh
 try:  # pragma: no cover - depends on the local build
     from electrical._pcbcore import sheet_pfft_near as _native
 except ImportError:  # pragma: no cover
-    try:  # a module built on its own by native/build.py
-        from . import _sheet_pfft_native as _native
-    except ImportError:
-        _native = None
+    _native = None
 
 
 def native_available() -> bool:
-    """True when the C++ near-field kernel is built (``python -m electrical.sheet_peec.native.build``)."""
+    """True when the C++ near-field kernel is built (``cmake -S . -B build/native && cmake --build build/native``)."""
 
     return _native is not None
 
@@ -191,7 +188,7 @@ class PfftSheetInductanceOperator:
         self._near_exact_z: sp.csr_matrix | None = None
         # The C++ near-field kernel when built, unless native=False; native=True demands it.
         if native and _native is None:
-            raise ImportError("the sheet pFFT native extension is not built; run python -m electrical.sheet_peec.native.build")
+            raise ImportError("the sheet pFFT native extension is not built; run cmake -S . -B build/native && cmake --build build/native")
         self.use_native = bool(_native is not None and native is not False)
         # The projection grid defaults to twice the finest cell: fine enough that
         # a bar's Gauss samples resolve its extent, coarse enough that the FFT

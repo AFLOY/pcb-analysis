@@ -109,7 +109,7 @@ def _case(sources: int, points_side: int, repeats: int, threads: list[int]) -> d
 
 def run(shapes: list[tuple[int, int]], repeats: int, threads: list[int]) -> dict[str, Any]:
     if not native_available():
-        raise SystemExit("emc native extension not built; run python -m emc.tiled_dipole_superposition.native.build")
+        raise SystemExit("emc native extension not built; run cmake -S . -B build/native && cmake --build build/native")
     cases = [_case(s, p, repeats, threads) for s, p in shapes]
     first = str(threads[0])
     near = [c["native_by_threads"][first]["near_speedup_vs_array"] for c in cases]

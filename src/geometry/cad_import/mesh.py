@@ -22,10 +22,7 @@ from electrical.threads import thread_budget
 try:  # pragma: no cover - depends on the local build
     from electrical._pcbcore import voxelize as _native
 except ImportError:  # pragma: no cover
-    try:  # a module built on its own by native/build.py
-        from . import _voxelize_native as _native
-    except ImportError:
-        _native = None
+    _native = None
 
 
 ClassifyMethod = Literal["auto", "occ", "numpy", "native", "section"]
@@ -98,7 +95,7 @@ class TriangleMesh:
             if _native is None:
                 raise ImportError(
                     "the geometry native extension is not built; run cmake or "
-                    "python -m geometry.cad_import.native.build"
+                    "cmake -S . -B build/native && cmake --build build/native"
                 )
             return np.asarray(_native.winding_numbers(points, self.triangles_m, thread_budget()))
         if chosen == "numpy":
@@ -114,7 +111,7 @@ class TriangleMesh:
             if _native is None:
                 raise ImportError(
                     "the geometry native extension is not built; run cmake or "
-                    "python -m geometry.cad_import.native.build"
+                    "cmake -S . -B build/native && cmake --build build/native"
                 )
             return np.asarray(_native.contains(points, self.triangles_m, threshold, thread_budget()), dtype=bool)
         lo, hi = self.bounds_m
@@ -157,7 +154,7 @@ def plane_section_coverage(
     if _native is None:
         raise ImportError(
             "the section rasteriser needs the geometry native extension; run cmake or "
-            "python -m geometry.cad_import.native.build"
+            "cmake -S . -B build/native && cmake --build build/native"
         )
     graded = x_edges_m is not None or y_edges_m is not None
     if graded:

@@ -176,7 +176,7 @@ def _case(elements: int, repeats: int, threads: list[int]) -> dict[str, Any]:
 
 def run(sizes: list[int], repeats: int, threads: list[int]) -> dict[str, Any]:
     if not native_available():
-        raise SystemExit("layered DC native extension not built; run python -m electrical.matrix_free_mpir_fem.native.build")
+        raise SystemExit("layered DC native extension not built; run cmake -S . -B build/native && cmake --build build/native")
     cases = [_case(size, repeats, threads) for size in sizes]
     first = str(threads[0])
     speedups = [case["native_by_threads"][first]["speedup_vs_portable"] for case in cases]
