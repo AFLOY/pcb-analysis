@@ -6,14 +6,18 @@
 // package's dataclasses.
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "pcbcore/errors.hpp"
 #include "pcbcore/network/dc_network.hpp"
+#include "pcbcore/sheet/convolution_operator.hpp"
 
 namespace py = pybind11;
 
@@ -95,6 +99,63 @@ py::tuple split_branch_sensitivity(const std::int64_t node_count, const Input<st
                           to_array(std::move(result.branch_sensitivity)), result.vertical_total);
 }
 
+// Kernel tables stacked as (pairs, padded_rows, padded_cols).
+const double* stacked_tables(const Input<double>& tables, const std::int64_t pairs, const std::int64_t rows,
+                             const std::int64_t cols, const char* name) {
+    if (pairs == 0) {
+        return nullptr;
+    }
+    if (tables.ndim() != 3 || tables.shape(0) != pairs || tables.shape(1) != 2 * rows || tables.shape(2) != 2 * cols) {
+        throw pcbcore::InvalidInput(std::string(name) + " must be (pairs, 2 rows, 2 cols)");
+    }
+    return tables.data();
+}
+
+std::unique_ptr<pcbcore::sheet::ConvolutionOperator> make_convolution_operator(
+    const std::int64_t layers, const std::int64_t rows, const std::int64_t cols, const std::int64_t levels,
+    const Input<double>& tables_x, const Input<double>& tables_y, const Input<double>& tables_z, const int threads) {
+    const std::int64_t pairs = layers * (layers + 1) / 2;
+    const std::int64_t vertical = levels * (levels + 1) / 2;
+    const double* x = stacked_tables(tables_x, pairs, rows, cols, "tables_x");
+    const double* y = stacked_tables(tables_y, pairs, rows, cols, "tables_y");
+    const double* z = stacked_tables(tables_z, vertical, rows, cols, "tables_z");
+    py::gil_scoped_release release;
+    return std::make_unique<pcbcore::sheet::ConvolutionOperator>(layers, rows, cols, levels, x, y, z, threads);
+}
+
+py::tuple apply_convolution(const pcbcore::sheet::ConvolutionOperator& op, const Input<double>& currents_x,
+                            const Input<double>& currents_y, const std::optional<Input<double>>& currents_z,
+                            const int threads) {
+    const std::int64_t layers = op.layers();
+    if (currents_x.ndim() != 3 || currents_y.ndim() != 3 || currents_x.shape(0) != layers ||
+        currents_y.shape(0) != layers || currents_x.size() != currents_y.size()) {
+        throw pcbcore::InvalidInput("currents_x and currents_y must be (layers, rows, cols)");
+    }
+    std::vector<py::ssize_t> shape{currents_x.shape(0), currents_x.shape(1), currents_x.shape(2)};
+    std::vector<double> flux_x(static_cast<std::size_t>(currents_x.size()));
+    std::vector<double> flux_y(static_cast<std::size_t>(currents_y.size()));
+    std::vector<double> flux_z;
+    const double* z = nullptr;
+    if (currents_z.has_value() && op.levels() > 0) {
+        if (currents_z->ndim() != 3 || currents_z->shape(0) != op.levels() || currents_z->shape(1) != shape[1] ||
+            currents_z->shape(2) != shape[2]) {
+            throw pcbcore::InvalidInput("currents_z must be (levels, rows, cols)");
+        }
+        flux_z.assign(static_cast<std::size_t>(currents_z->size()), 0.0);
+        z = currents_z->data();
+    }
+    {
+        py::gil_scoped_release release;
+        op.apply(currents_x.data(), currents_y.data(), z, flux_x.data(), flux_y.data(),
+                 z != nullptr ? flux_z.data() : nullptr, threads);
+    }
+    py::object out_z = py::none();
+    if (z != nullptr) {
+        out_z = to_array(std::move(flux_z), {op.levels(), shape[1], shape[2]});
+    }
+    return py::make_tuple(to_array(std::move(flux_x), shape), to_array(std::move(flux_y), shape), out_z);
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_pcbcore, m) {
@@ -119,4 +180,12 @@ PYBIND11_MODULE(_pcbcore, m) {
                 py::arg("weights"));
     network.def("split_branch_sensitivity", &split_branch_sensitivity, py::arg("node_count"), py::arg("left"),
                 py::arg("right"), py::arg("conductance"), py::arg("branch_product"), py::arg("in_plane"));
+
+    py::module_ sheet = m.def_submodule("sheet", "Sheet PEEC: operators, preconditioners and solves");
+    py::class_<pcbcore::sheet::ConvolutionOperator>(sheet, "ConvolutionOperator")
+        .def(py::init(&make_convolution_operator), py::arg("layers"), py::arg("rows"), py::arg("cols"),
+             py::arg("levels"), py::arg("tables_x"), py::arg("tables_y"), py::arg("tables_z"), py::arg("threads"))
+        .def("apply", &apply_convolution, py::arg("currents_x"), py::arg("currents_y"),
+             py::arg("currents_z") = py::none(), py::arg("threads"))
+        .def_property_readonly("spectrum_bytes", &pcbcore::sheet::ConvolutionOperator::spectrum_bytes);
 }

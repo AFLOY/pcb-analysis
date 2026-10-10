@@ -108,11 +108,22 @@ FetchContent_Declare(superlu
 FetchContent_MakeAvailable(superlu)
 set(BUILD_SHARED_LIBS ${_pcb_shared_libs})
 
+# pocketfft (BSD), header only: the FFT NumPy and SciPy use.  Compiled without
+# its own threads; the operators run independent transforms on OpenMP teams.
+FetchContent_Declare(pocketfft
+  URL https://github.com/mreineck/pocketfft/archive/c90e55b3d529f8efa40ed01a20de22405f45fc65.tar.gz
+  URL_HASH SHA256=2d90016da31a8cc1dd0ac0c89c1f2fb55df8f4ccc3f0386dcfbad09ac6d1c3ba)
+FetchContent_MakeAvailable(pocketfft)
+
 add_library(pcbcore STATIC
+  cpp/src/fft.cpp
   cpp/src/linalg/sparse_lu.cpp
-  cpp/src/network/dc_network.cpp)
+  cpp/src/network/dc_network.cpp
+  cpp/src/sheet/convolution_operator.cpp)
 target_include_directories(pcbcore PUBLIC cpp/include)
-target_compile_options(pcbcore PRIVATE -O3 -fno-math-errno -DNDEBUG)
+target_include_directories(pcbcore PRIVATE ${pocketfft_SOURCE_DIR})
+target_compile_definitions(pcbcore PRIVATE POCKETFFT_NO_MULTITHREADING POCKETFFT_CACHE_SIZE=16)
+target_compile_options(pcbcore PRIVATE -O3 -fcx-limited-range -fno-math-errno -DNDEBUG)
 if(PCB_NATIVE_MARCH)
   target_compile_options(pcbcore PRIVATE "-march=${PCB_NATIVE_MARCH}")
 endif()
