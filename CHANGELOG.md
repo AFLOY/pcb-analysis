@@ -47,6 +47,21 @@ Versions before 0.7.0 were not tagged; see the Git history.
   NumPy path to the solver tolerance, not bit for bit, and are bit-identical
   across thread budgets.
 
+- `electrical._pcbcore`: the C++ solver core (`cpp/`), one extension module
+  built by the root `CMakeLists.txt`. It bundles SuperLU 7.0.1, fetched from
+  its release archive (SHA-256 pinned) and built with its own CBLAS, so sparse
+  factorisations never run on the system's (possibly multithreaded) BLAS.
+  `electrical._backend` says whether it is built; tests compare it with the
+  NumPy references through `use_reference()`.
+- `dc_network.solve_conductance_network` and `split_branch_sensitivity` run in
+  the core when it is built: one SuperLU factorisation (COLAMD) for the
+  forward and every adjoint right-hand side, assembly and sums in branch
+  order, bit-identical across calls and thread budgets. The NumPy versions
+  moved to `_dc_network_reference.py` and answer without the build. Results
+  agree with them to roundoff, not bit for bit. A singular network now gives
+  non-finite potentials on both paths (with objectives, `splu` used to raise
+  `RuntimeError`).
+
 ### Breaking
 
 The default thread count of the native kernels changes from one to the

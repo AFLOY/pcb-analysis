@@ -12,7 +12,7 @@
 # pybind11 is found through that interpreter's ``python -m pybind11 --cmakedir``.
 
 cmake_minimum_required(VERSION 3.18)
-project(pcb_analysis_native LANGUAGES CXX)
+project(pcb_analysis_native LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -79,3 +79,51 @@ pcb_native_module(_voxelize_native geometry/cad_import
 pcb_native_module(_sheet_pfft_native electrical/sheet_peec
   src/electrical/sheet_peec/native/pfft_near.cpp)
 
+# ---------------------------------------------------------------------------
+# pcbcore: the C++ solver core (cpp/) and its one extension module,
+# ``electrical._pcbcore``.  New solver code goes here rather than into another
+# per-package module.
+#
+# SuperLU is built from its release source with its bundled CBLAS, as a static
+# library inside the module: the factorisations then run on one thread with
+# the same BLAS on every machine, never on whatever multithreaded BLAS the
+# system's libblas happens to be.  SuperLU is BSD-licensed.
+include(FetchContent)
+set(enable_internal_blaslib ON CACHE BOOL "" FORCE)
+set(enable_single OFF CACHE BOOL "" FORCE)
+set(enable_complex OFF CACHE BOOL "" FORCE)
+set(enable_double ON CACHE BOOL "" FORCE)
+set(enable_complex16 ON CACHE BOOL "" FORCE)
+set(enable_tests OFF CACHE BOOL "" FORCE)
+set(enable_examples OFF CACHE BOOL "" FORCE)
+set(enable_fortran OFF CACHE BOOL "" FORCE)
+set(enable_matlabmex OFF CACHE BOOL "" FORCE)
+set(enable_doc OFF CACHE BOOL "" FORCE)
+set(TPL_ENABLE_METISLIB OFF CACHE BOOL "" FORCE)
+set(_pcb_shared_libs ${BUILD_SHARED_LIBS})
+set(BUILD_SHARED_LIBS OFF)
+FetchContent_Declare(superlu
+  URL https://github.com/xiaoyeli/superlu/archive/refs/tags/v7.0.1.tar.gz
+  URL_HASH SHA256=86dcca1e086f8b8079990d07f00eb707fc9ef412cf3b2ce808b37956f0de2cb8)
+FetchContent_MakeAvailable(superlu)
+set(BUILD_SHARED_LIBS ${_pcb_shared_libs})
+
+add_library(pcbcore STATIC
+  cpp/src/linalg/sparse_lu.cpp
+  cpp/src/network/dc_network.cpp)
+target_include_directories(pcbcore PUBLIC cpp/include)
+target_compile_options(pcbcore PRIVATE -O3 -fno-math-errno -DNDEBUG)
+if(PCB_NATIVE_MARCH)
+  target_compile_options(pcbcore PRIVATE "-march=${PCB_NATIVE_MARCH}")
+endif()
+target_compile_definitions(pcbcore PRIVATE EIGEN_DONT_PARALLELIZE EIGEN_MPL2_ONLY)
+target_link_libraries(pcbcore PRIVATE superlu Eigen3::Eigen)
+if(PCB_NATIVE_OPENMP)
+  target_link_libraries(pcbcore PUBLIC OpenMP::OpenMP_CXX)
+endif()
+
+pybind11_add_module(_pcbcore MODULE cpp/bindings/module.cpp)
+target_compile_options(_pcbcore PRIVATE -O3 -DNDEBUG)
+target_link_libraries(_pcbcore PRIVATE pcbcore)
+set_target_properties(_pcbcore PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/src/electrical")

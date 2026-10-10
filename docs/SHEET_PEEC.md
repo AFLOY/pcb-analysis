@@ -451,10 +451,10 @@ is that solve with the mesh left to the caller.
   cell on a layer) and which branches exist (in-plane neighbours, vertical
   connections).
 - `solve_conductance_network(network, reference, injection,
-  objective_weights=None)`: node `reference` is held at 0 V and dropped. With
-  objectives the reduced Laplacian is factored once by SuperLU and the forward
-  and every adjoint right-hand side (`L λ = c`, the Laplacian being symmetric)
-  are one `solve`; without, the forward system goes to `spsolve`. The result
+  objective_weights=None)`: node `reference` is held at 0 V and dropped. The
+  reduced Laplacian is factored once by SuperLU (COLAMD ordering, threshold
+  pivoting as in SciPy's `splu`) and the forward and every adjoint right-hand
+  side (`L λ = c`, the Laplacian being symmetric) are one solve. The result
   carries the potentials, the branch currents, each node's net branch current,
   the I²R loss and the relative residual.
 - `split_branch_sensitivity(network, branch_product, in_plane)`: `G·ΔV·Δλ` per
@@ -463,14 +463,25 @@ is that solve with the mesh left to the caller.
   alike the terms add back to the objective, which is the identity a caller
   can check an adjoint against.
 
-The order of every floating-point operation is part of the contract: the
-matrix is assembled from the branches in the order given, duplicate indices
-accumulate in sequence (`np.add.at`), and the loss is a running sum. The same
-network and injection therefore give the same bits, and the factored and the
-`spsolve` paths are both kept because they can differ in the last ones.
+The solve runs in the C++ core (`electrical._pcbcore`, `cpp/src/network/`),
+with SuperLU 7.0.1 built from source with its bundled BLAS and linked into
+the module: one thread, the same BLAS on every machine. The order of every
+floating-point operation is fixed: the matrix is assembled from the branches
+in the order given, duplicate entries accumulate in sequence, and node
+currents and the loss are running sums in branch order. The same network and
+injection therefore give the same bits on every call and at every thread
+budget. Without the build, the NumPy implementation in
+`_dc_network_reference.py` answers (`splu` with objectives, `spsolve`
+without); the two agree to roundoff, not bit for bit.
+
 Kicad_PowerOpt's search screen (`physics/sparse_resistive.py`) moved onto this
-module unchanged in numbers: its replay of 80 recorded power_module cases,
-each solved with and without an adjoint objective, matched bit for bit.
+module unchanged in numbers (its replay of 80 recorded power_module cases,
+each solved with and without an adjoint objective, matched the earlier code
+bit for bit). On the C++ core the same replay differs by at most 6.9e-10
+relative in any value, excluding the fields that record roundoff itself
+(sensitivity closure error, relative residual); the count of cells with a
+negative sensitivity moves by 1 to 4 in 28 of 160 solves, cells whose
+sensitivity is roundoff-sized.
 `tests/test_dc_network.py` checks the solve against a dense one, the adjoint
 against a dense solve of `L λ = c`, the sensitivity closure and
 reproducibility.
