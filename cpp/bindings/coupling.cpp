@@ -12,6 +12,7 @@
 #include "arrays.hpp"
 #include "mpir_convert.hpp"
 #include "pcbcore/coupling/coupling.hpp"
+#include "pcbcore/coupling/enclosure.hpp"
 #include "pcbcore/errors.hpp"
 #include "thermal_convert.hpp"
 
@@ -136,6 +137,110 @@ pcbcore::thermal::SolveOptions thermal_options(const double relative_tolerance, 
     options.radiation_tolerance = radiation_tolerance;
     options.threads = threads;
     return options;
+}
+
+pcbcore::thermal::SolveOptions options_from(const py::dict& d) {
+    return thermal_options(d["relative_tolerance"].cast<double>(), d["absolute_tolerance"].cast<double>(),
+                           d["inner_relative_tolerance"].cast<double>(), d["max_outer_iterations"].cast<int>(),
+                           d["max_inner_iterations"].cast<int>(), d["two_level"].cast<bool>(), d["block"].cast<int>(),
+                           d["radiation_max_iterations"].cast<int>(), d["radiation_tolerance"].cast<double>(),
+                           d["threads"].cast<int>());
+}
+
+pcbcore::coupling::InterfaceConfig interface_from(const py::dict& d) {
+    pcbcore::coupling::InterfaceConfig config;
+    config.max_iterations = d["max_iterations"].cast<int>();
+    config.temperature_tolerance = d["temperature_tolerance"].cast<double>();
+    config.relative_heat_tolerance = d["relative_heat_tolerance"].cast<double>();
+    config.relaxation = d["relaxation"].cast<double>();
+    config.aitken = d["aitken"].cast<bool>();
+    config.max_relaxation = d["max_relaxation"].cast<double>();
+    config.divergence_temperature = d["divergence_temperature"].cast<double>();
+    config.board = options_from(d["board"].cast<py::dict>());
+    config.body = options_from(d["body"].cast<py::dict>());
+    return config;
+}
+
+// (problem, board top, body face, board cells (m, 2), body cells (m, 3), conductance, start)
+using BodyTuple = std::tuple<std::shared_ptr<pcbcore::thermal::ThermalProblem>, bool, int, Input<std::int64_t>,
+                             Input<std::int64_t>, Input<double>, double>;
+
+std::vector<pcbcore::coupling::Body> bodies_from(const std::vector<BodyTuple>& tuples) {
+    std::vector<pcbcore::coupling::Body> bodies;
+    for (const auto& [problem, board_top, body_face, board_cells, body_cells, conductance, start] : tuples) {
+        pcbcore::coupling::Body body;
+        body.problem = problem;
+        body.contact.board_top = board_top;
+        body.contact.body_face = body_face;
+        body.contact.conductance = vector_of(conductance);
+        const auto pairs = static_cast<py::ssize_t>(body.contact.conductance.size());
+        body.contact.board_cells = std::vector<Index>(sized(board_cells, 2 * pairs, "board_cells"),
+                                                      board_cells.data() + 2 * pairs);
+        body.contact.body_cells = std::vector<Index>(sized(body_cells, 3 * pairs, "body_cells"),
+                                                     body_cells.data() + 3 * pairs);
+        if (body_face < 0 || body_face > 5) {
+            throw pcbcore::InvalidInput("body_face is a direction 0..5");
+        }
+        body.start = start;
+        bodies.push_back(std::move(body));
+    }
+    return bodies;
+}
+
+py::dict enclosure_dict(pcbcore::coupling::EnclosureResult&& r, const pcbcore::thermal::ThermalProblem& board,
+                        const std::vector<pcbcore::coupling::Body>& bodies) {
+    py::list solutions;
+    for (std::size_t b = 0; b < r.bodies.size(); ++b) {
+        solutions.append(solution_dict(std::move(r.bodies[b]), bodies[b].problem->mesh));
+    }
+    py::list heat;
+    for (auto& values : r.contact_heat) {
+        heat.append(to_array(std::move(values)));
+    }
+    py::list temperature;
+    for (auto& values : r.contact_temperature) {
+        temperature.append(to_array(std::move(values)));
+    }
+    py::list history;
+    for (const auto& step : r.history) {
+        py::dict record;
+        record["iteration"] = step.iteration;
+        record["interface_heat_w"] = step.interface_heat;
+        record["max_temperature_change_k"] = step.max_temperature_change;
+        record["relative_heat_change"] = step.relative_heat_change;
+        record["relaxation"] = step.relaxation;
+        record["board_inner_iterations"] = step.board_inner_iterations;
+        record["body_inner_iterations"] = step.body_inner_iterations;
+        history.append(record);
+    }
+    py::dict out;
+    out["board"] = solution_dict(std::move(r.board), board.mesh);
+    out["bodies"] = solutions;
+    out["contact_heat"] = heat;
+    out["contact_temperature"] = temperature;
+    out["converged"] = r.converged;
+    out["history"] = history;
+    return out;
+}
+
+// A previous result as the warm start: the fields the interface loop reads.
+pcbcore::coupling::EnclosureResult warm_start(const py::dict& d) {
+    pcbcore::coupling::EnclosureResult out;
+    const auto field = [](const py::handle& item) {
+        const auto pair = item.cast<py::tuple>();
+        pcbcore::thermal::ThermalSolution solution;
+        solution.temperature = vector_of(pair[0].cast<Input<double>>());
+        solution.min_temperature = pair[1].cast<double>();
+        return solution;
+    };
+    out.board = field(d["board"]);
+    for (const py::handle item : d["bodies"]) {
+        out.bodies.push_back(field(item));
+    }
+    for (const py::handle item : d["contact_temperature"]) {
+        out.contact_temperature.push_back(vector_of(item.cast<Input<double>>()));
+    }
+    return out;
 }
 
 // (problem, reference port, layer slabs, pool width, team)
@@ -313,6 +418,80 @@ void register_coupling(py::module_& m) {
         py::arg("relative_tolerance"), py::arg("absolute_tolerance"), py::arg("inner_relative_tolerance"),
         py::arg("max_outer_iterations"), py::arg("max_inner_iterations"), py::arg("two_level"), py::arg("block"),
         py::arg("radiation_max_iterations"), py::arg("radiation_tolerance"), py::arg("threads"));
+
+    m.def(
+        "run_board_enclosure",
+        [](const std::shared_ptr<pcbcore::thermal::ThermalProblem>& board, const std::vector<BodyTuple>& body_tuples,
+           const py::dict& interface, const py::object& initial) {
+            const auto bodies = bodies_from(body_tuples);
+            const auto config = interface_from(interface);
+            std::optional<pcbcore::coupling::EnclosureResult> start;
+            if (!initial.is_none()) {
+                start = warm_start(initial.cast<py::dict>());
+            }
+            pcbcore::coupling::EnclosureResult result;
+            {
+                py::gil_scoped_release release;
+                result = pcbcore::coupling::run_board_enclosure(*board, bodies, config, start ? &*start : nullptr);
+            }
+            return enclosure_dict(std::move(result), *board, bodies);
+        },
+        py::arg("board"), py::arg("bodies"), py::arg("interface"), py::arg("initial"));
+
+    m.def(
+        "run_electro_thermal_enclosure",
+        [](const DCProblem& problem, const std::vector<int>& layer_slabs, const double reference_temperature,
+           const double coefficient, const std::shared_ptr<pcbcore::thermal::ThermalProblem>& board,
+           const py::object& extra_element_heat, const Input<double>& nodal_heat,
+           const Input<std::int64_t>& source_offsets, const Input<std::int64_t>& source_nodes,
+           const Input<double>& source_power, const std::vector<BodyTuple>& body_tuples, const py::dict& fixed_point,
+           const py::dict& interface, const int threads) {
+            pcbcore::coupling::Placement placement{layer_slabs, reference_temperature, coefficient};
+            const auto extra = extra_heat(board->mesh, extra_element_heat, nodal_heat, source_offsets, source_nodes,
+                                          source_power);
+            const auto bodies = bodies_from(body_tuples);
+            pcbcore::coupling::FixedPointConfig config{
+                fixed_point["max_iterations"].cast<int>(), fixed_point["temperature_tolerance"].cast<double>(),
+                fixed_point["relative_loss_tolerance"].cast<double>(), fixed_point["relaxation"].cast<double>(),
+                fixed_point["aitken"].cast<bool>(), fixed_point["max_relaxation"].cast<double>()};
+            const auto interface_config = interface_from(interface);
+            pcbcore::coupling::ElectroThermalEnclosureResult result;
+            {
+                py::gil_scoped_release release;
+                result = pcbcore::coupling::run_electro_thermal_enclosure(problem, placement, *board, extra, bodies,
+                                                                          config, interface_config, threads);
+            }
+            py::list history;
+            for (const auto& step : result.history) {
+                py::dict record;
+                record["iteration"] = step.step.iteration;
+                record["joule_loss_w"] = step.step.joule_loss;
+                record["max_temperature_k"] = step.step.max_temperature;
+                record["temperature_change_k"] = step.step.temperature_change;
+                record["relative_loss_change"] = step.step.relative_loss_change;
+                record["relaxation"] = step.step.relaxation;
+                record["electrical_inner_iterations"] = step.step.electrical_inner_iterations;
+                record["thermal_inner_iterations"] = step.step.thermal_inner_iterations;
+                record["interface_iterations"] = step.interface_iterations;
+                record["interface_heat_w"] = step.interface_heat;
+                history.append(record);
+            }
+            const std::vector<py::ssize_t> elements{problem.layers, problem.rows, problem.cols};
+            py::dict out;
+            out["electrical"] = dc_solution_dict(std::move(result.electrical), problem);
+            out["thermal"] = enclosure_dict(std::move(result.thermal), *board, bodies);
+            out["conductivity"] = to_array(std::move(result.conductivity), elements);
+            out["via_resistance"] = to_array(std::move(result.via_resistance));
+            out["element_temperature"] = to_array(std::move(result.element_temperature), elements);
+            out["converged"] = result.converged;
+            out["history"] = history;
+            out["cold_loss"] = result.cold_loss;
+            return out;
+        },
+        py::arg("problem"), py::arg("layer_slabs"), py::arg("reference_temperature"), py::arg("coefficient"),
+        py::arg("board"), py::arg("extra_element_heat"), py::arg("nodal_heat"), py::arg("source_offsets"),
+        py::arg("source_nodes"), py::arg("source_power"), py::arg("bodies"), py::arg("fixed_point"),
+        py::arg("interface"), py::arg("threads"));
 }
 
 }  // namespace pcbcore_bindings

@@ -81,9 +81,12 @@ Problem make_problem(const Input<std::uint8_t>& active, const Input<double>& thi
     if (source_offsets.size() != sources + 1 || source_offsets.data()[sources] != source_nodes.size()) {
         throw pcbcore::InvalidInput("heat sources need offsets (sources + 1) ending at the node count");
     }
-    problem->load = pcbcore::thermal::nodal_load(mesh, sized(element_heat, elements, "element_heat"),
-                                                 sized(nodal_heat, nodes, "nodal_heat"), sources,
-                                                 source_offsets.data(), source_nodes.data(), source_power.data());
+    problem->element_heat = copy(sized(element_heat, elements, "element_heat"), elements);
+    problem->nodal_heat = copy(sized(nodal_heat, nodes, "nodal_heat"), nodes);
+    problem->source_offsets = copy(source_offsets.data(), sources + 1);
+    problem->source_nodes = copy(source_nodes.data(), source_nodes.size());
+    problem->source_power = copy(source_power.data(), sources);
+    problem->sum_load();
     return problem;
 }
 

@@ -14,6 +14,8 @@ after the first pass it costs one or two board/body solves.
 
 from __future__ import annotations
 
+from typing import Any
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -101,10 +103,32 @@ def run_electro_thermal_enclosure(
     backend: RuntimeBackend | None = None,
     device_id: int = 0,
 ) -> ElectroThermalEnclosureResult:
-    """Iterate electrical, board and body solves to a self-consistent ρ(T) state."""
+    """Iterate electrical, board and body solves to a self-consistent ρ(T) state.
+
+    With the C++ core built and a CPU backend the loop runs in the core
+    (:mod:`.native_loops`).
+    """
 
     config = config or CouplingConfig()
     interface = interface or InterfaceCouplingConfig()
+    from .native_loops import coupling_core
+
+    core = coupling_core(None, backend)
+    if core is not None:
+        return _native_electro_thermal_enclosure(core, scenario, config, interface)
+    return _python_electro_thermal_enclosure(scenario, config, interface, backend=backend, device_id=device_id)
+
+
+def _python_electro_thermal_enclosure(
+    scenario: ElectroThermalEnclosureScenario,
+    config: CouplingConfig,
+    interface: InterfaceCouplingConfig,
+    *,
+    backend: RuntimeBackend | None,
+    device_id: int,
+) -> ElectroThermalEnclosureResult:
+    """The loop solve by solve; the reference of the C++ loop."""
+
     board = scenario.electro_thermal
     problem = board.electrical
     fixed_point = TemperatureFixedPoint(board, config)
@@ -188,6 +212,55 @@ def run_electro_thermal_enclosure(
         cold_joule_loss_w=cold_loss,
     )
 
+
+
+def _native_electro_thermal_enclosure(
+    core: Any,
+    scenario: ElectroThermalEnclosureScenario,
+    config: CouplingConfig,
+    interface: InterfaceCouplingConfig,
+) -> ElectroThermalEnclosureResult:
+    """run_electro_thermal_enclosure in ``electrical._pcbcore.coupling``."""
+
+    from electrical.matrix_free_mpir_fem.native_problem import dc_problem, solution_from
+    from electrical.threads import thread_budget
+
+    from .board_enclosure import result_from_core
+    from .native_loops import board_arguments, body_arguments, fixed_point_arguments, interface_arguments
+
+    board = scenario.electro_thermal
+    result = core.coupling.run_electro_thermal_enclosure(
+        dc_problem(core, board.electrical, config=config.electrical),
+        list(board.layer_slabs),
+        float(board.conductivity_reference_temperature_k),
+        float(board.temperature_coefficient_per_k),
+        **board_arguments(
+            core,
+            board.thermal_mesh,
+            convection=board.convection,
+            fixed_temperature_mask=board.fixed_temperature_mask,
+            fixed_temperature_k=board.fixed_temperature_k,
+            radiation=board.radiation,
+            extra_heat_sources=board.extra_heat_sources,
+            extra_element_heat_w=board.extra_element_heat_w,
+        ),
+        bodies=body_arguments(core, scenario.bodies),
+        fixed_point=fixed_point_arguments(config),
+        interface=interface_arguments(interface),
+        threads=thread_budget(),
+    )
+    history = tuple(ElectroThermalEnclosureStep(**step) for step in result["history"])
+    return ElectroThermalEnclosureResult(
+        electrical=solution_from(result["electrical"]),
+        thermal=result_from_core(result["thermal"]),
+        conductivity_s_per_m=result["conductivity"],
+        via_resistance_ohm=result["via_resistance"],
+        element_temperature_k=result["element_temperature"],
+        converged=bool(result["converged"]),
+        iterations=len(history),
+        history=history,
+        cold_joule_loss_w=float(result["cold_loss"]),
+    )
 
 __all__ = [
     "ElectroThermalEnclosureResult",
