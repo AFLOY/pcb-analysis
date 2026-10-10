@@ -20,6 +20,7 @@
 #include "pcbcore/network/dc_network.hpp"
 #include "pcbcore/sheet/convolution_operator.hpp"
 #include "pcbcore/sheet/hoer_love.hpp"
+#include "pcbcore/sheet/mesh.hpp"
 #include "pcbcore/sheet/near_field.hpp"
 #include "pcbcore/sheet/pfft_operator.hpp"
 #include "pcbcore/sheet/sheet_solve.hpp"
@@ -367,6 +368,30 @@ py::dict solve_sheet(const std::int64_t node_count, const Input<std::int64_t>& l
     return out;
 }
 
+std::shared_ptr<pcbcore::sheet::MeshTopology> build_topology(const Input<std::uint8_t>& occupancy,
+                                                             const Input<std::int64_t>& vias) {
+    if (occupancy.ndim() != 3) {
+        throw pcbcore::InvalidInput("occupancy must be (layers, rows, cols)");
+    }
+    if (vias.size() != 0 && (vias.ndim() != 2 || vias.shape(1) != 4)) {
+        throw pcbcore::InvalidInput("vias must be (count, 4): lower, upper, row, col");
+    }
+    auto mesh = std::make_shared<pcbcore::sheet::MeshTopology>();
+    {
+        py::gil_scoped_release release;
+        *mesh = pcbcore::sheet::build_topology(occupancy.shape(0), occupancy.shape(1), occupancy.shape(2),
+                                               occupancy.data(), vias.size() ? vias.data() : nullptr,
+                                               vias.size() ? vias.shape(0) : 0);
+    }
+    return mesh;
+}
+
+template <typename T>
+py::array_t<T> copy_array(const std::vector<T>& values, std::vector<py::ssize_t> shape) {
+    std::vector<T> copy(values);
+    return to_array(std::move(copy), std::move(shape));
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_pcbcore, m) {
@@ -419,6 +444,74 @@ PYBIND11_MODULE(_pcbcore, m) {
              py::arg("nodes"))
         .def("apply", &pfft_apply, py::arg("family"), py::arg("currents"), py::arg("threads"))
         .def_property_readonly("bytes", &pcbcore::sheet::PfftOperator::bytes);
+    py::class_<pcbcore::sheet::MeshTopology, std::shared_ptr<pcbcore::sheet::MeshTopology>>(sheet, "MeshTopology")
+        .def(py::init(&build_topology), py::arg("occupancy"), py::arg("vias"))
+        .def_readonly("node_count", &pcbcore::sheet::MeshTopology::node_count)
+        .def_property_readonly("node_of",
+                               [](const pcbcore::sheet::MeshTopology& m) {
+                                   return copy_array(m.node_of, {m.layers, m.rows, m.cols});
+                               })
+        .def_property_readonly("branch_x",
+                               [](const pcbcore::sheet::MeshTopology& m) {
+                                   return copy_array(m.branch_x, {static_cast<py::ssize_t>(m.branch_x.size() / 3), 3});
+                               })
+        .def_property_readonly("branch_y",
+                               [](const pcbcore::sheet::MeshTopology& m) {
+                                   return copy_array(m.branch_y, {static_cast<py::ssize_t>(m.branch_y.size() / 3), 3});
+                               })
+        .def_property_readonly("via_kept",
+                               [](const pcbcore::sheet::MeshTopology& m) {
+                                   return copy_array(m.via_kept, {static_cast<py::ssize_t>(m.via_kept.size())});
+                               })
+        .def_property_readonly("left",
+                               [](const pcbcore::sheet::MeshTopology& m) {
+                                   return copy_array(m.left, {static_cast<py::ssize_t>(m.left.size())});
+                               })
+        .def_property_readonly("right",
+                               [](const pcbcore::sheet::MeshTopology& m) {
+                                   return copy_array(m.right, {static_cast<py::ssize_t>(m.right.size())});
+                               })
+        .def(
+            "resistances",
+            [](const pcbcore::sheet::MeshTopology& m, const Input<double>& sheet_resistance,
+               const Input<double>& pitch_x, const Input<double>& pitch_y, const Input<double>& via_resistance) {
+                if (sheet_resistance.size() != m.layers || pitch_x.size() != m.cols || pitch_y.size() != m.rows) {
+                    throw pcbcore::InvalidInput("one sheet resistance per layer, one pitch per column and row");
+                }
+                return to_array(pcbcore::sheet::branch_resistance(m, sheet_resistance.data(), pitch_x.data(),
+                                                                  pitch_y.data(), via_resistance.data()));
+            },
+            py::arg("sheet_resistance"), py::arg("pitch_x"), py::arg("pitch_y"), py::arg("via_resistance"))
+        .def(
+            "source_vector",
+            [](const pcbcore::sheet::MeshTopology& m, const Input<std::int64_t>& layer,
+               const Input<std::int64_t>& cell_start, const Input<std::int64_t>& cells,
+               const Input<std::complex<double>>& current) {
+                const std::int64_t terminals = layer.size();
+                if (cell_start.size() != terminals + 1 || current.size() != terminals) {
+                    throw pcbcore::InvalidInput("one layer and current per terminal, terminals + 1 cell starts");
+                }
+                std::vector<std::int64_t> usable;
+                auto injected = pcbcore::sheet::source_vector(m, terminals, layer.data(), cell_start.data(),
+                                                              cells.size() ? cells.data() : nullptr, current.data(),
+                                                              usable);
+                return py::make_tuple(to_array(std::move(injected)), to_array(std::move(usable)));
+            },
+            py::arg("layer"), py::arg("cell_start"), py::arg("cells"), py::arg("current"))
+        .def(
+            "cell_density",
+            [](const pcbcore::sheet::MeshTopology& m, const Input<std::complex<double>>& branch_current,
+               const Input<double>& pitch_x, const Input<double>& pitch_y, const Input<double>& thickness_m) {
+                if (thickness_m.size() != m.layers || pitch_x.size() != m.cols || pitch_y.size() != m.rows) {
+                    throw pcbcore::InvalidInput("one thickness per layer, one pitch per column and row");
+                }
+                std::vector<std::complex<double>> along_x(static_cast<std::size_t>(m.node_count));
+                std::vector<std::complex<double>> along_y(static_cast<std::size_t>(m.node_count));
+                pcbcore::sheet::cell_density(m, branch_current.data(), pitch_x.data(), pitch_y.data(),
+                                             thickness_m.data(), along_x.data(), along_y.data());
+                return py::make_tuple(to_array(std::move(along_x)), to_array(std::move(along_y)));
+            },
+            py::arg("branch_current"), py::arg("pitch_x"), py::arg("pitch_y"), py::arg("thickness_m"));
     sheet.def("solve_sheet", &solve_sheet, py::arg("node_count"), py::arg("left"), py::arg("right"),
               py::arg("resistance"), py::arg("injection"), py::arg("frequency_hz"), py::arg("tolerance"),
               py::arg("max_iterations"), py::arg("restart"), py::arg("preconditioner"),
