@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 
-from electrical.dice_peec import Stackup, ViaSet
-from electrical.dice_peec import ViaSpec as PeecViaSpec
 from electrical.sheet_peec.current_field_contract import CURRENT_FIELD_PROBLEM_SCHEMA, CURRENT_FIELD_PROBLEM_SCHEMA_V2
 from thermal.matrix_free_mpir_fem import HeatSource, LayeredThermalMesh, VoxelSolidModel, VoxelThermalMesh
 
@@ -18,21 +17,81 @@ from .reader import MM
 from .section import BoardRaster
 
 
-def board_stackup(raster: BoardRaster) -> Stackup:
-    return Stackup(
-        layer_names=raster.spec.layer_names,
-        z_mm=tuple(layer.center_z_mm for layer in raster.layers),
-    )
+@dataclass(frozen=True)
+class BoardVia:
+    """One via barrel reduced to a grid cell, the two layers it joins and its lumped R and L."""
+
+    row: int
+    col: int
+    layer_from: int
+    layer_to: int
+    resistance_ohm: float = 0.0
+    inductance_h: float = 1e-9
+
+    def __post_init__(self) -> None:
+        for name in ("row", "col", "layer_from", "layer_to"):
+            value = getattr(self, name)
+            if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
+                raise TypeError(f"{name} must be an integer")
+            object.__setattr__(self, name, int(value))
+        if self.layer_from == self.layer_to:
+            raise ValueError("via layers must differ")
+        if min(self.row, self.col, self.layer_from, self.layer_to) < 0:
+            raise ValueError("via coordinates and layers must be non-negative")
+        for name in ("resistance_ohm", "inductance_h"):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative")
+            object.__setattr__(self, name, value)
+        # The lower layer index first, so one barrel has one key.
+        if self.layer_from > self.layer_to:
+            layer_from, layer_to = self.layer_to, self.layer_from
+            object.__setattr__(self, "layer_from", layer_from)
+            object.__setattr__(self, "layer_to", layer_to)
+
+    @property
+    def key(self) -> tuple[int, int, int, int]:
+        return self.row, self.col, self.layer_from, self.layer_to
+
+
+@dataclass(frozen=True)
+class BoardVias:
+    """The vias of a board, one per (cell, layer span).
+
+    Two barrels at one cell joining the same layers merge when they agree
+    electrically and are refused when they do not.
+    """
+
+    vias: tuple[BoardVia, ...] = ()
+
+    def __post_init__(self) -> None:
+        merged: dict[tuple[int, int, int, int], BoardVia] = {}
+        for via in self.vias:
+            if not isinstance(via, BoardVia):
+                raise TypeError("vias must contain BoardVia instances")
+            previous = merged.get(via.key)
+            if previous is None:
+                merged[via.key] = via
+            elif (previous.resistance_ohm, previous.inductance_h) != (via.resistance_ohm, via.inductance_h):
+                raise ValueError(f"conflicting duplicate via at {via.key}")
+        object.__setattr__(self, "vias", tuple(merged.values()))
+
+    @classmethod
+    def from_iterable(cls, vias: Iterable[BoardVia]) -> "BoardVias":
+        return cls(tuple(vias))
+
+    def __len__(self) -> int:
+        return len(self.vias)
 
 
 def board_occupancy(raster: BoardRaster) -> np.ndarray:
-    """The accepted-layout occupancy ``x0`` of shape ``(layers, rows, cols)``."""
+    """The copper occupancy of every layer, shape ``(layers, rows, cols)``."""
 
     return raster.occupancy
 
 
-def board_vias(resolved: ResolvedBodies, raster: BoardRaster) -> ViaSet:
-    """Via barrels as ``ViaSpec`` entries: cell from the axis, layers from the z extent."""
+def board_vias(resolved: ResolvedBodies, raster: BoardRaster) -> BoardVias:
+    """Via barrels as :class:`BoardVia` entries: cell from the axis, layers from the z extent."""
 
     layers = raster.layers
     vias = []
@@ -58,7 +117,7 @@ def board_vias(resolved: ResolvedBodies, raster: BoardRaster) -> ViaSet:
                 length = (layers[spanned[-1]].center_z_mm - layers[spanned[0]].center_z_mm) * MM
                 resistance = layers[spanned[-1]].resistivity_ohm_m * length / cross_section
             vias.append(
-                PeecViaSpec(
+                BoardVia(
                     row=row,
                     col=col,
                     layer_from=spanned[0],
@@ -67,7 +126,7 @@ def board_vias(resolved: ResolvedBodies, raster: BoardRaster) -> ViaSet:
                     inductance_h=spec.inductance_h,
                 )
             )
-    return ViaSet(tuple(vias))
+    return BoardVias(tuple(vias))
 
 
 def board_barrels(
@@ -204,7 +263,7 @@ def current_field_problem_mapping(
     frequency_hz: float = 0.0,
     name: str = "board",
     role: str = "step-geometry",
-    vias: ViaSet | None = None,
+    vias: BoardVias | None = None,
     barrels: Mapping[tuple[int, int], Barrel] | None = None,
     thickness_source: str = "stackup",
 ) -> dict[str, Any]:
@@ -283,9 +342,10 @@ def current_field_problem_mapping(
 
 __all__ = [
     "BoardThermalModel",
+    "BoardVia",
+    "BoardVias",
     "board_barrels",
     "board_occupancy",
-    "board_stackup",
     "board_thermal_mesh",
     "board_vias",
     "body_heat_sources",

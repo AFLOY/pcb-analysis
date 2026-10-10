@@ -18,7 +18,6 @@ from geometry.cad_import import (
     ViaSpec,
     board_body_contact,
     board_occupancy,
-    board_stackup,
     board_thermal_mesh,
     board_barrels,
     board_vias,
@@ -163,12 +162,12 @@ def test_disc_area_error_falls_with_supersampling(model) -> None:
     print(f"disc area error by supersample 1/2/4: {errors}")
 
 
-def test_stackup_vias_thermal_mesh_and_current_field_mapping(model) -> None:
+def test_layers_vias_thermal_mesh_and_current_field_mapping(model) -> None:
     body_map = _body_map()
     resolved = resolve_bodies(model, body_map)
     raster = rasterize_board(resolved, body_map.board, pitch_mm=0.5)
-    stackup = board_stackup(raster)
-    assert stackup.layer_names == ("B1", "F1") and stackup.z_mm == (-0.0175, 1.6175)
+    assert tuple(layer.name for layer in raster.layers) == ("B1", "F1")
+    assert tuple(layer.center_z_mm for layer in raster.layers) == (-0.0175, 1.6175)
 
     vias = board_vias(resolved, raster)
     assert len(vias.vias) == 1
