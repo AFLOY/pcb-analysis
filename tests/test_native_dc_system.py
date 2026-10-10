@@ -185,3 +185,62 @@ def test_the_native_system_rejects_what_the_numpy_operator_rejects() -> None:
     free = tuple(int(i) for i in np.argwhere(native.free_nodes)[0])
     with pytest.raises(ValueError, match=r"voltage terminal 'v' node .* is not a Dirichlet node"):
         native.dirichlet_potential((VoltageTerminal((free,), 1.0, "v"),))
+
+
+def test_the_native_port_basis_has_the_same_bits_at_every_budget_and_split(monkeypatch: pytest.MonkeyPatch) -> None:
+    import electrical.matrix_free_mpir_fem.ports as ports_module
+    from electrical.matrix_free_mpir_fem import PortSet, dc_port_basis
+
+    current = _board(12, 18, graded=True)
+    source, sink = current.terminals
+    taps = (tuple((1, r, 9) for r in range(4, 8)), tuple((0, r, 12) for r in range(2, 5)))
+    ports = PortSet(pads=(source.nodes, *taps, sink.nodes), reference=3)
+    correlation = np.array(
+        [[4.0, 1.0, 0.5, -5.5], [1.0, 2.0, -0.5, -2.5], [0.5, -0.5, 1.0, -1.0], [-5.5, -2.5, -1.0, 9.0]]
+    )
+    outputs = []
+    for budget, split in ((1, None), (2, None), (3, (3, 1)), (8, (2, 4)), (8, None)):
+        if split is not None:
+            monkeypatch.setattr(ports_module, "_split_budget", lambda budget, tasks, split=split: split)
+        else:
+            monkeypatch.undo()
+        with thread_budget_scope(budget):
+            basis = dc_port_basis(current.mesh, ports, vias=current.vias, native=True)
+            element, via = basis.mean_loss_w(correlation)
+            rms = basis.rms_current_density_a_per_m2(correlation)
+        outputs.append(
+            tuple(
+                np.asarray(value).tobytes()
+                for value in (
+                    basis.conductance_s,
+                    basis.unit_voltage_potential_v,
+                    basis.unit_current_potential_v,
+                    element,
+                    via,
+                    rms,
+                )
+            )
+            + tuple(result.history for result in basis.solves)
+        )
+    assert all(output == outputs[0] for output in outputs[1:])
+
+
+def test_the_native_port_reductions_agree_with_numpy() -> None:
+    from electrical.matrix_free_mpir_fem import PortSet, dc_port_basis
+
+    current = _board(10, 16, graded=True)
+    source, sink = current.terminals
+    ports = PortSet(pads=(source.nodes, tuple((1, r, 8) for r in range(3, 7)), sink.nodes), reference=2)
+    config = MPIRConfig()
+    native = dc_port_basis(current.mesh, ports, vias=current.vias, native=True, config=config)
+    portable = dc_port_basis(current.mesh, ports, vias=current.vias, native=False, config=config)
+    rtol = iterative_rtol(config.relative_tolerance)
+    # KCL closes the reference row and column exactly on both paths.
+    np.testing.assert_allclose(native.conductance_s.sum(axis=0), 0.0, atol=1e-12 * np.abs(native.conductance_s).max())
+    np.testing.assert_allclose(native.conductance_s, portable.conductance_s, rtol=rtol)
+    correlation = np.array([[4.0, 1.0, -5.0], [1.0, 2.0, -3.0], [-5.0, -3.0, 8.0]])
+    rms = native.rms_current_density_a_per_m2(correlation)
+    expected = portable.rms_current_density_a_per_m2(correlation)
+    np.testing.assert_allclose(rms, expected, rtol=0, atol=rtol * expected.max())
+    with pytest.raises(ValueError, match="positive semi-definite"):
+        native.mean_loss_w(np.array([[1.0, 2.0, -3.0], [2.0, 1.0, -3.0], [-3.0, -3.0, 6.0]]))

@@ -11,6 +11,7 @@
 
 #include "arrays.hpp"
 #include "pcbcore/errors.hpp"
+#include "pcbcore/fem/dc_ports.hpp"
 #include "pcbcore/fem/layered_dc_system.hpp"
 
 namespace pcbcore_bindings {
@@ -84,6 +85,35 @@ py::array_t<T> node_action(const LayeredDCSystem& system, const Input<T>& vector
     return to_array(std::move(y));
 }
 
+pcbcore::fem::MpirConfig mpir_config(const double relative_tolerance, const double absolute_tolerance,
+                                     const double inner_relative_tolerance, const int max_outer_iterations,
+                                     const int max_inner_iterations) {
+    pcbcore::fem::MpirConfig config;
+    config.relative_tolerance = relative_tolerance;
+    config.absolute_tolerance = absolute_tolerance;
+    config.inner_relative_tolerance = inner_relative_tolerance;
+    config.max_outer_iterations = max_outer_iterations;
+    config.max_inner_iterations = max_inner_iterations;
+    return config;
+}
+
+py::dict result_dict(const pcbcore::fem::MpirResult& result) {
+    std::vector<std::tuple<int, double, int, double>> history;
+    for (const auto& step : result.history) {
+        history.emplace_back(step.outer_iteration, step.high_relative_residual, step.inner_iterations,
+                             step.inner_relative_residual);
+    }
+    py::dict out;
+    out["converged"] = result.converged;
+    out["outer_iterations"] = result.outer_iterations;
+    out["inner_iterations"] = result.inner_iterations;
+    out["relative_residual"] = result.relative_residual;
+    out["high_operator_applications"] = result.high_operator_applications;
+    out["low_operator_applications"] = result.low_operator_applications;
+    out["history"] = history;
+    return out;
+}
+
 py::dict solve(const LayeredDCSystem& system, const Input<double>& rhs, const py::object& initial_guess,
                const double relative_tolerance, const double absolute_tolerance,
                const double inner_relative_tolerance, const int max_outer_iterations,
@@ -95,36 +125,64 @@ py::dict solve(const LayeredDCSystem& system, const Input<double>& rhs, const py
         const double* g = sized(guess, system.size(), "initial_guess");
         std::copy(g, g + system.size(), x.begin());
     }
-    pcbcore::fem::MpirConfig config;
-    config.relative_tolerance = relative_tolerance;
-    config.absolute_tolerance = absolute_tolerance;
-    config.inner_relative_tolerance = inner_relative_tolerance;
-    config.max_outer_iterations = max_outer_iterations;
-    config.max_inner_iterations = max_inner_iterations;
+    const auto config = mpir_config(relative_tolerance, absolute_tolerance, inner_relative_tolerance,
+                                    max_outer_iterations, max_inner_iterations);
     pcbcore::fem::MpirResult result;
     {
         py::gil_scoped_release release;
         result = system.solve(b, x.data(), config, threads);
     }
-    std::vector<std::tuple<int, double, int, double>> history;
-    for (const auto& step : result.history) {
-        history.emplace_back(step.outer_iteration, step.high_relative_residual, step.inner_iterations,
-                             step.inner_relative_residual);
-    }
-    py::dict out;
+    py::dict out = result_dict(result);
     out["solution"] = to_array(std::move(x));
-    out["converged"] = result.converged;
-    out["outer_iterations"] = result.outer_iterations;
-    out["inner_iterations"] = result.inner_iterations;
-    out["relative_residual"] = result.relative_residual;
-    out["high_operator_applications"] = result.high_operator_applications;
-    out["low_operator_applications"] = result.low_operator_applications;
-    out["history"] = history;
     return out;
 }
 
 std::vector<py::ssize_t> element_shape(const LayeredDCSystem& s) { return {s.layers(), s.rows(), s.cols()}; }
 std::vector<py::ssize_t> node_shape(const LayeredDCSystem& s) { return {s.layers(), s.rows() + 1, s.cols() + 1}; }
+
+py::dict port_basis(const LayeredDCSystem& system, const Input<std::int64_t>& offsets,
+                    const Input<std::int64_t>& nodes, const std::int64_t reference, const py::object& initial,
+                    const double relative_tolerance, const double absolute_tolerance,
+                    const double inner_relative_tolerance, const int max_outer_iterations,
+                    const int max_inner_iterations, const int width, const int team) {
+    const auto ports = groups_view(offsets, nodes);
+    const auto config = mpir_config(relative_tolerance, absolute_tolerance, inner_relative_tolerance,
+                                    max_outer_iterations, max_inner_iterations);
+    Input<double> previous;
+    const double* initial_data = nullptr;
+    if (!initial.is_none()) {
+        previous = initial.cast<Input<double>>();
+        initial_data = sized(previous, (ports.count - 1) * system.size(), "initial");
+    }
+    pcbcore::fem::DCPortBasisResult result;
+    {
+        py::gil_scoped_release release;
+        result = pcbcore::fem::dc_port_basis(system, ports, reference, initial_data, config, width, team);
+    }
+    const auto n = static_cast<py::ssize_t>(result.ports);
+    auto fields = node_shape(system);
+    fields.insert(fields.begin(), n - 1);
+    py::list solves;
+    for (const auto& solve : result.solves) {
+        solves.append(result_dict(solve));
+    }
+    py::dict out;
+    out["conductance"] = to_array(std::move(result.conductance), {n, n});
+    out["unit_voltage"] = to_array(std::move(result.unit_voltage), fields);
+    out["unit_current"] = to_array(std::move(result.unit_current), fields);
+    out["solves"] = solves;
+    return out;
+}
+
+pcbcore::fem::CorrelationModes modes_of(const LayeredDCSystem& system, const Input<double>& reduced,
+                                        const double scale, const Input<double>& unit_current) {
+    const auto driven = static_cast<std::int64_t>(reduced.ndim() == 2 ? reduced.shape(0) : -1);
+    if (driven < 0 || reduced.shape(1) != driven) {
+        throw pcbcore::InvalidInput("the reduced correlation must be square");
+    }
+    const double* fields = sized(unit_current, driven * system.size(), "unit_current");
+    return pcbcore::fem::correlation_modes(reduced.data(), driven, scale, fields, system.size());
+}
 
 }  // namespace
 
@@ -273,6 +331,36 @@ void register_fem(py::module_& m) {
                 return out;
             },
             py::arg("potential"), py::arg("threads"));
+    m.def("dc_port_basis", &port_basis, py::arg("system"), py::arg("offsets"), py::arg("nodes"),
+          py::arg("reference"), py::arg("initial"), py::arg("relative_tolerance"), py::arg("absolute_tolerance"),
+          py::arg("inner_relative_tolerance"), py::arg("max_outer_iterations"), py::arg("max_inner_iterations"),
+          py::arg("width"), py::arg("team"));
+    m.def(
+        "port_modal_loss",
+        [](const LayeredDCSystem& system, const Input<double>& reduced, const double scale,
+           const Input<double>& unit_current, const int threads) {
+            pcbcore::fem::ModalLoss loss;
+            {
+                py::gil_scoped_release release;
+                loss = pcbcore::fem::modal_loss(system, modes_of(system, reduced, scale, unit_current), threads);
+            }
+            return py::make_tuple(to_array(std::move(loss.element), element_shape(system)),
+                                  to_array(std::move(loss.via)));
+        },
+        py::arg("system"), py::arg("reduced"), py::arg("scale"), py::arg("unit_current"), py::arg("threads"));
+    m.def(
+        "port_rms_current_density",
+        [](const LayeredDCSystem& system, const Input<double>& reduced, const double scale,
+           const Input<double>& unit_current, const int threads) {
+            std::vector<double> rms;
+            {
+                py::gil_scoped_release release;
+                rms = pcbcore::fem::modal_rms_current_density(system, modes_of(system, reduced, scale, unit_current),
+                                                              threads);
+            }
+            return to_array(std::move(rms), element_shape(system));
+        },
+        py::arg("system"), py::arg("reduced"), py::arg("scale"), py::arg("unit_current"), py::arg("threads"));
     m.def("choose_block_size", &pcbcore::fem::choose_block_size, py::arg("layers"), py::arg("node_rows"),
           py::arg("node_cols"), py::arg("max_coarse_size") = pcbcore::fem::kDefaultMaxCoarseSize,
           py::arg("minimum") = 4);

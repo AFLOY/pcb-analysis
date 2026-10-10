@@ -36,6 +36,12 @@ pcb-analysis nests parallelism.  The caller sets only the process-wide total
 (:func:`electrical.threads.set_thread_budget`); :func:`_split_budget` divides
 it into pool width × team with a product inside the budget.  A CUDA runtime
 solves serially, since its stream is shared.
+
+With the C++ core built, the pool, the unit solves, the KCL closure, the
+unit-current fields and the modal loss and RMS sums run in
+``electrical._pcbcore.fem`` (one ``std::thread`` per pool slot, each driving
+an OpenMP team); this module keeps the split rule, the input checks and the
+dataclasses.
 """
 
 from __future__ import annotations
@@ -56,7 +62,7 @@ from .pcb import (
     VoltageTerminal,
 )
 from .runtime import LowPrecisionRuntime, RuntimeBackend
-from .solver import MPIRConfig, MPIRResult, solve_mpir
+from .solver import MPIRConfig, MPIRResult, MPIRStep, solve_mpir
 
 
 def _split_budget(budget: int, tasks: int) -> tuple[int, int]:
@@ -227,8 +233,8 @@ class DCPortBasis:
         voltages[list(self.ports.driven)] = self.reduced_resistance_ohm @ reduced
         return voltages
 
-    def _modes(self, correlation_a2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Eigen-decompose ``C_rr`` into weights and potential modes ``ψ_m``."""
+    def _reduced_correlation(self, correlation_a2: np.ndarray) -> tuple[np.ndarray, float]:
+        """``C_rr`` after the checks every reduction needs, and its scale."""
 
         matrix = np.asarray(correlation_a2, dtype=np.float64)
         n = self.ports.count
@@ -240,7 +246,12 @@ class DCPortBasis:
         if np.any(np.abs(matrix.sum(axis=1)) > 1.0e-9 * scale):
             raise ValueError("correlation rows must sum to zero (port currents satisfy KCL)")
         driven = list(self.ports.driven)
-        reduced = matrix[np.ix_(driven, driven)]
+        return np.ascontiguousarray(matrix[np.ix_(driven, driven)]), scale
+
+    def _modes(self, correlation_a2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Eigen-decompose ``C_rr`` into weights and potential modes ``ψ_m``."""
+
+        reduced, scale = self._reduced_correlation(correlation_a2)
         weights, vectors = np.linalg.eigh(reduced)
         if float(np.min(weights)) < -1.0e-10 * scale:
             raise ValueError("correlation must be positive semi-definite")
@@ -256,6 +267,11 @@ class DCPortBasis:
         is ``I Iᵀ`` and the result is the loss of that current.
         """
 
+        if self.operator._system is not None:
+            reduced, scale = self._reduced_correlation(correlation_a2)
+            return self.operator._core.fem.port_modal_loss(
+                self.operator._system, reduced, scale, self.unit_current_potential_v, self.operator._team
+            )
         weights, modes = self._modes(correlation_a2)
         element = np.zeros(self.mesh.element_active.shape, dtype=np.float64)
         via = np.zeros(len(self.operator.vias), dtype=np.float64)
@@ -267,6 +283,11 @@ class DCPortBasis:
     def rms_current_density_a_per_m2(self, correlation_a2: np.ndarray) -> np.ndarray:
         """Root-mean-square current density magnitude of every element."""
 
+        if self.operator._system is not None:
+            reduced, scale = self._reduced_correlation(correlation_a2)
+            return self.operator._core.fem.port_rms_current_density(
+                self.operator._system, reduced, scale, self.unit_current_potential_v, self.operator._team
+            )
         weights, modes = self._modes(correlation_a2)
         conductivity = np.asarray(self.mesh.conductivity_s_per_m, dtype=np.float64)
         square = np.zeros(self.mesh.element_active.shape, dtype=np.float64)
@@ -345,6 +366,8 @@ def dc_port_basis(
         width = 1
     team = max(1, min(int(team), budget // width))
     operator._set_native_team(team)
+    if operator._system is not None:
+        return _native_port_basis(operator, mesh, ports, config or MPIRConfig(), initial, width, team)
     if width > 1:
         from threadpoolctl import threadpool_limits
 
@@ -386,5 +409,58 @@ def dc_port_basis(
         unit_voltage_potential_v=unit_voltage,
         unit_current_potential_v=unit_current,
         solves=tuple(solves),
+        workers=width,
+    )
+
+
+def _native_port_basis(
+    operator: MatrixFreePCBOperator,
+    mesh: LayeredPCBMesh,
+    ports: PortSet,
+    config: MPIRConfig,
+    initial: DCPortBasis | None,
+    width: int,
+    team: int,
+) -> DCPortBasis:
+    """The unit solves, the KCL closure and the unit-current fields in C++."""
+
+    offsets, nodes = operator._node_groups(ports.voltage_terminals(np.zeros(ports.count)))
+    basis = operator._core.fem.dc_port_basis(
+        operator._system,
+        offsets,
+        nodes,
+        ports.reference,
+        None if initial is None else np.ascontiguousarray(initial.unit_voltage_potential_v, dtype=np.float64),
+        float(config.relative_tolerance),
+        float(config.absolute_tolerance),
+        float(config.inner_relative_tolerance),
+        int(config.max_outer_iterations),
+        int(config.max_inner_iterations),
+        width,
+        team,
+    )
+    unit_voltage = basis["unit_voltage"]
+    solves = tuple(
+        MPIRResult(
+            solution=unit_voltage[column].reshape(-1),
+            converged=bool(solve["converged"]),
+            outer_iterations=int(solve["outer_iterations"]),
+            inner_iterations=int(solve["inner_iterations"]),
+            relative_residual=float(solve["relative_residual"]),
+            high_operator_applications=int(solve["high_operator_applications"]),
+            low_operator_applications=int(solve["low_operator_applications"]),
+            low_runtime=operator.runtime.name,
+            history=tuple(MPIRStep(*step) for step in solve["history"]),
+        )
+        for column, solve in enumerate(basis["solves"])
+    )
+    return DCPortBasis(
+        mesh=mesh,
+        ports=ports,
+        operator=operator,
+        conductance_s=basis["conductance"],
+        unit_voltage_potential_v=unit_voltage,
+        unit_current_potential_v=basis["unit_current"],
+        solves=solves,
         workers=width,
     )
