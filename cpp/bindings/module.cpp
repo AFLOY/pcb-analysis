@@ -38,7 +38,10 @@ namespace pcb_voxelize { void register_module(py::module_& m); }
 namespace pcb_sheet_pfft_near { void register_module(py::module_& m); }
 
 // Bindings kept in their own files.
-namespace pcbcore_bindings { void register_fem(py::module_& m); }
+namespace pcbcore_bindings {
+void register_fem(py::module_& m);
+void register_thermal(py::module_& m);
+}  // namespace pcbcore_bindings
 
 namespace {
 
@@ -503,6 +506,10 @@ PYBIND11_MODULE(_pcbcore, m) {
     {
         py::module_ sub = m.def_submodule("fem", "Prepared matrix-free FEM systems");
         pcbcore_bindings::register_fem(sub);
+    }
+    {
+        py::module_ sub = m.def_submodule("thermal", "Steady and transient heat conduction");
+        pcbcore_bindings::register_thermal(sub);
     }
 
     py::module_ network = m.def_submodule("network", "Conductance networks: the zero-frequency sheet mesh");

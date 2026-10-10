@@ -379,6 +379,26 @@ remains the open item for boards beyond a few hundred thousand nodes.
 
 ## Fused C++ host path (measured on `exp/cpp-thermal-emc`)
 
+**Now (pcbcore):** with the core built, the whole conduction solve is C++
+(`electrical._pcbcore.thermal`, `cpp/src/thermal/`).  `ThermalProblem` holds
+the mesh arrays, fixed nodes and loads and lumps every boundary (top/bottom
+faces, exposed faces, their Newton-linearised radiation) onto the nodes;
+`ThermalSystem` holds one prepared operator (coefficients, Robin and `C/Δt`
+terms, diagonal, coarse space, both precisions) with its right-hand side,
+residuals and heat budget.  `solve_steady` runs the linear solve with the
+re-reference restart, or the radiation Newton loop around it;
+`solve_transient` marches backward Euler and reuses the prepared system
+while `Δt` repeats and nothing radiates.  The facades
+(`MatrixFreeThermalOperator`, `solve_thermal_conduction`,
+`solve_thermal_transient`) only convert the dataclasses
+(`native_system.py`); `native=False` or a CUDA runtime keep the NumPy/CuPy
+path.  Lumping, loads and the diagonal agree with NumPy bit for bit; the
+radiation linearisation agrees to an ulp of `T³` (NumPy 2.3 evaluates
+`x**3` with its own SIMD `pow`).  `tests/test_native_thermal_system.py`
+compares the two and checks identical bits at budgets 1, 2, 3 and 8.
+
+The rest of this section describes the kernels as they were first added.
+
 The array-corner-product action issues 64 whole-grid products per
 application and the two-level PCG spends the rest of an inner iteration in
 NumPy vector calls, the patch restriction and a `(n_c × n_c)` matmul.  The

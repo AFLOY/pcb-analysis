@@ -152,7 +152,7 @@ def test_native_rejects_wrong_sizes_and_cuda_runtime() -> None:
     with pytest.raises(ValueError, match="size"):
         native.apply_low(np.zeros(native.size + 1, dtype=np.float32))
     with pytest.raises(ValueError, match="size"):
-        native.native_inner_pcg(np.zeros(native.size - 1), MPIRConfig())
+        native.native_solve_mpir(np.zeros(native.size - 1), MPIRConfig())
     with pytest.raises(ValueError, match="size"):
         native.apply_high(np.zeros(native.size + 1))
 

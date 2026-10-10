@@ -30,6 +30,7 @@ struct OperatorView {
 };
 
 void apply_high(const OperatorView<double>& op, const double* x, double* y, int threads);
+void apply_low(const OperatorView<float>& op, const float* x, float* y, int threads);
 
 [[nodiscard]] CoarseSpace assemble_coarse(const OperatorView<double>& op, int block, int threads);
 

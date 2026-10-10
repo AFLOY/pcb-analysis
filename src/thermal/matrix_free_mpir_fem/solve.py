@@ -11,6 +11,7 @@ from electrical.matrix_free_mpir_fem.runtime import LowPrecisionRuntime, Runtime
 from electrical.matrix_free_mpir_fem.solver import MPIRConfig, MPIRResult, solve_mpir
 
 from .mesh import Preconditioner
+from .native_system import native_problem, nodal_field, solution_from, solve_options, thermal_core
 from .operator import MatrixFreeThermalOperator
 from .problem import ThermalConductionProblem
 
@@ -97,6 +98,25 @@ def _solve(
 ) -> ThermalConductionSolution:
     """Steady solve, or one backward-Euler step when ``capacity_per_s`` is given."""
 
+    core = thermal_core(runtime, backend, native)
+    if core is not None:
+        size = problem.mesh.size
+        return solution_from(
+            core.thermal.solve_steady(
+                native_problem(core, problem),
+                nodal_field(initial_temperature_k, size, "initial_temperature_k"),
+                nodal_field(capacity_per_s, size, "capacity_per_s"),
+                nodal_field(previous_temperature_k, size, "previous_temperature_k"),
+                **solve_options(
+                    config,
+                    preconditioner,
+                    coarse_block_nodes,
+                    reference_temperature_k,
+                    radiation_max_iterations,
+                    radiation_tolerance_k,
+                ),
+            )
+        )
     linear_options = dict(
         config=config, runtime=runtime, backend=backend, device_id=device_id,
         preconditioner=preconditioner, coarse_block_nodes=coarse_block_nodes,

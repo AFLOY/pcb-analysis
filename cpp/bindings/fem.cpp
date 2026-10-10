@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "arrays.hpp"
+#include "mpir_convert.hpp"
 #include "pcbcore/errors.hpp"
 #include "pcbcore/fem/dc_ports.hpp"
 #include "pcbcore/fem/layered_dc_system.hpp"
@@ -20,20 +21,6 @@ namespace {
 
 using pcbcore::fem::LayeredDCSystem;
 using System = std::shared_ptr<LayeredDCSystem>;
-
-template <typename T>
-const T* sized(const Input<T>& array, const py::ssize_t expected, const char* const name) {
-    if (array.size() != expected) {
-        throw pcbcore::InvalidInput(std::string(name) + " has the wrong size");
-    }
-    return array.data();
-}
-
-py::array_t<bool> mask_array(const std::vector<std::uint8_t>& values, std::vector<py::ssize_t> shape) {
-    py::array_t<bool> out(std::move(shape));
-    std::memcpy(out.mutable_data(), values.data(), values.size());
-    return out;
-}
 
 pcbcore::fem::NodeGroupsView groups_view(const Input<std::int64_t>& offsets, const Input<std::int64_t>& nodes) {
     if (offsets.ndim() != 1 || nodes.ndim() != 1 || offsets.size() < 1) {
@@ -83,35 +70,6 @@ py::array_t<T> node_action(const LayeredDCSystem& system, const Input<T>& vector
         action(x, y.data());
     }
     return to_array(std::move(y));
-}
-
-pcbcore::fem::MpirConfig mpir_config(const double relative_tolerance, const double absolute_tolerance,
-                                     const double inner_relative_tolerance, const int max_outer_iterations,
-                                     const int max_inner_iterations) {
-    pcbcore::fem::MpirConfig config;
-    config.relative_tolerance = relative_tolerance;
-    config.absolute_tolerance = absolute_tolerance;
-    config.inner_relative_tolerance = inner_relative_tolerance;
-    config.max_outer_iterations = max_outer_iterations;
-    config.max_inner_iterations = max_inner_iterations;
-    return config;
-}
-
-py::dict result_dict(const pcbcore::fem::MpirResult& result) {
-    std::vector<std::tuple<int, double, int, double>> history;
-    for (const auto& step : result.history) {
-        history.emplace_back(step.outer_iteration, step.high_relative_residual, step.inner_iterations,
-                             step.inner_relative_residual);
-    }
-    py::dict out;
-    out["converged"] = result.converged;
-    out["outer_iterations"] = result.outer_iterations;
-    out["inner_iterations"] = result.inner_iterations;
-    out["relative_residual"] = result.relative_residual;
-    out["high_operator_applications"] = result.high_operator_applications;
-    out["low_operator_applications"] = result.low_operator_applications;
-    out["history"] = history;
-    return out;
 }
 
 py::dict solve(const LayeredDCSystem& system, const Input<double>& rhs, const py::object& initial_guess,

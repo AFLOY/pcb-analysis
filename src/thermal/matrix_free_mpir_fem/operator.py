@@ -18,11 +18,13 @@ from electrical.matrix_free_mpir_fem.runtime import (
     make_float32_runtime,
 )
 from electrical.matrix_free_mpir_fem.solver import MPIRConfig
+from electrical.matrix_free_mpir_fem.two_level import AggregationCoarseCorrection
+from electrical.threads import thread_budget
 
 from .mesh import Preconditioner, _corner_views, _flat_index, unit_hexahedron_matrices
-from .native_hex import NativeThermalHexQ1, NativeThermalHexQ1High, native_requested
+from .native_hex import NATIVE_HIGH_KERNEL_NAME, NATIVE_KERNEL_NAME
+from .native_system import native_problem, nodal_field, thermal_core
 from .problem import ThermalConductionProblem
-from electrical.matrix_free_mpir_fem.two_level import AggregationCoarseCorrection
 
 
 class MatrixFreeThermalOperator:
@@ -66,6 +68,15 @@ class MatrixFreeThermalOperator:
         self.runtime = runtime or make_float32_runtime(
             backend or "cpu", device_id=device_id
         )
+
+        self.preconditioner = preconditioner
+        # The C++ system owns the whole prepared operator when the core
+        # answers; the arrays below are the NumPy (and CuPy) implementation.
+        self._system: Any = None
+        core = thermal_core(self.runtime, None, native)
+        if core is not None:
+            self._init_system(core, problem, preconditioner, coarse_block_nodes, capacity_per_s)
+            return
 
         mesh = self.mesh
         # K_e = a_x U_x + a_y U_y + a_z U_z with per-element coefficients that
@@ -135,7 +146,6 @@ class MatrixFreeThermalOperator:
         self._diagonal_low = self.runtime.from_host(diagonal)
 
         self._cuda_apply = None
-        self._native: NativeThermalHexQ1 | None = None
         self.low_operator_backend = "array-corner-products"
         if getattr(self.runtime, "is_cuda", False):
             if native:
@@ -153,23 +163,8 @@ class MatrixFreeThermalOperator:
             self._unit_low = runtime_ns.ascontiguousarray(self._unit_low)
             self._robin_total_low = runtime_ns.ascontiguousarray(self._robin_total_low)
 
-        use_native = self._cuda_apply is None and (native or (native is None and native_requested()))
-        # The FP64 action (outer residual and coarse assembly) goes native with
-        # the low path; it is built first because the coarse matrix below is
-        # assembled from FP64 applications.
-        self._native_high: NativeThermalHexQ1High | None = None
         self.high_operator_backend = "array-corner-products-fp64"
-        if use_native:
-            self._native_high = NativeThermalHexQ1High(
-                mesh.element_grid_shape,
-                self._coefficients_high,
-                self._unit_high,
-                self._robin_total_high,
-                self.free_nodes,
-            )
-            self.high_operator_backend = self._native_high.kernel_name
 
-        self.preconditioner = preconditioner
         self.coarse_correction: AggregationCoarseCorrection | None = None
         if preconditioner == "two-level":
             self.coarse_correction = AggregationCoarseCorrection(
@@ -179,24 +174,53 @@ class MatrixFreeThermalOperator:
                 apply_high=self.apply_high,
                 runtime=self.runtime,
                 block=coarse_block_nodes,
-                native_operator=self._native_high,
             )
-        if use_native:
-            # Fused C++ host path, the CPU default when built: operator plus
-            # the whole inner PCG with the same preconditioner.  ``native=True``
-            # demands it and ``native=False`` keeps the NumPy path.
-            coarse = self.coarse_correction
-            self._native = NativeThermalHexQ1(
-                mesh.element_grid_shape,
-                self._coefficients_high,
-                self._unit_high,
-                self._robin_total_high,
-                self.free_nodes,
-                diagonal,
-                coarse_block=None if coarse is None else coarse.block,
-                coarse_inverse=None if coarse is None else coarse._coarse_inverse_high,
+
+    def _init_system(
+        self,
+        core: Any,
+        problem: ThermalConductionProblem,
+        preconditioner: Preconditioner,
+        coarse_block_nodes: int | None,
+        capacity_per_s: np.ndarray | None,
+    ) -> None:
+        capacity = nodal_field(capacity_per_s, self.size, "capacity_per_s")
+        # OpenMP team of every call: the process budget when the operator is built.
+        self._team = thread_budget()
+        self._core_problem = native_problem(core, problem)
+        system = core.thermal.ThermalSystem(
+            self._core_problem,
+            capacity,
+            preconditioner == "two-level",
+            0 if coarse_block_nodes is None else int(coarse_block_nodes),
+            self._team,
+        )
+        self._system = system
+        self.active_nodes = system.active_nodes
+        self.free_nodes = system.free_nodes
+        self.fixed_nodes = ~self.free_nodes
+        self.fixed_temperature_k = system.fixed_temperature
+        self._diagonal_high = system.diagonal
+        self._diagonal_low = self.runtime.from_host(self._diagonal_high)
+        self.high_operator_backend = NATIVE_HIGH_KERNEL_NAME
+        self.low_operator_backend = NATIVE_KERNEL_NAME
+        self.coarse_correction = None
+        if preconditioner == "two-level":
+            self.coarse_correction = AggregationCoarseCorrection(
+                node_shape=self.mesh.node_shape,
+                free_nodes=self.free_nodes,
+                diagonal_high=self._diagonal_high,
+                apply_high=self.apply_high,
+                runtime=self.runtime,
+                block=system.block,
+                assembled=(system.coarse_matrix, system.coarse_inverse),
             )
-            self.low_operator_backend = self._native.kernel_name
+
+    def _flat(self, values: np.ndarray, name: str = "vector") -> np.ndarray:
+        flat = np.ascontiguousarray(values, dtype=np.float64).reshape(-1)
+        if flat.size != self.size:
+            raise ValueError(f"{name} has size {flat.size}, expected {self.size}")
+        return flat
 
     # ------------------------------------------------------------------ views
     _corner_views = staticmethod(_corner_views)
@@ -271,8 +295,8 @@ class MatrixFreeThermalOperator:
         vector = np.asarray(vector, dtype=np.float64).reshape(-1)
         if vector.size != self.size:
             raise ValueError(f"vector has size {vector.size}, expected {self.size}")
-        if self._native_high is not None:
-            return self._native_high.apply(vector)
+        if self._system is not None:
+            return self._system.apply_high(vector, self._team)
         return self._apply_impl(
             vector, np, self._coefficients_high, self._unit_high, self._robin_total_high, self.free_nodes
         )
@@ -285,26 +309,35 @@ class MatrixFreeThermalOperator:
     ) -> tuple[np.ndarray, bool, int, int, float, int, int] | None:
         """End-to-end mixed-precision solve in C++; ``None`` when native is off."""
 
-        if self._native is None:
+        if self._system is None:
             return None
-        return self._native.solve_mpir(rhs_high, config, initial_guess)
-
-    def native_inner_pcg(
-        self, rhs_high: np.ndarray, config: MPIRConfig
-    ) -> tuple[np.ndarray, int, float, int] | None:
-        """Whole inner PCG in C++; ``None`` when the native path is off."""
-
-        if self._native is None:
-            return None
-        return self._native.inner_pcg(
-            rhs_high,
-            inner_relative_tolerance=config.inner_relative_tolerance,
-            max_inner_iterations=config.max_inner_iterations,
+        result = self._system.solve(
+            self._flat(rhs_high, "rhs"),
+            None if initial_guess is None else self._flat(initial_guess, "initial_guess"),
+            float(config.relative_tolerance),
+            float(config.absolute_tolerance),
+            float(config.inner_relative_tolerance),
+            int(config.max_outer_iterations),
+            int(config.max_inner_iterations),
+            self._team,
+        )
+        return (
+            result["solution"],
+            bool(result["converged"]),
+            int(result["outer_iterations"]),
+            int(result["inner_iterations"]),
+            float(result["relative_residual"]),
+            int(result["high_operator_applications"]),
+            int(result["low_operator_applications"]),
+            list(result["history"]),
         )
 
     def apply_low(self, vector: Any) -> Any:
-        if self._native is not None:
-            return self._native.apply(vector)
+        if self._system is not None:
+            vector = np.ascontiguousarray(vector, dtype=np.float32).reshape(-1)
+            if vector.size != self.size:
+                raise ValueError(f"vector has size {vector.size}, expected {self.size}")
+            return self._system.apply_low(vector, self._team)
         if self._cuda_apply is not None:
             return self._cuda_apply(
                 vector, self._coefficients_low, self._unit_low, self._robin_total_low, self._free_low_u8
@@ -327,6 +360,8 @@ class MatrixFreeThermalOperator:
     def nodal_load(self) -> np.ndarray:
         """Heat input per node in W: lumped element heat plus nodal sources."""
 
+        if self._system is not None:
+            return self._core_problem.load.reshape(-1)
         load = self.problem.nodal_heat_w.copy()
         share = self.problem.element_heat_w / 8.0
         for target in self._corner_views(load):
@@ -340,6 +375,8 @@ class MatrixFreeThermalOperator:
     def default_reference_temperature(self) -> float:
         """Ambient of the first convective face, else the mean fixed value."""
 
+        if self._system is not None:
+            return float(self._system.default_reference())
         if self._robin_ambient_k:
             return float(self._robin_ambient_k[0])
         mask = self.problem.fixed_temperature_mask & self.active_nodes
@@ -371,6 +408,9 @@ class MatrixFreeThermalOperator:
         from ``previous_temperature_k``.
         """
 
+        if self._system is not None:
+            previous = nodal_field(previous_temperature_k, self.size, "previous_temperature_k")
+            return self._system.build_rhs(float(reference_temperature_k), previous, self._team)
         reference = float(reference_temperature_k)
         mask = self.fixed_nodes.reshape(-1)
         active = self.active_nodes.reshape(-1)
@@ -391,6 +431,9 @@ class MatrixFreeThermalOperator:
     ) -> np.ndarray:
         """``C / Δt (T - T_n)`` per node: the heat going into the thermal mass this step."""
 
+        if self._system is not None:
+            previous = nodal_field(previous_temperature_k, self.size, "previous_temperature_k")
+            return self._system.stored_heat(self._flat(temperature_k, "temperature_k"), previous)
         flat = np.asarray(temperature_k, dtype=np.float64).reshape(-1)
         if previous_temperature_k is None:
             return np.zeros(self.size, dtype=np.float64)
@@ -409,6 +452,9 @@ class MatrixFreeThermalOperator:
         + sink``.
         """
 
+        if self._system is not None:
+            previous = nodal_field(previous_temperature_k, self.size, "previous_temperature_k")
+            return self._system.unconstrained_residual(self._flat(temperature_k, "temperature_k"), previous, self._team)
         flat = np.asarray(temperature_k, dtype=np.float64).reshape(-1)
         conduction = self._stiffness_action(
             flat.reshape(self.mesh.node_shape), np, self._coefficients_high, self._unit_high
@@ -424,6 +470,8 @@ class MatrixFreeThermalOperator:
     def convective_heat(self, temperature_k: np.ndarray) -> np.ndarray:
         """Heat removed by each convection boundary, in W, in problem order."""
 
+        if self._system is not None:
+            return self._system.convective_heat(self._flat(temperature_k, "temperature_k"))
         flat = np.asarray(temperature_k, dtype=np.float64).reshape(-1)
         return np.asarray(
             [
@@ -438,6 +486,8 @@ class MatrixFreeThermalOperator:
     def element_heat_flux(self, temperature_k: np.ndarray) -> np.ndarray:
         """Return ``-k grad T`` at each element centre, in W/m², as (x, y, z)."""
 
+        if self._system is not None:
+            return self._system.element_heat_flux(self._flat(temperature_k, "temperature_k"), self._team)
         grid = np.asarray(temperature_k, dtype=np.float64).reshape(
             self.mesh.node_shape
         )

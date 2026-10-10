@@ -1,247 +1,25 @@
-"""Optional fused C++ low path for the hexahedral Q1 conduction operator.
+"""The C++ path of the hexahedral Q1 conduction operator.
 
-The compiled module ``_thermal_native`` is built in place with
-``python -m thermal.matrix_free_mpir_fem.native.build``.  Without it every
-entry point reports unavailability and the portable NumPy path is used.
+With the core built, :class:`.operator.MatrixFreeThermalOperator` hands the
+whole prepared operator to ``electrical._pcbcore.thermal.ThermalSystem`` and
+the solves run in ``electrical._pcbcore.thermal`` (see :mod:`.native_system`);
+``native=False``, a CUDA runtime or a missing build keep the NumPy/CuPy
+implementation.  The two agree within the solver tolerance, not bit for bit.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
-import numpy as np
-
-from electrical.threads import thread_budget
-
-try:  # pragma: no cover - depends on the local build
-    from electrical._pcbcore import thermal_hex as _native
-except ImportError:  # pragma: no cover
-    try:  # a module built on its own by native/build.py
-        from . import _thermal_native as _native
-    except ImportError:
-        _native = None
-
+from electrical import _backend
 
 NATIVE_KERNEL_NAME = "cpp-fused-node-gather-hex-q1"
-
-
-def native_available() -> bool:
-    return _native is not None
-
-
-def native_requested() -> bool:
-    """The built extension is the default CPU path; ``native=False`` opts out."""
-
-    return native_available()
-
-
-class NativeThermalHexQ1:
-    """Host float32 operator and two-level inner PCG bound to one prepared mesh."""
-
-    kernel_name = NATIVE_KERNEL_NAME
-
-    def __init__(
-        self,
-        element_grid_shape: tuple[int, int, int],
-        coefficients: np.ndarray,
-        unit: np.ndarray,
-        robin: np.ndarray,
-        free_nodes: np.ndarray,
-        diagonal: np.ndarray,
-        *,
-        coarse_block: int | None = None,
-        coarse_inverse: np.ndarray | None = None,
-    ) -> None:
-        if _native is None:
-            raise ImportError(
-                "the thermal native extension is not built; run "
-                "python -m thermal.matrix_free_mpir_fem.native.build"
-            )
-        self.slabs, self.rows, self.cols = (int(axis) for axis in element_grid_shape)
-        self.size = (self.slabs + 1) * (self.rows + 1) * (self.cols + 1)
-        self.threads = thread_budget()  # the whole process budget: the kernel runs alone
-        f32 = lambda value: np.ascontiguousarray(value, dtype=np.float32).reshape(-1)
-        self._coefficients = f32(coefficients)
-        self._unit = f32(unit)
-        if self._coefficients.size != 3 * self.slabs * self.rows * self.cols or self._unit.size != 192:
-            raise ValueError("coefficients must be (3, slabs, rows, cols) and unit (3, 8, 8)")
-        self._robin = f32(robin)
-        self._free = np.ascontiguousarray(free_nodes, dtype=np.uint8).reshape(-1)
-        self._free_mask = self._free.astype(np.float32)
-        self._diagonal = f32(diagonal)
-        if (coarse_block is None) != (coarse_inverse is None):
-            raise ValueError("coarse_block and coarse_inverse go together")
-        self.coarse_block = int(coarse_block) if coarse_block is not None else 1
-        self._coarse_inverse = (
-            np.ascontiguousarray(coarse_inverse, dtype=np.float32).reshape(-1)
-            if coarse_inverse is not None
-            else np.zeros(0, dtype=np.float32)
-        )
-        if coarse_inverse is not None:
-            block = self.coarse_block
-            coarse = (self.slabs + 1) * (-(-(self.rows + 1) // block)) * (-(-(self.cols + 1) // block))
-            if self._coarse_inverse.size != coarse * coarse:
-                raise ValueError("coarse_inverse does not match the patch grid")
-
-        self._coefficients_f64 = np.ascontiguousarray(coefficients, dtype=np.float64).reshape(-1)
-        self._unit_f64 = np.ascontiguousarray(unit, dtype=np.float64).reshape(-1)
-        self._robin_f64 = np.ascontiguousarray(robin, dtype=np.float64).reshape(-1)
-        self._free_mask_f64 = self._free.astype(np.float64)
-
-    def apply(self, vector: Any) -> np.ndarray:
-        vector = np.ascontiguousarray(vector, dtype=np.float32).reshape(-1)
-        if vector.size != self.size:
-            raise ValueError(f"vector has size {vector.size}, expected {self.size}")
-        return _native.apply_hex_q1(
-            vector,
-            self._coefficients,
-            self._unit,
-            self._robin,
-            self._free,
-            self._free_mask,
-            self.slabs,
-            self.rows,
-            self.cols,
-            self.threads,
-        )
-
-    def inner_pcg(
-        self,
-        rhs_high: np.ndarray,
-        *,
-        inner_relative_tolerance: float,
-        max_inner_iterations: int,
-    ) -> tuple[np.ndarray, int, float, int]:
-        rhs_high = np.ascontiguousarray(rhs_high, dtype=np.float64).reshape(-1)
-        if rhs_high.size != self.size:
-            raise ValueError(f"rhs has size {rhs_high.size}, expected {self.size}")
-        correction, iterations, relative_residual, applications = _native.pcg_hex_q1(
-            rhs_high,
-            self._diagonal,
-            self._coefficients,
-            self._unit,
-            self._robin,
-            self._free,
-            self._free_mask,
-            self.slabs,
-            self.rows,
-            self.cols,
-            self.coarse_block,
-            self._coarse_inverse,
-            float(inner_relative_tolerance),
-            int(max_inner_iterations),
-            self.threads,
-        )
-        return (
-            np.asarray(correction, dtype=np.float32),
-            int(iterations),
-            float(relative_residual),
-            int(applications),
-        )
-
-    def solve_mpir(
-        self,
-        rhs_high: np.ndarray,
-        config: Any,
-        initial_guess: np.ndarray | None = None,
-    ) -> tuple[np.ndarray, bool, int, int, float, int, int, list[tuple[int, float, int, float]]]:
-        rhs_high = np.ascontiguousarray(rhs_high, dtype=np.float64).reshape(-1)
-        if rhs_high.size != self.size:
-            raise ValueError(f"rhs has size {rhs_high.size}, expected {self.size}")
-        init_guess = (
-            np.ascontiguousarray(initial_guess, dtype=np.float64).reshape(-1)
-            if initial_guess is not None
-            else np.zeros(0, dtype=np.float64)
-        )
-        sol, conv, outer, inner, rel, n_high, n_low, history = _native.solve_mpir_thermal_hex(
-            rhs_high, init_guess, self._diagonal,
-            self._coefficients, self._unit, self._robin, self._free, self._free_mask,
-            self._coefficients_f64, self._unit_f64, self._robin_f64, self._free_mask_f64,
-            self.slabs, self.rows, self.cols, self.coarse_block, self._coarse_inverse,
-            float(config.relative_tolerance), float(config.absolute_tolerance),
-            float(config.inner_relative_tolerance), int(config.max_outer_iterations),
-            int(config.max_inner_iterations), self.threads,
-        )
-        return (
-            np.asarray(sol, dtype=np.float64),
-            bool(conv),
-            int(outer),
-            int(inner),
-            float(rel),
-            int(n_high),
-            int(n_low),
-            [(int(o), float(h), int(k), float(r)) for o, h, k, r in history],
-        )
-
-
 NATIVE_HIGH_KERNEL_NAME = "cpp-fused-node-gather-hex-q1-fp64"
 
 
-class NativeThermalHexQ1High:
-    """Host float64 operator for the outer MPIR residual and coarse assembly.
+def native_available() -> bool:
+    return _backend.native_available()
 
-    Built before the two-level preconditioner, whose coarse matrix is
-    assembled from FP64 applications, so it holds no preconditioner data.
-    """
 
-    kernel_name = NATIVE_HIGH_KERNEL_NAME
+def native_requested() -> bool:
+    """The built core is the default CPU path; ``native=False`` opts out."""
 
-    def __init__(
-        self,
-        element_grid_shape: tuple[int, int, int],
-        coefficients: np.ndarray,
-        unit: np.ndarray,
-        robin: np.ndarray,
-        free_nodes: np.ndarray,
-    ) -> None:
-        if _native is None:
-            raise ImportError(
-                "the thermal native extension is not built; run "
-                "python -m thermal.matrix_free_mpir_fem.native.build"
-            )
-        self.slabs, self.rows, self.cols = (int(axis) for axis in element_grid_shape)
-        self.size = (self.slabs + 1) * (self.rows + 1) * (self.cols + 1)
-        self.threads = thread_budget()  # the whole process budget: the kernel runs alone
-        f64 = lambda value: np.ascontiguousarray(value, dtype=np.float64).reshape(-1)
-        self._coefficients = f64(coefficients)
-        self._unit = f64(unit)
-        if self._coefficients.size != 3 * self.slabs * self.rows * self.cols or self._unit.size != 192:
-            raise ValueError("coefficients must be (3, slabs, rows, cols) and unit (3, 8, 8)")
-        self._robin = f64(robin)
-        self._free = np.ascontiguousarray(free_nodes, dtype=np.uint8).reshape(-1)
-        self._free_mask = self._free.astype(np.float64)
-
-    def apply(self, vector: Any) -> np.ndarray:
-        vector = np.ascontiguousarray(vector, dtype=np.float64).reshape(-1)
-        if vector.size != self.size:
-            raise ValueError(f"vector has size {vector.size}, expected {self.size}")
-        return _native.apply_hex_q1_f64(
-            vector,
-            self._coefficients,
-            self._unit,
-            self._robin,
-            self._free,
-            self._free_mask,
-            self.slabs,
-            self.rows,
-            self.cols,
-            self.threads,
-        )
-
-    def assemble_coarse(self, block: int) -> tuple[np.ndarray, np.ndarray]:
-        """The Galerkin coarse matrix ``Z^T A Z`` and its SPD inverse, row-major."""
-
-        matrix, inverse = _native.assemble_coarse_hex(
-            self._coefficients,
-            self._unit,
-            self._robin,
-            self._free,
-            self._free_mask,
-            self.slabs,
-            self.rows,
-            self.cols,
-            int(block),
-            self.threads,
-        )
-        return np.asarray(matrix), np.asarray(inverse)
-
+    return native_available()
