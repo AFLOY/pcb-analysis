@@ -115,6 +115,38 @@ def mpir_result_from_core(result: dict, low_runtime: str) -> MPIRResult:
     )
 
 
+def solve_mpir_device(
+    device_system: Any,
+    rhs: np.ndarray,
+    *,
+    config: MPIRConfig | None = None,
+    initial_guess: np.ndarray | None = None,
+) -> MPIRResult:
+    """:func:`solve_mpir` with the FP32 inner solve on a CUDA device.
+
+    ``device_system`` comes from an operator's ``device_system()``; the FP64
+    residual runs on the host C++ system as in the CPU solve.
+    """
+
+    from ..threads import thread_budget
+
+    config = config or MPIRConfig()
+    rhs_high = np.ascontiguousarray(rhs, dtype=np.float64).reshape(-1)
+    if not np.all(np.isfinite(rhs_high)):
+        raise ValueError("rhs must contain only finite values")
+    result = device_system.solve(
+        rhs_high,
+        None if initial_guess is None else np.ascontiguousarray(initial_guess, dtype=np.float64).reshape(-1),
+        float(config.relative_tolerance),
+        float(config.absolute_tolerance),
+        float(config.inner_relative_tolerance),
+        int(config.max_outer_iterations),
+        int(config.max_inner_iterations),
+        thread_budget(),
+    )
+    return mpir_result_from_core(result, "cuda-fp32")
+
+
 def _inner_pcg(
     system: MatrixFreeMPIRSystem,
     rhs_high: np.ndarray,

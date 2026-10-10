@@ -92,6 +92,11 @@ public:
     // Bytes of the arrays the FP32 inner solve reads (operator, masks, vias,
     // diagonal, coarse inverse).
     [[nodiscard]] std::int64_t low_bytes() const noexcept;
+    // The FP32 operator, diagonal and coarse inverse the inner solve reads
+    // (empty inverse without the two-level preconditioner), for a device copy.
+    [[nodiscard]] layered_dc::OperatorView<float> low_view() const noexcept;
+    [[nodiscard]] const std::vector<float>& diagonal_low() const noexcept { return diagonal_low_; }
+    [[nodiscard]] const std::vector<float>& coarse_inverse_low() const noexcept { return coarse_inverse_low_; }
 
     // A x with fixed rows as the identity (what the MPIR solves).
     void apply_high(const double* x, double* y, int threads) const;
@@ -126,7 +131,6 @@ public:
 private:
     [[nodiscard]] layered_dc::OperatorView<double> high_view() const noexcept;
     [[nodiscard]] layered_dc::OperatorView<double> full_view() const noexcept;
-    [[nodiscard]] layered_dc::OperatorView<float> low_view() const noexcept;
     void check_nodes(const NodeGroupsView& groups, const char* what) const;
 
     int layers_{0};

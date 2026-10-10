@@ -17,8 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCES = sorted(
     path
     for pattern in ("*.cpp", "*.hpp", "*.cu", "*.cuh")
-    for path in (ROOT / "src").rglob(pattern)
-) + sorted((ROOT / "cpp").rglob("*.[ch]pp") if (ROOT / "cpp").is_dir() else [])
+    for root in (ROOT / "src", ROOT / "cpp")
+    for path in root.rglob(pattern)
+)
 
 
 def _pragmas(text: str) -> list[str]:

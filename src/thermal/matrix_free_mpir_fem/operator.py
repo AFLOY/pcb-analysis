@@ -216,6 +216,20 @@ class MatrixFreeThermalOperator:
                 assembled=(system.coarse_matrix, system.coarse_inverse),
             )
 
+    def device_system(self, device: int = 0) -> Any:
+        """This operator's inner solve resident on CUDA ``device``.
+
+        Pass it to ``electrical.matrix_free_mpir_fem.solver.solve_mpir_device``.
+        Needs the C++ system and ``electrical._pcbcore_cuda`` with a device present.
+        """
+
+        from electrical import backend as _backend
+
+        cuda = _backend.cuda_core()
+        if cuda is None or self._system is None:
+            raise RuntimeError("no CUDA device, or electrical._pcbcore_cuda or the C++ system is missing")
+        return cuda.DeviceSystem.thermal(self._system, int(device))
+
     def _flat(self, values: np.ndarray, name: str = "vector") -> np.ndarray:
         flat = np.ascontiguousarray(values, dtype=np.float64).reshape(-1)
         if flat.size != self.size:

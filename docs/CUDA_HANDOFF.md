@@ -14,9 +14,32 @@ maps CPU and CUDA solutions through one result-conversion function.  CPU
 fallback is off by default; setting `fallback_backend` to `pypeec` enables it
 and records the requested backend and reason in the result metadata.
 
-The package also contains a CuPy/cuFFT plus RawKernel implementation of exact
-batched sparse-delta quadratic scoring.  The adaptive controller and scalar
-delta experiments remain available for later candidate-screening work.
+## C++ CUDA inner solves (`electrical._pcbcore_cuda`, compiled, not yet run on a GPU)
+
+`-DPCB_NATIVE_CUDA=ON` builds a second extension beside `electrical._pcbcore`.
+It moves the FP32 inner PCG of the layered DC and thermal hex MPIR solves to
+a device (`cpp/cuda/inner_pcg.cu`): the same node gathers as the CPU kernels,
+Jacobi plus the patch-constant coarse correction, and inner products summed
+as per-line lane sums in a fixed tree, so a device solve gives the same bits
+on every run.  The FP64 outer refinement stays on the host C++ system.  It is
+opt-in: `operator.device_system()` on `MatrixFreePCBOperator` or
+`MatrixFreeThermalOperator`, then
+`electrical.matrix_free_mpir_fem.solver.solve_mpir_device(device, rhs)`.  The
+CuPy runtimes remain the `backend="cuda"` path until the device tests pass.
+
+The CI job `cuda-compile` builds it in `nvidia/cuda:12.6.3-devel-ubuntu24.04`
+for sm_75, sm_86 and sm_89; no runner has a GPU.  On a CUDA machine:
+
+```sh
+cmake -S . -B build/native -DPCB_NATIVE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=native
+cmake --build build/native
+.venv/bin/python -m pytest tests/test_cuda_core.py -rs
+```
+
+`tests/test_cuda_core.py` checks, for DC (two-level and Jacobi) and thermal,
+that the device solve converges, repeats bit for bit, and agrees with the CPU
+solve to the iterative tolerance.  Record the device, driver and CUDA version
+with the result; only then can the facades route `backend="cuda"` to it.
 
 ## Environment and first run
 

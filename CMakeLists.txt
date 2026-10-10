@@ -199,3 +199,31 @@ target_link_libraries(_pcbcore PRIVATE pcbcore pcbcore_kernels)
 # from appending a Release/ directory.
 set_target_properties(_pcbcore PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "$<1:${CMAKE_SOURCE_DIR}/src/electrical>")
+
+# ---------------------------------------------------------------------------
+# electrical._pcbcore_cuda (-DPCB_NATIVE_CUDA=ON): the FP32 inner solves of
+# the prepared systems on a CUDA device.  It links the same pcbcore code as
+# _pcbcore and takes the systems that module builds.  --fmad=false keeps
+# products and sums apart, as the CPU gathers do.  CMAKE_CUDA_ARCHITECTURES
+# defaults to Turing, Ampere and Ada (sm_75, sm_86, sm_89).
+if(PCB_NATIVE_CUDA)
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES 75 86 89)
+  endif()
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  add_library(pcbcore_cuda STATIC cpp/cuda/inner_pcg.cu)
+  set_target_properties(pcbcore_cuda PROPERTIES
+    CUDA_STANDARD 17
+    CUDA_STANDARD_REQUIRED ON
+    POSITION_INDEPENDENT_CODE ON)
+  target_include_directories(pcbcore_cuda PUBLIC cpp/include)
+  target_compile_options(pcbcore_cuda PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--fmad=false -O3>)
+  target_link_libraries(pcbcore_cuda PUBLIC CUDA::cudart_static)
+
+  pybind11_add_module(_pcbcore_cuda MODULE cpp/bindings/cuda_module.cpp)
+  target_compile_options(_pcbcore_cuda PRIVATE ${PCB_OPT_FLAGS})
+  target_link_libraries(_pcbcore_cuda PRIVATE pcbcore pcbcore_kernels pcbcore_cuda)
+  set_target_properties(_pcbcore_cuda PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "$<1:${CMAKE_SOURCE_DIR}/src/electrical>")
+endif()
