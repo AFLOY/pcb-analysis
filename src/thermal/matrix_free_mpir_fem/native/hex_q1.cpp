@@ -35,6 +35,7 @@
 #include <omp.h>
 #endif
 #include "pcbcore/flush_subnormals.hpp"
+#include "pcbcore/pragmas.hpp"
 
 #include "pcbcore/fem/thermal_hex.hpp"
 #include "pcbcore/lane_sum.hpp"
@@ -160,7 +161,7 @@ struct HexOperatorT final {
                     const T* const ay = coef + ne + e_row;
                     const T* const az = coef + (2 * ne) + e_row;
                     const py::ssize_t corner_row = (static_cast<py::ssize_t>(ez * nr + ey)) * nc;
-#pragma omp simd
+PCBCORE_OMP_SIMD
                     for (int xi = 1; xi < cols; ++xi) {
                         T acc{static_cast<T>(0)};
 #pragma GCC unroll 2
@@ -182,7 +183,7 @@ struct HexOperatorT final {
                     }
                 }
             }
-#pragma omp simd
+PCBCORE_OMP_SIMD
             for (int xi = 1; xi < cols; ++xi) {
                 const py::ssize_t node = base + static_cast<py::ssize_t>(xi);
                 const T f = free_mask[node];
