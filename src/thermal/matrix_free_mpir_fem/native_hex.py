@@ -7,7 +7,6 @@ entry point reports unavailability and the portable NumPy path is used.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import numpy as np
@@ -28,10 +27,9 @@ def native_available() -> bool:
 
 
 def native_requested() -> bool:
-    """True when ``PCB_NATIVE_THERMAL`` selects the built extension by default."""
+    """The built extension is the default CPU path; ``native=False`` opts out."""
 
-    flag = os.environ.get("PCB_NATIVE_THERMAL", "").strip().lower()
-    return flag in {"1", "true", "yes", "on"} and native_available()
+    return native_available()
 
 
 class NativeThermalHexQ1:

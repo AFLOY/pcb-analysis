@@ -137,8 +137,8 @@ is adequate for the magnetic near field on a GPU without fast FP64.
 
 The tiled array path materialises `(tile × sources × 3)` complex temporaries
 about thirty times per tile, so it is memory bound.  `native=True` on
-`evaluate_fields` and `far_field_pattern` (or `PCB_NATIVE_EMC=1`, after
-`python -m emc.tiled_dipole_superposition.native.build`) sums the pairs point
+`evaluate_fields` and `far_field_pattern` (the default whenever
+`_dipole_native` is built; `native=False` keeps the array path) sums the pairs point
 by point in C++ with the same complex128 formulas; OpenMP threads own disjoint
 observation points (as many as the process-wide thread budget,
 `electrical.set_thread_budget`; until 0.9.3 `native_threads=` or
@@ -212,7 +212,7 @@ stays the array path.
 `dipoles_from_sheet_peec` assembled one Python tuple per branch. A plane at
 the acceptance grid has 10^5 to 10^6 branches, so the loop was tried two
 ways: a C++ kernel `sheet_branch_dipoles` in `_dipole_native` (OpenMP over
-branches, `native=True` or `PCB_NATIVE_EMC=1`), and the same assembly with
+branches, `native=True`), and the same assembly with
 NumPy indexing. Measured with `experiments/emc_sources_benchmark.py --shapes
 100x100,300x300,600x600 --threads 1,4,16` on the Xeon Platinum 8581C (GCC
 14.2.1, NumPy 2.3.5, `OPENBLAS_NUM_THREADS=1`;

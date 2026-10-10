@@ -280,9 +280,8 @@ class MatrixFreePCBOperator:
 
     ``native=True`` runs the FP32 action, the whole inner PCG and the FP64
     action in the optional C++ extension (CPU runtime only, an OpenMP team of
-    :func:`electrical.threads.thread_budget` threads); ``None`` follows
-    ``PCB_NATIVE_Q1``.  The results are the same either way; only the speed
-    differs.
+    :func:`electrical.threads.thread_budget` threads); ``None`` uses it when
+    built, ``False`` keeps NumPy.  The two agree within the solver tolerance.
 
     Fixed nodes are the inactive nodes, the ``reference_node`` and every
     ``dirichlet_nodes`` entry; at least one of the last two must be given.

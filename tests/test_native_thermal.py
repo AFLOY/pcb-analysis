@@ -57,7 +57,7 @@ def _stack(rows: int, cols: int, *, fixed: bool = False) -> ThermalConductionPro
 @pytest.mark.parametrize("threads", [1, 3])
 def test_native_apply_matches_portable_float32(shape, fixed, threads) -> None:
     problem = _stack(*shape, fixed=fixed)
-    portable = MatrixFreeThermalOperator(problem, preconditioner="jacobi")
+    portable = MatrixFreeThermalOperator(problem, preconditioner="jacobi", native=False)
     with thread_budget_scope(threads):
         native = MatrixFreeThermalOperator(
             problem, preconditioner="jacobi", native=True
@@ -79,7 +79,7 @@ def test_native_apply_matches_portable_float32(shape, fixed, threads) -> None:
 @pytest.mark.parametrize("threads", [1, 3])
 def test_native_apply_high_matches_portable_float64(shape, fixed, threads) -> None:
     problem = _stack(*shape, fixed=fixed)
-    portable = MatrixFreeThermalOperator(problem, preconditioner="jacobi")
+    portable = MatrixFreeThermalOperator(problem, preconditioner="jacobi", native=False)
     with thread_budget_scope(threads):
         native = MatrixFreeThermalOperator(
             problem, preconditioner="jacobi", native=True
@@ -99,7 +99,7 @@ def test_native_apply_high_matches_portable_float64(shape, fixed, threads) -> No
 def test_native_apply_high_carries_the_backward_euler_capacity() -> None:
     problem = _stack(6, 9)
     capacity = np.random.default_rng(7).uniform(0.0, 5.0, problem.mesh.size)
-    portable = MatrixFreeThermalOperator(problem, capacity_per_s=capacity)
+    portable = MatrixFreeThermalOperator(problem, capacity_per_s=capacity, native=False)
     with thread_budget_scope(2):
         native = MatrixFreeThermalOperator(problem, capacity_per_s=capacity, native=True)
     vector = np.random.default_rng(8).standard_normal(portable.size)
@@ -119,7 +119,7 @@ def test_native_apply_high_carries_the_backward_euler_capacity() -> None:
 def test_native_inner_pcg_reaches_the_same_fp64_solution(preconditioner, threads) -> None:
     problem = _stack(16, 24, fixed=True)
     config = MPIRConfig(max_outer_iterations=16, max_inner_iterations=3000)
-    portable = MatrixFreeThermalOperator(problem, preconditioner=preconditioner)
+    portable = MatrixFreeThermalOperator(problem, preconditioner=preconditioner, native=False)
     with thread_budget_scope(threads):
         native = MatrixFreeThermalOperator(
             problem, preconditioner=preconditioner, native=True
@@ -136,7 +136,7 @@ def test_native_inner_pcg_reaches_the_same_fp64_solution(preconditioner, threads
 
 def test_native_solution_and_heat_budget_match_the_front_end() -> None:
     problem = _stack(20, 20)
-    portable = solve_thermal_conduction(problem, initial_temperature_k=298.15)
+    portable = solve_thermal_conduction(problem, initial_temperature_k=298.15, native=False)
     with thread_budget_scope(2):
         native = solve_thermal_conduction(problem, initial_temperature_k=298.15, native=True)
     assert native.solve.converged

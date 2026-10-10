@@ -182,9 +182,9 @@ class MatrixFreeThermalOperator:
                 native_operator=self._native_high,
             )
         if use_native:
-            # Opt-in fused C++ host path: operator plus the whole inner PCG
-            # with the same preconditioner.  ``native=True`` demands it and
-            # ``PCB_NATIVE_THERMAL=1`` selects it for every CPU operator.
+            # Fused C++ host path, the CPU default when built: operator plus
+            # the whole inner PCG with the same preconditioner.  ``native=True``
+            # demands it and ``native=False`` keeps the NumPy path.
             coarse = self.coarse_correction
             self._native = NativeThermalHexQ1(
                 mesh.element_grid_shape,
