@@ -87,6 +87,15 @@ struct ThermalProblem {
     std::vector<FaceBoundary> convection;
     std::vector<FaceBoundary> radiation;
     std::vector<double> load;              // nodal heat input, W
+    // The parts ``load`` was summed from (nodal_load), kept so a coupling
+    // can change one part and sum again in the same order.
+    std::vector<double> element_heat;      // (slabs, rows, cols)
+    std::vector<double> nodal_heat;        // nodes
+    std::vector<Index> source_offsets{0};
+    std::vector<Index> source_nodes;
+    std::vector<double> source_power;
+
+    void sum_load();
 };
 
 // Heat per node: ``nodal_heat`` plus an eighth of each element's heat on

@@ -122,3 +122,49 @@ def test_the_core_circuit_loop_follows_the_python_loop() -> None:
             a.basis.mean_loss_w(a.excitation.correlation_a2)[0], a.element_loss_w, rtol=0,
             atol=1e-9 * a.element_loss_w.max(),
         )
+
+
+def test_the_core_interface_loop_follows_the_python_loop() -> None:
+    from multiphysics.staggered_coupling.board_enclosure import (
+        InterfaceCouplingConfig,
+        _python_board_enclosure,
+        run_board_enclosure_thermal,
+    )
+    from tests.test_board_enclosure_coupling import _partitioned
+
+    scenario = _partitioned()
+    config = InterfaceCouplingConfig()
+    native = run_board_enclosure_thermal(scenario, config=config)
+    python = _python_board_enclosure(scenario, config, backend=None, device_id=0, initial=None)
+    assert native.converged and python.converged
+    assert native.iterations == python.iterations
+    assert native.history[0].interface_heat_w == pytest.approx(python.history[0].interface_heat_w, rel=1e-12)
+    assert native.interface_heat_w == pytest.approx(python.interface_heat_w, rel=1e-6)
+    np.testing.assert_allclose(native.contact_temperature_k[0], python.contact_temperature_k[0], rtol=1e-9)
+    active = ~np.isnan(python.board.temperature_k)
+    np.testing.assert_allclose(native.board.temperature_k[active], python.board.temperature_k[active], rtol=1e-9)
+    # Warm-started from its own result the loop stops at once.
+    again = run_board_enclosure_thermal(scenario, config=config, initial=native)
+    assert again.converged and again.iterations <= 2
+
+
+@pytest.mark.parametrize("radiating", [False, True])
+def test_the_core_enclosure_loop_follows_the_python_loop(radiating: bool) -> None:
+    from multiphysics.staggered_coupling.board_enclosure import InterfaceCouplingConfig
+    from multiphysics.staggered_coupling.electro_thermal_enclosure import (
+        _python_electro_thermal_enclosure,
+        run_electro_thermal_enclosure,
+    )
+    from tests.test_electro_thermal_enclosure import _partitioned
+
+    scenario = _partitioned(radiating=radiating)
+    config, interface = CouplingConfig(), InterfaceCouplingConfig()
+    native = run_electro_thermal_enclosure(scenario, config=config, interface=interface)
+    python = _python_electro_thermal_enclosure(scenario, config, interface, backend=None, device_id=0)
+    assert native.converged and python.converged
+    assert native.iterations == python.iterations
+    assert [s.interface_iterations for s in native.history] == [s.interface_iterations for s in python.history]
+    assert native.cold_joule_loss_w == python.cold_joule_loss_w
+    assert native.electrical.joule_loss_w == pytest.approx(python.electrical.joule_loss_w, rel=1e-6)
+    np.testing.assert_allclose(native.element_temperature_k, python.element_temperature_k, rtol=1e-9)
+    np.testing.assert_allclose(native.conductivity_s_per_m, python.conductivity_s_per_m, rtol=1e-6)

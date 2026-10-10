@@ -244,6 +244,11 @@ std::vector<double> nodal_load(const ThermalMesh& mesh, const double* const elem
     return load;
 }
 
+void ThermalProblem::sum_load() {
+    load = nodal_load(mesh, element_heat.data(), nodal_heat.data(), static_cast<Index>(source_power.size()),
+                      source_offsets.data(), source_nodes.data(), source_power.data());
+}
+
 ThermalSystem::ThermalSystem(const ThermalProblem& problem, std::vector<LumpedRobin> robin,
                              const double* const capacity_per_s, const bool two_level, const int block,
                              const int threads)

@@ -88,3 +88,64 @@ def thermal_arguments(config: Any) -> dict[str, Any]:
     options = solve_options(config.thermal, "two-level", None, None, 25, 1.0e-4)
     options.pop("reference")
     return options
+
+
+def body_start_k(problem: ThermalConductionProblem) -> float:
+    """A body's contact temperature before the first exchange: its own reference."""
+
+    if problem.convection:
+        return float(problem.convection[0].mean_ambient_k())
+    if problem.radiation:
+        return float(problem.radiation[0].mean_ambient_k())
+    mask = problem.fixed_temperature_mask
+    return float(np.mean(problem.fixed_temperature_k[mask]))
+
+
+def body_arguments(core: Any, bodies: Sequence[Any]) -> list[tuple]:
+    """``BodyContact`` entries as the core's interface loop takes them."""
+
+    from thermal.matrix_free_mpir_fem.mesh import FACE_DIRECTIONS
+
+    return [
+        (
+            native_problem(core, body.body),
+            body.contact.board_side == "top",
+            FACE_DIRECTIONS.index(body.contact.body_face),
+            np.ascontiguousarray(body.contact.board_cells, dtype=np.int64),
+            np.ascontiguousarray(body.contact.body_cells, dtype=np.int64),
+            np.ascontiguousarray(body.contact.conductance_w_per_k, dtype=np.float64),
+            body_start_k(body.body),
+        )
+        for body in bodies
+    ]
+
+
+def interface_arguments(config: Any) -> dict[str, Any]:
+    def options(mpir: Any) -> dict[str, Any]:
+        values = solve_options(mpir, "two-level", None, None, 25, 1.0e-4)
+        values.pop("reference")
+        return values
+
+    return dict(
+        max_iterations=int(config.max_iterations),
+        temperature_tolerance=float(config.temperature_tolerance_k),
+        relative_heat_tolerance=float(config.relative_heat_tolerance),
+        relaxation=float(config.relaxation),
+        aitken=bool(config.aitken),
+        max_relaxation=float(config.max_relaxation),
+        divergence_temperature=float(config.divergence_temperature_k),
+        board=options(config.board),
+        body=options(config.body),
+    )
+
+
+def enclosure_warm_start(result: Any) -> dict[str, Any] | None:
+    """The fields of a previous ``BoardEnclosureThermalResult`` the interface loop restarts from."""
+
+    if result is None:
+        return None
+    return dict(
+        board=(np.ascontiguousarray(result.board.temperature_k).reshape(-1), float(result.board.min_temperature_k)),
+        bodies=[(np.ascontiguousarray(s.temperature_k).reshape(-1), float(s.min_temperature_k)) for s in result.bodies],
+        contact_temperature=[np.ascontiguousarray(t, dtype=np.float64) for t in result.contact_temperature_k],
+    )

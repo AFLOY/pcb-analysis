@@ -18,6 +18,8 @@ Neither solver knows about the other; the exchange is two arrays per body.
 
 from __future__ import annotations
 
+from typing import Any
+
 import dataclasses
 from dataclasses import dataclass
 
@@ -143,10 +145,30 @@ def run_board_enclosure_thermal(
 
     ``initial`` warm-starts the contact temperatures and both solves from a
     previous result of the same scenario geometry (an outer σ(T) loop calls
-    this once per resistivity update).
+    this once per resistivity update).  With the C++ core built and a CPU
+    backend the loop runs in the core (:mod:`.native_loops`), reusing each
+    body's prepared system while only its contact heat changes.
     """
 
     config = config or InterfaceCouplingConfig()
+    from .native_loops import coupling_core
+
+    core = coupling_core(None, backend)
+    if core is not None:
+        return _native_board_enclosure(core, scenario, config, initial)
+    return _python_board_enclosure(scenario, config, backend=backend, device_id=device_id, initial=initial)
+
+
+def _python_board_enclosure(
+    scenario: BoardEnclosureThermalScenario,
+    config: InterfaceCouplingConfig,
+    *,
+    backend: RuntimeBackend | None,
+    device_id: int,
+    initial: BoardEnclosureThermalResult | None,
+) -> BoardEnclosureThermalResult:
+    """The interface loop solve by solve; the reference of the C++ loop."""
+
     board_mesh = scenario.board.mesh
     bodies = scenario.bodies
 
@@ -272,6 +294,51 @@ def run_board_enclosure_thermal(
         history=tuple(history),
     )
 
+
+
+def result_from_core(result: dict) -> BoardEnclosureThermalResult:
+    from thermal.matrix_free_mpir_fem.native_system import solution_from
+
+    history = tuple(InterfaceStep(**step) for step in result["history"])
+    return BoardEnclosureThermalResult(
+        board=solution_from(result["board"]),
+        bodies=tuple(solution_from(body) for body in result["bodies"]),
+        contact_heat_w=tuple(result["contact_heat"]),
+        contact_temperature_k=tuple(result["contact_temperature"]),
+        converged=bool(result["converged"]),
+        iterations=len(history),
+        history=history,
+    )
+
+
+def _native_board_enclosure(
+    core: Any,
+    scenario: BoardEnclosureThermalScenario,
+    config: InterfaceCouplingConfig,
+    initial: BoardEnclosureThermalResult | None,
+) -> BoardEnclosureThermalResult:
+    """run_board_enclosure_thermal in ``electrical._pcbcore.coupling``."""
+
+    from thermal.matrix_free_mpir_fem.native_system import native_problem
+
+    from .native_loops import body_arguments, enclosure_warm_start, interface_arguments
+
+    if initial is not None and (
+        len(initial.bodies) != len(scenario.bodies)
+        or any(
+            np.shape(previous) != (body.contact.size,)
+            for previous, body in zip(initial.contact_temperature_k, scenario.bodies)
+        )
+    ):
+        raise ValueError("initial must come from a scenario with the same bodies and contacts")
+    return result_from_core(
+        core.coupling.run_board_enclosure(
+            native_problem(core, scenario.board),
+            body_arguments(core, scenario.bodies),
+            interface_arguments(config),
+            enclosure_warm_start(initial),
+        )
+    )
 
 __all__ = [
     "BoardEnclosureThermalResult",

@@ -122,6 +122,7 @@ add_library(pcbcore STATIC
   cpp/src/fem/scalar_maxwell_system.cpp
   cpp/src/emc/post.cpp
   cpp/src/coupling/coupling.cpp
+  cpp/src/coupling/enclosure.cpp
   cpp/src/thermal/thermal_system.cpp
   cpp/src/thermal/thermal_solve.cpp)
 target_include_directories(pcbcore PUBLIC cpp/include)
