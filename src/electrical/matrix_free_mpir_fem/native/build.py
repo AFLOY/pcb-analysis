@@ -36,6 +36,11 @@ def compile_extension(
     # (AOCC: its clang++, ``--gcc-install-dir`` and an rpath to its lib/).
     compiler = shlex.split(os.environ.get("PCB_NATIVE_CXX", "g++"))
     clang = "clang" in subprocess.run([*compiler, "--version"], capture_output=True, text=True).stdout
+    eigen_includes = []
+    for candidate in [Path("/usr/include/eigen3"), Path("/usr/local/include/eigen3")]:
+        if candidate.is_dir():
+            eigen_includes.append(f"-I{candidate}")
+
     command = [
         *compiler,
         "-O3",
@@ -52,6 +57,7 @@ def compile_extension(
         "-DNDEBUG",
         f"-I{pybind11.get_include()}",
         f"-I{sysconfig.get_paths()['include']}",
+        *eigen_includes,
         str(source),
         "-o",
         str(output),
