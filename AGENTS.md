@@ -19,11 +19,9 @@
 - `src/electrical/sheet_peec/`: 2.5D sheet PEEC。sheet mesh(等間隔・tensor格子)、畳み込み演算子と
   pFFT演算子(`sheet_pfft`)、CUDA solve、板厚方向のskin filamentsと厚さ判定、`plane_opt`向け
   契約(`plane_opt_contract`、v1は`pitch_mm`、v2は格子線)。
-- `src/electrical/dice_peec/`: DICEのdelta scoring(2.5D多層proxy)、router向け`layout_ops`、
-  runtime controllerとbackend、`Stackup`、CLI。電流や電位は解かない。
 - `src/electrical/voxel_peec/`: PyPEECの3D voxel PEEC。配列契約(`contract`)、CUDA実行方針と
   計測(`cuda_pypeec`)、memory予測(`pypeec_memory`)。PyPEECが組立てとsolveを所有する。
-  計測型2つを`dice_peec.controller`からimportする以外に`electrical`内の依存は持たない。
+  計測型(`telemetry`)も自前で持ち、`electrical`内の依存は持たない。
 - `src/electrical/matrix_free_mpir_fem/`: MPIR solverとNumPy/CuPy runtime、二段preconditioner、tensor格子(`grid`)、Q1 DC伝導、
   2D周波数領域Maxwell、fused CUDA kernel。solverとruntimeはここが唯一の所有者である。
 - `src/thermal/matrix_free_mpir_fem/`: 定常・過渡(後退Euler)熱伝導の離散化、対流・輻射(Newton線形化)境界、
@@ -42,8 +40,8 @@ importは`electrical` ← `thermal` ← `multiphysics`、`electrical` ← `emc` 
 `_`始まりの名前をimportしない。新しい物理は`src/<physics>/<method+acceleration>/`へ置き、
 既存packageの中へ足さない。
 
-CLIは`electrical.dice_peec.cli`に集める。console scriptを`pyproject.toml`へ追加したら
-CIの「Check what the distribution actually ships」で起動確認する。`py.typed`は各top-level
+console scriptを`pyproject.toml`へ追加したら、CIの「Check what the distribution actually
+ships」で起動確認する(現在はconsole scriptを持たない)。`py.typed`は各top-level
 packageに置き、`[tool.setuptools.package-data]`へ登録する。
 
 ## データと成果物

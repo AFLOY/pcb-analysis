@@ -6,6 +6,17 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
+- Removed `electrical.dice_peec` (the DICE delta scorer, its runtime
+  controller and CUDA calibration) and the `pcb-analysis-calibrate` console
+  script. Its scalar interaction kernel was a ranking proxy that no consumer
+  used. Migration: `geometry.cad_import.board_vias` returns
+  `geometry.cad_import.BoardVias` of `BoardVia` (same `row`, `col`,
+  `layer_from`, `layer_to`, `resistance_ohm`, `inductance_h` fields as the
+  old `ViaSpec`; duplicate vias still merge or are refused);
+  `board_stackup` is gone (the raster's `layers` carry names and centre z);
+  `voxel_peec` keeps `HardwareTelemetry` and `ExecutionReport` in
+  `electrical.voxel_peec.telemetry`. Breaking: the next release is a minor
+  version.
 - `electrical.sheet_peec.dc_network`: the zero-frequency sheet mesh as a bare
   conductance network. `ConductanceNetwork` (numbered nodes, branches in
   siemens), `solve_conductance_network(network, reference, injection,

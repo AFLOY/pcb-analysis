@@ -22,8 +22,7 @@ in an automated, LLM-driven PCB design workflow.
 
 - **electrical**: 2.5D sheet PEEC for current density, voltage drop and
   skin effect on multilayer copper; matrix-free FEM for DC conduction and 2D
-  frequency-domain Maxwell; 3D voxel PEEC (PyPEEC) for thick conductors;
-  DICE delta scoring to rank many candidate edits without a full solve.
+  frequency-domain Maxwell; 3D voxel PEEC (PyPEEC) for thick conductors.
 - **thermal**: steady and transient heat conduction through the board stack,
   with convection, radiation and fixed-temperature boundaries.
 - **emc**: near-field scans, far-field patterns and CISPR 32 / FCC Part 15

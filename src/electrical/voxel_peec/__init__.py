@@ -5,8 +5,7 @@ array contract (``contract``: conductor mask, resistivity, lumped terminals,
 fields and losses back), the CUDA execution policy and telemetry
 (``cuda_pypeec``) and the memory prediction that decides whether a model fits
 a device (``pypeec_memory``).  It is the high-fidelity path for conductors a
-2.5D sheet cannot represent and for the promoted candidates of the DICE
-search.
+2.5D sheet cannot represent.
 """
 
 from .contract import (

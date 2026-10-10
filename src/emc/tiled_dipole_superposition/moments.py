@@ -10,9 +10,8 @@ radiated powers are
 P_e = η k² |P|² / 12π          P_m = η k⁴ |M|² / 12π
 ```
 
-Both are quadratic in the currents, so they fit the exact incremental scoring
-in ``electrical.dice_peec`` and make cheap gates for an optimizer before a
-full pattern is evaluated.  The ratio of the pattern's integrated power to
+Both are quadratic in the currents, so they make cheap gates for an
+optimizer before a full pattern is evaluated.  The ratio of the pattern's integrated power to
 ``P_e + P_m`` tells how much of the radiation the two lowest moments miss.
 """
 
