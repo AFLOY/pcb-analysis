@@ -31,6 +31,11 @@ Versions before 0.7.0 were not tagged; see the Git history.
   internally (provisionally a serial pool and the whole budget in the team,
   to be replaced by a measured rule); `DCPortBasis.workers` still reports the
   pool width used. CUDA paths are unchanged.
+- Sheet PEEC (`solve_sheet_case`, `build_current_field_sheet_inputs`,
+  `solve_current_field_problem`) runs the BLAS pools on one thread
+  (`electrical.threads.serial_blas`, process-wide and reference counted);
+  the OpenMP team keeps the budget. Threaded BLAS made these solves no
+  faster and kept every core spinning (docs/SHEET_PEEC.md).
 
 ### Breaking
 

@@ -37,6 +37,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 import numpy as np
 
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
+from electrical.threads import serial_blas
 import scipy.sparse as sp
 import scipy.sparse.csgraph as csgraph
 import scipy.sparse.linalg as spla
@@ -495,6 +496,7 @@ def _source_vector(mesh: SheetMesh, terminals: Sequence[Terminal]) -> np.ndarray
     return injected
 
 
+@serial_blas()
 def solve_sheet_case(
     mesh: SheetMesh,
     operator: SheetInductanceOperator,

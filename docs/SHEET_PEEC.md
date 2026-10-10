@@ -326,7 +326,17 @@ grid stencil product per distinct configuration) are the build's cost; the
 grid products run in C++ with OpenMP when `electrical.sheet_peec.native` is
 built (`native_available()`), else in NumPy. The OpenMP team is the
 process-wide thread budget (`electrical.set_thread_budget`), passed explicitly,
-so `OMP_NUM_THREADS` no longer sets it. A 12 × 1 mm strip line at 1e+06 Hz
+so `OMP_NUM_THREADS` no longer sets it.
+
+The build and the solve run the NumPy and SciPy BLAS pools on one thread
+(`electrical.threads.serial_blas`); the OpenMP team keeps the budget. Their
+BLAS calls are Krylov vector work, too small to share: on the power_module
+radiation cases (16 sheet solves, Ryzen 7 9700X) the heaviest case took
+25.5 s with BLAS at a budget of 5 (8.6 cores busy) and 24.9 s with BLAS on
+one thread (1.0 core). The idle BLAS threads spin on every core between
+calls, which at a budget of 8 froze the host within seconds, every time,
+with or without the C++ kernel and with OpenBLAS's AVX2 kernels; with BLAS
+on one thread the same 48 solves at a budget of 8 completed. A 12 × 1 mm strip line at 1e+06 Hz
 (F.Cu go, B.Cu return, 35 µm copper cut into filaments), loss relative to the
 uniform 0.1 mm convolution solve:
 

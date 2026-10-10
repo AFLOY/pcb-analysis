@@ -13,6 +13,7 @@ from electrical.threads import (
     available_threads,
     set_thread_budget,
     thread_budget,
+    serial_blas,
     thread_budget_scope,
 )
 from electrical.voxel_peec import default_tolerance
@@ -131,3 +132,57 @@ def test_pypeec_fft_workers_follow_the_budget() -> None:
     assert tolerance["dense_options"]["fft_options"]["scipy_worker"] == 3
     with pytest.raises(ValueError, match="set_thread_budget"):
         default_tolerance({"scipy_workers": 4})
+
+
+def _openmp_threads() -> list[int]:
+    return [pool["num_threads"] for pool in threadpool_info() if pool["user_api"] == "openmp"]
+
+
+def test_serial_blas_holds_blas_at_one_and_keeps_openmp_at_the_budget() -> None:
+    np.dot(np.ones((4, 4)), np.ones((4, 4)))
+    pools = _blas_threads()
+    if not pools:
+        pytest.skip("no BLAS library visible to threadpoolctl")
+    set_thread_budget(2)
+    with serial_blas():
+        assert _blas_threads() == [1] * len(pools)
+        assert all(threads == 2 for threads in _openmp_threads())
+        with serial_blas():
+            assert _blas_threads() == [1] * len(pools)
+        assert _blas_threads() == [1] * len(pools)  # the outer block still holds it
+        set_thread_budget(3)  # a budget change inside keeps BLAS serial
+        assert _blas_threads() == [1] * len(pools) and thread_budget() == 3
+    assert _blas_threads() == [3] * len(pools)
+    with pytest.raises(RuntimeError, match="boom"):
+        with serial_blas():
+            raise RuntimeError("boom")
+    assert _blas_threads() == [3] * len(pools)
+
+
+def test_the_sheet_solve_runs_its_krylov_iterations_on_serial_blas(monkeypatch) -> None:
+    import electrical.sheet_peec.sheet_peec as sheet_peec
+    from electrical.sheet_peec.sheet_operator import SheetInductanceOperator, SheetLayer, SheetStackup
+
+    np.dot(np.ones((4, 4)), np.ones((4, 4)))
+    if not _blas_threads():
+        pytest.skip("no BLAS library visible to threadpoolctl")
+    set_thread_budget(2)
+    seen = []
+    original = sheet_peec.spla.gmres
+
+    def recording_gmres(*args, **kwargs):
+        seen.append(_blas_threads())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(sheet_peec.spla, "gmres", recording_gmres)
+    rows, cols, pitch = 5, 7, 2e-4
+    stackup = SheetStackup((SheetLayer("F.Cu", 0.0, 3.5e-5, 1.724e-8),))
+    mesh = sheet_peec.SheetMesh((rows, cols), pitch, stackup, np.ones((1, rows, cols), dtype=bool))
+    operator = SheetInductanceOperator((rows, cols), pitch, stackup)
+    terminals = [
+        sheet_peec.Terminal("in", 0, tuple((row, 0) for row in range(rows)), 1.0),
+        sheet_peec.Terminal("out", 0, tuple((row, cols - 1) for row in range(rows)), -1.0),
+    ]
+    sheet_peec.solve_sheet_case(mesh, operator, terminals, frequency_hz=1e6)
+    assert seen and all(threads == [1] * len(threads) for threads in seen)
+    assert _blas_threads() == [2] * len(seen[0])

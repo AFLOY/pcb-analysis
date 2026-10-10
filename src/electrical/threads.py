@@ -9,7 +9,9 @@ with :func:`set_thread_budget` (or for a block with
   near-field corrections) is the budget when the kernel runs alone;
 * PyPEEC's SciPy FFT workers are the budget;
 * the BLAS and OpenMP pools of NumPy and SciPy are limited to the budget
-  (through :mod:`threadpoolctl`) while an explicit budget is set.
+  (through :mod:`threadpoolctl`), except that the BLAS pools run on one
+  thread while a solve that gains nothing from threaded BLAS is running
+  (:func:`serial_blas`).
 
 Where pcb-analysis nests parallelism (the thread pool over the unit solves
 of an N-port basis, each solve running an OpenMP team) it splits the budget
@@ -43,6 +45,7 @@ __all__ = [
 _lock = threading.RLock()
 _budget: int | None = None
 _pool_limit: Any = None
+_serial_blas_depth = 0
 
 
 def _physical_cores(cpus: set[int]) -> int | None:
@@ -103,21 +106,58 @@ def set_thread_budget(threads: int | None) -> None:
     to the budget, so the application's total is the budget whatever library
     a solve happens to use; a later call replaces the limit.  An application
     that never calls this leaves those pools at their own defaults (usually
-    every logical CPU), so call it once at start-up.
+    every logical CPU) until a solve under :func:`serial_blas` sets them to
+    the default budget, so call it once at start-up.
     """
 
-    global _budget, _pool_limit
+    global _budget
     value = _validated(threads)
+    with _lock:
+        _budget = value
+        _apply_pool_limits()
+
+
+def _apply_pool_limits() -> None:
+    """Limit the loaded BLAS and OpenMP pools to the budget, BLAS to one inside :func:`serial_blas`."""
+
+    global _pool_limit
     with _lock:
         if _pool_limit is not None:
             _pool_limit.restore_original_limits()
             _pool_limit = None
-        _budget = value
         from threadpoolctl import threadpool_limits
 
+        budget = _budget if _budget is not None else available_threads()
         _pool_limit = threadpool_limits(
-            limits=value if value is not None else available_threads()
+            limits={"blas": 1 if _serial_blas_depth else budget, "openmp": budget}
         )
+
+
+@contextmanager
+def serial_blas() -> Iterator[None]:
+    """Run a block with the NumPy and SciPy BLAS pools on one thread.
+
+    For solves whose BLAS calls are too small to share: the sheet-PEEC solve
+    calls BLAS only for Krylov vector work, and with the BLAS pools at the
+    budget it ran no faster than on one thread (power_module radiation
+    cases, budget 5: 25.5 s on 8.6 busy cores against 24.9 s on one) while
+    the idle pool threads spun on every core -- the extra load that froze
+    the measuring host at a budget of 8 (docs/SHEET_PEEC.md).  The OpenMP
+    kernels keep the budget.  The limit is process-wide and reference
+    counted, so concurrent and nested blocks keep it until the last one
+    leaves; a budget change inside the block keeps it as well.
+    """
+
+    global _serial_blas_depth
+    with _lock:
+        _serial_blas_depth += 1
+        _apply_pool_limits()
+    try:
+        yield
+    finally:
+        with _lock:
+            _serial_blas_depth -= 1
+            _apply_pool_limits()
 
 
 @contextmanager

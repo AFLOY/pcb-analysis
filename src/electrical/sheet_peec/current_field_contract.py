@@ -15,6 +15,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
+from electrical.threads import serial_blas
 
 from .sheet_pfft import PfftSheetInductanceOperator
 from .sheet_operator import SheetInductanceOperator, SheetStackup
@@ -340,6 +341,7 @@ def _nearest_filament(
     )
 
 
+@serial_blas()
 def build_current_field_sheet_inputs(
     value: Mapping[str, Any] | CurrentFieldProblem,
     settings: Mapping[str, Any] | None = None,
@@ -495,6 +497,7 @@ def build_current_field_sheet_inputs(
     return mesh, operator, terminals, context
 
 
+@serial_blas()
 def solve_current_field_problem(
     value: Mapping[str, Any] | CurrentFieldProblem,
     settings: Mapping[str, Any] | None = None,
