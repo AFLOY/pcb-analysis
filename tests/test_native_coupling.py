@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from electrical import _backend
+from electrical import backend as _backend
 from electrical.threads import thread_budget_scope
 from multiphysics.staggered_coupling import CouplingConfig, run_electro_thermal
 from multiphysics.staggered_coupling.electro_thermal import _python_electro_thermal

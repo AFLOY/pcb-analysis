@@ -21,7 +21,7 @@ from typing import Any, Literal, Sequence
 
 import numpy as np
 
-from .. import _backend
+from .. import backend as _backend
 from ..threads import thread_budget
 from .grid import check_pitch_axis
 from .native_dc import NATIVE_HIGH_KERNEL_NAME, NATIVE_KERNEL_NAME

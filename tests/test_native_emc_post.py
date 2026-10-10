@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from electrical import _backend
+from electrical import backend as _backend
 from electrical.matrix_free_mpir_fem import PCBConductionProblem, VoltageTerminal, solve_pcb_dc
 from emc.tiled_dipole_superposition import (
     CurrentDipoles,

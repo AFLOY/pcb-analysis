@@ -11,7 +11,7 @@ solver tolerance, not bit for bit.
 
 from __future__ import annotations
 
-from .. import _backend
+from .. import backend as _backend
 
 NATIVE_KERNEL_NAME = "cpp-fused-node-gather-layered-dc-q1"
 NATIVE_HIGH_KERNEL_NAME = "cpp-fused-node-gather-layered-dc-q1-fp64"

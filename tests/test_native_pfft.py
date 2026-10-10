@@ -87,7 +87,7 @@ def _graded_mesh_with_vias() -> SheetMesh:
 
 
 def test_the_core_applies_the_same_pfft_operator() -> None:
-    from electrical import _backend
+    from electrical import backend as _backend
 
     if not _backend.native_available():
         pytest.skip("electrical._pcbcore is not built")
@@ -114,7 +114,7 @@ def test_the_core_applies_the_same_pfft_operator() -> None:
 
 
 def test_the_core_builds_the_same_pfft_parts() -> None:
-    from electrical import _backend
+    from electrical import backend as _backend
     from tests.tolerance import CLOSED_FORM_RTOL
 
     if not _backend.native_available():

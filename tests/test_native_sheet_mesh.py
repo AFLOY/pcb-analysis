@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from electrical import _backend
+from electrical import backend as _backend
 from electrical.matrix_free_mpir_fem import TensorGrid, graded_edges
 from electrical.sheet_peec.sheet_operator import SheetLayer, SheetStackup
 from electrical.sheet_peec.sheet_peec import SheetMesh, SheetSolution, Terminal, ViaBranch, _source_vector

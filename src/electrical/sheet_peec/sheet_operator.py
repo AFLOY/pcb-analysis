@@ -37,7 +37,7 @@ from typing import Any, Sequence
 import numpy as np
 import scipy.fft
 
-from electrical import _backend
+from electrical import backend as _backend
 from electrical.threads import thread_budget
 
 from .sheet_inductance import (

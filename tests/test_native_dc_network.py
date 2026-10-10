@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from electrical import _backend
+from electrical import backend as _backend
 from electrical.sheet_peec import ConductanceNetwork, solve_conductance_network, split_branch_sensitivity
 from electrical.threads import thread_budget_scope
 from tests.test_dc_network import _grid_network

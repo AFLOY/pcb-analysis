@@ -15,7 +15,7 @@ from typing import Any
 
 import numpy as np
 
-from electrical import _backend
+from electrical import backend as _backend
 from electrical.matrix_free_mpir_fem.runtime import LowPrecisionRuntime, RuntimeBackend
 from electrical.matrix_free_mpir_fem.solver import MPIRConfig, MPIRResult, mpir_result_from_core
 from electrical.threads import thread_budget

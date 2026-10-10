@@ -15,10 +15,9 @@ import numpy as np
 
 from electrical.threads import thread_budget
 
-try:  # pragma: no cover - depends on the local build
-    from electrical._pcbcore import dipole as _native
-except ImportError:  # pragma: no cover
-    _native = None
+from electrical import backend
+
+_native = getattr(backend.native_core(), "dipole", None)
 
 
 def native_available() -> bool:

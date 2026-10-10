@@ -7,7 +7,7 @@ hands the prepared operator to ``electrical._pcbcore.fem.ScalarMaxwellSystem``
 
 from __future__ import annotations
 
-from .. import _backend
+from .. import backend as _backend
 
 NATIVE_KERNEL_NAME = "cpp-fused-node-gather-q1"
 

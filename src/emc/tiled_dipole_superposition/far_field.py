@@ -30,7 +30,7 @@ from .fields import (
     to_host,
     wavenumber_per_m,
 )
-from electrical import _backend
+from electrical import backend as _backend
 
 from .native_dipole import far_field_pattern_native, use_native
 

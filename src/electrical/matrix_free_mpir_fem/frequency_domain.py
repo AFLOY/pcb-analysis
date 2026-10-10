@@ -19,7 +19,7 @@ from .runtime import (
     RuntimeBackend,
     make_complex64_runtime,
 )
-from .. import _backend
+from .. import backend as _backend
 from ..threads import thread_budget
 from .native_q1 import (
     DOT_ACCUMULATIONS,

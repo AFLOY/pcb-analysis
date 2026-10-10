@@ -20,7 +20,7 @@ from typing import Sequence
 
 import numpy as np
 
-from electrical import _backend
+from electrical import backend as _backend
 
 from electrical.matrix_free_mpir_fem.pcb import (
     PCBConductionProblem,
