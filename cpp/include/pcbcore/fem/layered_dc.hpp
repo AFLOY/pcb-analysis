@@ -33,6 +33,8 @@ struct OperatorView {
 
 // y = A x on the FP64 operator (fixed rows identity, as the MPIR sees it).
 void apply_high(const OperatorView<double>& op, const double* x, double* y, int threads);
+// The same action on the FP32 operator of the inner PCG.
+void apply_low(const OperatorView<float>& op, const float* x, float* y, int threads);
 
 // The coarse space of ``block`` x ``block`` node patches per layer.
 [[nodiscard]] CoarseSpace assemble_coarse(const OperatorView<double>& op, int block, int threads);

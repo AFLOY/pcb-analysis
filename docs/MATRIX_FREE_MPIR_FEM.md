@@ -258,8 +258,8 @@ The only threading control is the process-wide thread budget of
 `electrical.threads`: `set_thread_budget(n)` (or `thread_budget_scope(n)` for
 a block; `None` restores the default, `available_threads()`, the CPUs of the
 process's affinity mask). No solver takes a thread argument and no environment
-variable sets a thread count. Every fused C++ kernel (`native_q1`,
-`native_dc`) runs an OpenMP team of the budget when it runs alone; an
+variable sets a thread count. Every C++ kernel (`native_q1`, the DC system
+`_pcbcore.fem.LayeredDCSystem`) runs an OpenMP team of the budget when it runs alone; an
 explicit budget also limits the BLAS/OpenMP pools of NumPy and SciPy through
 `threadpoolctl`. Where pcb-analysis nests parallelism, in `dc_port_basis`, it
 splits the budget itself so that pool width × team stays inside it. CUDA
@@ -696,6 +696,25 @@ this environment, so integration into `feature/` requires the packaging and
 CI work described in `AGENTS.md` before the default path changes.
 
 ## Fused C++ host path for the layered DC conduction operator (measured on `exp/cpp-multiphysics-dc-emc`)
+
+**Now (pcbcore):** the whole prepared operator is the C++ object
+`electrical._pcbcore.fem.LayeredDCSystem` (`cpp/src/fem/layered_dc_system.cpp`),
+built from the mesh arrays, the via ends and conductances and the fixed nodes.
+It forms the element coefficients, the unit sheet matrices, the active and
+free masks, the via adjacency, the Jacobi diagonal (summed in the order of the
+NumPy scatter, so bit for bit equal) and the coarse space, and it runs the
+right-hand side with the lifting of voltage terminals, the MPIR solve, the
+terminal currents and the post-processing (fields, current density, element
+and via losses, each computed once).  `MatrixFreePCBOperator` and
+`solve_pcb_dc` convert terminals to flat node indices, check them with the
+messages they always raised, and wrap the results in the same dataclasses;
+`native=False`, a CUDA runtime or a missing build keep the NumPy/CuPy
+implementation in `pcb.py`.  `tests/test_native_dc_system.py` compares the
+two and checks that every output of a solve has the same bits at budgets
+1, 2, 3 and 8.  pcbcore is compiled with `-ffp-contract=off`, so no result
+depends on whether the target ISA has FMA.
+
+The rest of this section describes the kernels as they were first added.
 
 The layered-PCB DC conduction operator (`MatrixFreePCBOperator`, the electrical
 half of the electro-thermal coupling) had only the NumPy path. `native=True`

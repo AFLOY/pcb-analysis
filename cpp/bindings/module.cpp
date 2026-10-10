@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "arrays.hpp"
 #include "pcbcore/errors.hpp"
 #include "pcbcore/network/dc_network.hpp"
 #include "pcbcore/sheet/convolution_operator.hpp"
@@ -36,24 +37,14 @@ namespace pcb_dipole { void register_module(py::module_& m); }
 namespace pcb_voxelize { void register_module(py::module_& m); }
 namespace pcb_sheet_pfft_near { void register_module(py::module_& m); }
 
+// Bindings kept in their own files.
+namespace pcbcore_bindings { void register_fem(py::module_& m); }
+
 namespace {
 
-template <typename T>
-using Input = py::array_t<T, py::array::c_style | py::array::forcecast>;
-
-// A NumPy array that owns ``values``: the vector moves into a capsule.
-template <typename T>
-py::array_t<T> to_array(std::vector<T>&& values, std::vector<py::ssize_t> shape) {
-    auto* owner = new std::vector<T>(std::move(values));
-    py::capsule release(owner, [](void* pointer) { delete static_cast<std::vector<T>*>(pointer); });
-    return py::array_t<T>(std::move(shape), owner->data(), release);
-}
-
-template <typename T>
-py::array_t<T> to_array(std::vector<T>&& values) {
-    const auto size = static_cast<py::ssize_t>(values.size());
-    return to_array(std::move(values), {size});
-}
+using pcbcore_bindings::copy_array;
+using pcbcore_bindings::Input;
+using pcbcore_bindings::to_array;
 
 pcbcore::network::ConductanceNetworkView network_view(const std::int64_t node_count,
                                                       const Input<std::int64_t>& left,
@@ -395,12 +386,6 @@ std::shared_ptr<pcbcore::sheet::MeshTopology> build_topology(const Input<std::ui
     return mesh;
 }
 
-template <typename T>
-py::array_t<T> copy_array(const std::vector<T>& values, std::vector<py::ssize_t> shape) {
-    std::vector<T> copy(values);
-    return to_array(std::move(copy), std::move(shape));
-}
-
 py::tuple csr_arrays(pcbcore::sheet::CsrMatrix&& m) {
     return py::make_tuple(to_array(std::move(m.indptr)), to_array(std::move(m.indices)), to_array(std::move(m.data)),
                           py::make_tuple(m.rows, m.cols));
@@ -513,6 +498,11 @@ PYBIND11_MODULE(_pcbcore, m) {
     {
         py::module_ sub = m.def_submodule("sheet_pfft_near", "pFFT near-field grid coupling");
         pcb_sheet_pfft_near::register_module(sub);
+    }
+
+    {
+        py::module_ sub = m.def_submodule("fem", "Prepared matrix-free FEM systems");
+        pcbcore_bindings::register_fem(sub);
     }
 
     py::module_ network = m.def_submodule("network", "Conductance networks: the zero-frequency sheet mesh");

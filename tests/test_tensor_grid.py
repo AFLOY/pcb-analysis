@@ -16,7 +16,7 @@ from electrical.matrix_free_mpir_fem import (
     refined_grid,
     solve_pcb_dc,
 )
-from electrical.matrix_free_mpir_fem.pcb import MatrixFreePCBOperator, _local_stiffness
+from electrical.matrix_free_mpir_fem.pcb import MatrixFreePCBOperator, _local_stiffness, unit_sheet_matrices
 from thermal.matrix_free_mpir_fem import (
     ConvectionBoundary,
     ExposedFaceConvection,
@@ -205,5 +205,5 @@ def test_graded_dc_strip_has_the_analytic_resistance_and_uniform_arrays_match_th
     vector = np.random.default_rng(3).standard_normal(op_a.size)
     np.testing.assert_array_equal(op_a.apply_high(vector), op_b.apply_high(vector))
     cx, cy = scalar.mesh.element_coefficients()
-    ux, uy = op_a._unit_high
+    ux, uy = unit_sheet_matrices()
     np.testing.assert_allclose(cx[0, 0, 0] * ux + cy[0, 0, 0] * uy, sigma * 35e-6 * _local_stiffness(0.25e-3, 0.25e-3), rtol=1e-12)

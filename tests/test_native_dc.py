@@ -19,7 +19,7 @@ from electrical.matrix_free_mpir_fem import (
     solve_mpir,
     solve_pcb_dc,
 )
-from electrical.matrix_free_mpir_fem.native_dc import native_available, via_adjacency
+from electrical.matrix_free_mpir_fem.native_dc import native_available
 
 pytestmark = pytest.mark.skipif(
     not native_available(),
@@ -121,13 +121,23 @@ def test_native_coarse_space_matches_portable() -> None:
     )
 
 
-def test_via_adjacency_lists_every_link_under_both_ends() -> None:
-    pointer, neighbour, conductance = via_adjacency([0, 2, 2], [5, 6, 7], [1.0, 2.0, 3.0], 8, np.float32)
-    assert pointer.tolist() == [0, 1, 1, 3, 3, 3, 4, 5, 6]
-    assert neighbour.tolist() == [5, 6, 7, 0, 2, 2]
-    assert conductance.tolist() == [1.0, 2.0, 3.0, 1.0, 2.0, 3.0]
-    empty = via_adjacency([], [], [], 4, np.float64)
-    assert empty[0].tolist() == [0, 0, 0, 0, 0] and empty[1].size == 0 and empty[2].size == 0
+def test_vias_sharing_a_node_enter_the_operator_like_the_numpy_one() -> None:
+    # Several vias start or end on one node; the C++ adjacency lists each
+    # under both ends, the starts before the ends, so the diagonal is summed
+    # in the order of the NumPy scatter and agrees bit for bit.
+    problem = _board(4, 6, vias=False, graded=True)
+    links = (
+        ViaConnection((0, 2, 3), (1, 2, 3), 1.0e-3),
+        ViaConnection((0, 2, 3), (1, 3, 3), 2.0e-3),
+        ViaConnection((0, 1, 4), (1, 2, 3), 3.0e-3),
+        ViaConnection((0, 2, 3), (1, 3, 5), 4.0e-3),
+    )
+    portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=links, native=False)
+    native = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=links, native=True)
+    assert np.array_equal(native._diagonal_high, portable._diagonal_high)
+    assert np.array_equal(native.free_nodes, portable.free_nodes)
+    vector = np.random.default_rng(5).standard_normal(native.size)
+    np.testing.assert_allclose(native.apply_high(vector), portable.apply_high(vector), rtol=1e-12, atol=1e-12 * np.abs(portable.apply_high(vector)).max())
 
 
 @pytest.mark.parametrize("preconditioner", ["two-level", "jacobi"])
@@ -214,7 +224,7 @@ def test_native_rejects_wrong_sizes_and_cuda_runtime() -> None:
     with pytest.raises(ValueError, match="size"):
         native.apply_high(np.zeros(native.size + 1))
     with pytest.raises(ValueError, match="size"):
-        native.native_inner_pcg(np.zeros(native.size - 1), MPIRConfig())
+        native.native_solve_mpir(np.zeros(native.size - 1), MPIRConfig())
 
     class FakeCudaRuntime(NumpyFloat32Runtime):
         is_cuda = True

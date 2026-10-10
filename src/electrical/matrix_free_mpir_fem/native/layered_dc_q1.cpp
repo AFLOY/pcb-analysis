@@ -737,6 +737,11 @@ void apply_high(const OperatorView<double>& view, const double* const x, double*
     pcb_layered_dc::apply_parallel(op, x, y);
 }
 
+void apply_low(const OperatorView<float>& view, const float* const x, float* const y, const int threads) {
+    const LayeredOperatorT<float> op = pcb_layered_dc::operator_from(view, threads);
+    pcb_layered_dc::apply_parallel(op, x, y);
+}
+
 CoarseSpace assemble_coarse(const OperatorView<double>& view, const int block, const int threads) {
     if (block < 1) {
         throw std::invalid_argument("block must be positive");
