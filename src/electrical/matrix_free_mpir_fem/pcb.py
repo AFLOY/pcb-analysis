@@ -458,6 +458,7 @@ class MatrixFreePCBOperator:
             self._team,
         )
         self._system = system
+        self._core = core
         self.active_nodes = system.active_nodes
         self.free_nodes = system.free_nodes
         self._diagonal_high = system.diagonal

@@ -96,6 +96,7 @@ public:
     [[nodiscard]] const std::vector<double>& coefficients() const noexcept { return coef_; }
     [[nodiscard]] const std::vector<double>& unit() const noexcept { return unit_; }
     [[nodiscard]] const std::vector<double>& diagonal() const noexcept { return diagonal_; }
+    [[nodiscard]] const std::vector<double>& conductivity() const noexcept { return conductivity_; }
     [[nodiscard]] const CoarseSpace& coarse() const noexcept { return coarse_; }
     // Bytes of the arrays the FP32 inner solve reads (operator, masks, vias,
     // diagonal, coarse inverse).

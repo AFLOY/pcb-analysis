@@ -116,7 +116,8 @@ add_library(pcbcore STATIC
   cpp/src/sheet/sheet_solve.cpp
   cpp/src/sheet/mesh.cpp
   cpp/src/sheet/pfft_build.cpp
-  cpp/src/fem/layered_dc_system.cpp)
+  cpp/src/fem/layered_dc_system.cpp
+  cpp/src/fem/dc_ports.cpp)
 target_include_directories(pcbcore PUBLIC cpp/include)
 target_include_directories(pcbcore PRIVATE ${pocketfft_SOURCE_DIR})
 target_compile_definitions(pcbcore PRIVATE POCKETFFT_NO_MULTITHREADING POCKETFFT_CACHE_SIZE=16)
@@ -127,7 +128,10 @@ if(PCB_NATIVE_MARCH)
   target_compile_options(pcbcore PRIVATE "-march=${PCB_NATIVE_MARCH}")
 endif()
 target_compile_definitions(pcbcore PRIVATE EIGEN_DONT_PARALLELIZE EIGEN_MPL2_ONLY)
+find_package(Threads REQUIRED)
 target_link_libraries(pcbcore PRIVATE superlu Eigen3::Eigen)
+# std::thread: the N-port basis runs its unit solves on a pool of its own.
+target_link_libraries(pcbcore PUBLIC Threads::Threads)
 if(PCB_NATIVE_OPENMP)
   target_link_libraries(pcbcore PUBLIC OpenMP::OpenMP_CXX)
 endif()
