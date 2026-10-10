@@ -3,6 +3,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <complex>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -14,6 +15,7 @@
 #include "pcbcore/errors.hpp"
 #include "pcbcore/fem/dc_ports.hpp"
 #include "pcbcore/fem/layered_dc_system.hpp"
+#include "pcbcore/fem/scalar_maxwell_system.hpp"
 
 namespace pcbcore_bindings {
 
@@ -142,9 +144,113 @@ pcbcore::fem::CorrelationModes modes_of(const LayeredDCSystem& system, const Inp
     return pcbcore::fem::correlation_modes(reduced.data(), driven, scale, fields, system.size());
 }
 
+using pcbcore::fem::ScalarMaxwellSystem;
+using Complex = std::complex<double>;
+
+std::shared_ptr<ScalarMaxwellSystem> make_maxwell(const Input<double>& permittivity, const Input<double>& permeability,
+                                                  const Input<double>& conductivity, const Input<double>& loss_tangent,
+                                                  const double pitch_x, const double pitch_y, const double frequency,
+                                                  const Input<std::uint8_t>& dirichlet,
+                                                  const Input<Complex>& dirichlet_values, const Input<Complex>& source) {
+    if (permittivity.ndim() != 2) {
+        throw pcbcore::InvalidInput("material arrays must be (rows, cols)");
+    }
+    pcbcore::fem::ScalarMaxwellMeshView mesh;
+    mesh.rows = static_cast<int>(permittivity.shape(0));
+    mesh.cols = static_cast<int>(permittivity.shape(1));
+    mesh.pitch_x = pitch_x;
+    mesh.pitch_y = pitch_y;
+    const py::ssize_t elements = permittivity.size();
+    const py::ssize_t nodes = static_cast<py::ssize_t>(mesh.rows + 1) * (mesh.cols + 1);
+    mesh.relative_permittivity = permittivity.data();
+    mesh.relative_permeability = sized(permeability, elements, "relative_permeability");
+    mesh.conductivity = sized(conductivity, elements, "conductivity");
+    mesh.loss_tangent = sized(loss_tangent, elements, "dielectric_loss_tangent");
+    const auto* d = sized(dirichlet, nodes, "dirichlet_mask");
+    const auto* v = sized(dirichlet_values, nodes, "dirichlet values");
+    const auto* q = sized(source, nodes, "nodal_source");
+    py::gil_scoped_release release;
+    return std::make_shared<ScalarMaxwellSystem>(mesh, frequency, d, v, q);
+}
+
 }  // namespace
 
 void register_fem(py::module_& m) {
+    py::class_<ScalarMaxwellSystem, std::shared_ptr<ScalarMaxwellSystem>>(m, "ScalarMaxwellSystem")
+        .def(py::init(&make_maxwell), py::arg("relative_permittivity"), py::arg("relative_permeability"),
+             py::arg("conductivity"), py::arg("dielectric_loss_tangent"), py::arg("pitch_x"), py::arg("pitch_y"),
+             py::arg("frequency_hz"), py::arg("dirichlet_mask"), py::arg("dirichlet_values"), py::arg("nodal_source"))
+        .def_property_readonly("size", &ScalarMaxwellSystem::size)
+        .def_property_readonly("diagonal",
+                               [](const ScalarMaxwellSystem& s) { return copy_array(s.diagonal(), {s.size()}); })
+        .def(
+            "apply_high",
+            [](const ScalarMaxwellSystem& s, const Input<Complex>& x, const int threads) {
+                std::vector<Complex> y(static_cast<std::size_t>(s.size()));
+                s.apply_high(sized(x, s.size(), "vector"), y.data(), threads);
+                return to_array(std::move(y));
+            },
+            py::arg("vector"), py::arg("threads"))
+        .def(
+            "apply_low",
+            [](const ScalarMaxwellSystem& s, const Input<std::complex<float>>& x, const int threads) {
+                std::vector<std::complex<float>> y(static_cast<std::size_t>(s.size()));
+                s.apply_low(sized(x, s.size(), "vector"), y.data(), threads);
+                return to_array(std::move(y));
+            },
+            py::arg("vector"), py::arg("threads"))
+        .def(
+            "build_rhs", [](const ScalarMaxwellSystem& s, const int threads) { return to_array(s.build_rhs(threads)); },
+            py::arg("threads"))
+        .def(
+            "solve",
+            [](const ScalarMaxwellSystem& s, const Input<Complex>& rhs, const py::object& initial,
+               const double relative_tolerance, const double absolute_tolerance,
+               const double inner_relative_tolerance, const int max_outer_iterations,
+               const int max_inner_iterations, const int restart, const bool cgs2, const bool float_dots,
+               const int threads) {
+                const Complex* b = sized(rhs, s.size(), "rhs");
+                std::vector<Complex> x(static_cast<std::size_t>(s.size()), Complex{});
+                if (!initial.is_none()) {
+                    const auto guess = initial.cast<Input<Complex>>();
+                    const Complex* g = sized(guess, s.size(), "initial_guess");
+                    std::copy(g, g + s.size(), x.begin());
+                }
+                const auto config = mpir_config(relative_tolerance, absolute_tolerance, inner_relative_tolerance,
+                                                max_outer_iterations, max_inner_iterations);
+                pcbcore::fem::scalar_maxwell::GmresOptions gmres;
+                gmres.restart = restart;
+                gmres.cgs2 = cgs2;
+                gmres.float_dots = float_dots;
+                pcbcore::fem::MpirResult result;
+                {
+                    py::gil_scoped_release release;
+                    result = s.solve(b, x.data(), config, gmres, threads);
+                }
+                py::dict out = result_dict(result);
+                out["solution"] = to_array(std::move(x));
+                return out;
+            },
+            py::arg("rhs"), py::arg("initial_guess"), py::arg("relative_tolerance"), py::arg("absolute_tolerance"),
+            py::arg("inner_relative_tolerance"), py::arg("max_outer_iterations"), py::arg("max_inner_iterations"),
+            py::arg("restart"), py::arg("cgs2"), py::arg("float_dots"), py::arg("threads"))
+        .def(
+            "element_fields",
+            [](const ScalarMaxwellSystem& s, const Input<Complex>& field, const int rows, const int cols) {
+                auto fields = s.element_fields(sized(field, s.size(), "electric_field"));
+                return py::make_tuple(to_array(std::move(fields.centre), {rows, cols}),
+                                      to_array(std::move(fields.magnetic), {rows, cols, 2}),
+                                      to_array(std::move(fields.current), {rows, cols}));
+            },
+            py::arg("electric_field"), py::arg("rows"), py::arg("cols"))
+        .def(
+            "losses",
+            [](const ScalarMaxwellSystem& s, const Input<Complex>& field) {
+                const auto [conduction, dielectric] = s.losses(sized(field, s.size(), "electric_field"));
+                return py::make_tuple(conduction, dielectric);
+            },
+            py::arg("electric_field"));
+
     py::class_<LayeredDCSystem, System>(m, "LayeredDCSystem")
         .def(py::init(&make_system), py::arg("element_active"), py::arg("layer_thickness"), py::arg("pitch_x"),
              py::arg("pitch_y"), py::arg("conductivity"), py::arg("via_lower"), py::arg("via_upper"),

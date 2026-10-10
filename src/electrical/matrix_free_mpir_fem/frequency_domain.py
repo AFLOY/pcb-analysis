@@ -19,7 +19,15 @@ from .runtime import (
     RuntimeBackend,
     make_complex64_runtime,
 )
-from .native_q1 import NativeScalarMaxwellQ1, native_available, native_requested
+from .. import _backend
+from ..threads import thread_budget
+from .native_q1 import (
+    DOT_ACCUMULATIONS,
+    NATIVE_KERNEL_NAME,
+    ORTHOGONALIZATIONS,
+    native_dot_accumulation as default_dot_accumulation,
+    native_orthogonalization as default_orthogonalization,
+)
 from .solver import MPIRConfig, MPIRResult, solve_mpir
 
 
@@ -156,7 +164,15 @@ def _q1_matrices(pitch_x_m: float, pitch_y_m: float) -> tuple[np.ndarray, np.nda
 
 
 class MatrixFreeScalarMaxwellOperator:
-    """Complex matrix-free Q1 action for the scalar full-wave equation."""
+    """Complex matrix-free Q1 action for the scalar full-wave equation.
+
+    With the C++ core built (``native=None``, the default, or ``True``) the
+    whole prepared operator is ``electrical._pcbcore.fem.ScalarMaxwellSystem``:
+    materials, Q1 matrices, Dirichlet rows, diagonal, the lifted right-hand
+    side, the MPIR solve and the element fields and losses.  ``native=False``
+    or a CUDA runtime keep the NumPy/CuPy implementation; the two agree
+    within the GMRES tolerance.
+    """
 
     high_dtype = np.complex128
     inner_solver = "gmres"
@@ -168,7 +184,7 @@ class MatrixFreeScalarMaxwellOperator:
         runtime: LowPrecisionRuntime | None = None,
         backend: RuntimeBackend | None = None,
         device_id: int = 0,
-        native: bool = False,
+        native: bool | None = None,
         native_orthogonalization: str | None = None,
         native_dot_accumulation: str | None = None,
     ) -> None:
@@ -182,6 +198,18 @@ class MatrixFreeScalarMaxwellOperator:
         )
         self.free_nodes = ~problem.dirichlet_mask
         self._free_low = self.runtime.namespace.asarray(self.free_nodes, dtype=bool)
+        is_cuda = bool(getattr(self.runtime, "is_cuda", False))
+        if is_cuda and native:
+            raise ValueError("native=True requires the CPU runtime")
+        core = None if is_cuda or native is False else _backend.core()
+        if native and core is None:
+            raise ImportError(
+                "the pcbcore extension is not built; run cmake -S . -B build/native && cmake --build build/native"
+            )
+        self._system: Any = None
+        if core is not None:
+            self._init_system(core, problem, native_orthogonalization, native_dot_accumulation)
+            return
         stiffness, mass = _q1_matrices(
             self.mesh.pitch_x_m, self.mesh.pitch_y_m
         )
@@ -221,7 +249,6 @@ class MatrixFreeScalarMaxwellOperator:
             raise ValueError("Jacobi diagonal is singular at this frequency")
         self._diagonal_low = self.runtime.from_host(diagonal)
         self._cuda_apply = None
-        self._native: NativeScalarMaxwellQ1 | None = None
         self.low_operator_backend = "portable-array-q1"
         if getattr(self.runtime, "is_cuda", False):
             if native:
@@ -232,21 +259,42 @@ class MatrixFreeScalarMaxwellOperator:
                 self.runtime, self.mesh.element_shape
             )
             self.low_operator_backend = self._cuda_apply.kernel_name
-        elif native or (native is None and native_requested()):
-            # Fused C++ host path, the CPU default when built: ``native=True``
-            # demands it and ``native=False`` keeps the portable NumPy path.
-            self._native = NativeScalarMaxwellQ1(
-                self.mesh.element_shape,
-                self._inverse_mu_high,
-                self._reaction_high,
-                self._stiffness_high,
-                self._mass_high,
-                self.free_nodes,
-                diagonal,
-                orthogonalization=native_orthogonalization,
-                dot_accumulation=native_dot_accumulation,
+
+    def _init_system(
+        self,
+        core: Any,
+        problem: ScalarMaxwellProblem,
+        orthogonalization: str | None,
+        dot_accumulation: str | None,
+    ) -> None:
+        orthogonalization = orthogonalization if orthogonalization is not None else default_orthogonalization()
+        if orthogonalization not in ORTHOGONALIZATIONS:
+            raise ValueError(
+                f"orthogonalization must be one of {ORTHOGONALIZATIONS}, got {orthogonalization!r}"
             )
-            self.low_operator_backend = self._native.kernel_name
+        dot_accumulation = dot_accumulation if dot_accumulation is not None else default_dot_accumulation()
+        if dot_accumulation not in DOT_ACCUMULATIONS:
+            raise ValueError(f"dot_accumulation must be one of {DOT_ACCUMULATIONS}, got {dot_accumulation!r}")
+        self._cgs2 = orthogonalization == "cgs2"
+        self._float_dots = dot_accumulation == "float32"
+        # OpenMP team of every call: the process budget when the operator is built.
+        self._team = thread_budget()
+        mesh = self.mesh
+        self._system = core.fem.ScalarMaxwellSystem(
+            mesh.relative_permittivity,
+            mesh.relative_permeability,
+            mesh.conductivity_s_per_m,
+            mesh.dielectric_loss_tangent,
+            mesh.pitch_x_m,
+            mesh.pitch_y_m,
+            problem.frequency_hz,
+            np.ascontiguousarray(problem.dirichlet_mask, dtype=np.uint8),
+            problem.dirichlet_electric_field_v_per_m,
+            problem.nodal_source,
+        )
+        self._diagonal_low = self.runtime.from_host(self._system.diagonal)
+        self._cuda_apply = None
+        self.low_operator_backend = NATIVE_KERNEL_NAME
 
     @staticmethod
     def _views(grid: Any) -> tuple[Any, Any, Any, Any]:
@@ -323,6 +371,8 @@ class MatrixFreeScalarMaxwellOperator:
         vector = np.asarray(vector, dtype=np.complex128).reshape(-1)
         if vector.size != self.size:
             raise ValueError(f"vector has size {vector.size}, expected {self.size}")
+        if self._system is not None:
+            return self._system.apply_high(vector, self._team)
         return self._apply_impl(
             vector,
             np,
@@ -333,20 +383,6 @@ class MatrixFreeScalarMaxwellOperator:
             self.free_nodes,
         )
 
-    def native_inner_gmres(
-        self, rhs_high: np.ndarray, config: MPIRConfig
-    ) -> tuple[np.ndarray, int, float, int] | None:
-        """Whole inner GMRES in C++; ``None`` when the native path is off."""
-
-        if self._native is None:
-            return None
-        return self._native.inner_gmres(
-            rhs_high,
-            inner_relative_tolerance=config.inner_relative_tolerance,
-            max_inner_iterations=config.max_inner_iterations,
-            restart=config.gmres_restart,
-        )
-
     def native_solve_mpir(
         self,
         rhs_high: np.ndarray,
@@ -355,13 +391,41 @@ class MatrixFreeScalarMaxwellOperator:
     ) -> tuple[np.ndarray, bool, int, int, float, int, int] | None:
         """End-to-end MPIR solve in C++; ``None`` when the native path is off."""
 
-        if self._native is None:
+        if self._system is None:
             return None
-        return self._native.solve_mpir(rhs_high, config, initial_guess)
+        rhs_high = np.ascontiguousarray(rhs_high, dtype=np.complex128).reshape(-1)
+        if rhs_high.size != self.size:
+            raise ValueError(f"rhs has size {rhs_high.size}, expected {self.size}")
+        result = self._system.solve(
+            rhs_high,
+            None if initial_guess is None else np.ascontiguousarray(initial_guess, dtype=np.complex128).reshape(-1),
+            float(config.relative_tolerance),
+            float(config.absolute_tolerance),
+            float(config.inner_relative_tolerance),
+            int(config.max_outer_iterations),
+            int(config.max_inner_iterations),
+            int(config.gmres_restart),
+            self._cgs2,
+            self._float_dots,
+            self._team,
+        )
+        return (
+            result["solution"],
+            bool(result["converged"]),
+            int(result["outer_iterations"]),
+            int(result["inner_iterations"]),
+            float(result["relative_residual"]),
+            int(result["high_operator_applications"]),
+            int(result["low_operator_applications"]),
+            list(result["history"]),
+        )
 
     def apply_low(self, vector: Any) -> Any:
-        if self._native is not None:
-            return self._native.apply(vector)
+        if self._system is not None:
+            vector = np.ascontiguousarray(vector, dtype=np.complex64).reshape(-1)
+            if vector.size != self.size:
+                raise ValueError(f"vector has size {vector.size}, expected {self.size}")
+            return self._system.apply_low(vector, self._team)
         if self._cuda_apply is not None:
             vector = self.runtime.namespace.asarray(
                 vector, dtype=self.runtime.dtype
@@ -394,6 +458,8 @@ class MatrixFreeScalarMaxwellOperator:
         return self._diagonal_low
 
     def build_rhs(self) -> np.ndarray:
+        if self._system is not None:
+            return self._system.build_rhs(self._team)
         boundary = np.where(
             self.problem.dirichlet_mask,
             self.problem.dirichlet_electric_field_v_per_m,
@@ -418,6 +484,9 @@ class MatrixFreeScalarMaxwellOperator:
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Return element-centre ``E_z``, vector ``H_xy``, and ``J_z``."""
 
+        if self._system is not None:
+            flat = np.ascontiguousarray(electric_field, dtype=np.complex128).reshape(-1)
+            return self._system.element_fields(flat, *self.mesh.element_shape)
         electric = np.asarray(electric_field, dtype=np.complex128).reshape(
             self.mesh.node_shape
         )
@@ -442,6 +511,11 @@ class MatrixFreeScalarMaxwellOperator:
     def losses(self, electric_field: np.ndarray) -> tuple[float, float]:
         """Return conduction and dielectric loss in W per metre of z depth."""
 
+        if self._system is not None:
+            conduction, dielectric = self._system.losses(
+                np.ascontiguousarray(electric_field, dtype=np.complex128).reshape(-1)
+            )
+            return float(conduction), float(dielectric)
         electric = np.asarray(electric_field, dtype=np.complex128).reshape(
             self.mesh.node_shape
         )
@@ -483,12 +557,15 @@ def solve_scalar_maxwell(
     runtime: LowPrecisionRuntime | None = None,
     backend: RuntimeBackend | None = None,
     device_id: int = 0,
+    native: bool | None = None,
 ) -> ScalarMaxwellSolution:
     """Solve the scalar 2D full-wave Maxwell boundary-value problem.
 
     ``backend="cuda"`` keeps the inner complex64 GMRES vectors and fused Q1
     operator on the selected GPU.  The reliable complex128 residual and final
-    field post-processing intentionally remain on the host.
+    field post-processing intentionally remain on the host.  On the CPU the
+    C++ core solves when it is built (``native=False`` keeps NumPy); the
+    answers agree within the GMRES tolerance, not bit for bit.
     """
 
     operator = MatrixFreeScalarMaxwellOperator(
@@ -496,6 +573,7 @@ def solve_scalar_maxwell(
         runtime=runtime,
         backend=backend,
         device_id=device_id,
+        native=native,
     )
     result = solve_mpir(operator, operator.build_rhs(), config=config)
     electric = result.solution.reshape(problem.mesh.node_shape)

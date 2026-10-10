@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from electrical.matrix_free_mpir_fem.native_q1 import native_available
+
 from electrical.matrix_free_mpir_fem import (
     EPSILON_0_F_PER_M,
     MU_0_H_PER_M,
@@ -48,7 +50,10 @@ def test_backend_selector_preserves_cpu_default_and_rejects_ambiguity() -> None:
     operator = MatrixFreeScalarMaxwellOperator(problem, backend="cpu")
 
     assert operator.runtime.name == "numpy-complex64"
-    assert operator.low_operator_backend == "portable-array-q1"
+    # The C++ core is the CPU default when it is built.
+    assert operator.low_operator_backend == (
+        "cpp-fused-node-gather-q1" if native_available() else "portable-array-q1"
+    )
     assert make_complex64_runtime("auto").name in {
         "numpy-complex64",
         "cupy-complex64",
