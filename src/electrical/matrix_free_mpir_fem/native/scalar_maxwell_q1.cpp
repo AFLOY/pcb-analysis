@@ -36,6 +36,10 @@
 
 namespace py = pybind11;
 
+// Registered as electrical._pcbcore.scalar_maxwell; built on its own as _scalar_maxwell_native
+// when PCB_STANDALONE_MODULE is defined (native/build.py).
+namespace pcb_scalar_maxwell {
+
 using c64 = std::complex<float>;
 using c128 = std::complex<double>;
 
@@ -775,7 +779,7 @@ int default_threads() noexcept {
 #endif
 }
 
-PYBIND11_MODULE(_scalar_maxwell_native, m) {
+void register_module(py::module_& m) {
     m.doc() = "Fused C++ Q1 scalar Maxwell operator, complex64 inner GMRES and end-to-end MPIR solver";
     m.def("apply_q1", &apply_q1, py::arg("vector"), py::arg("inverse_mu"), py::arg("reaction"),
           py::arg("stiffness"), py::arg("mass"), py::arg("free_nodes"), py::arg("free_mask"),
@@ -807,3 +811,9 @@ PYBIND11_MODULE(_scalar_maxwell_native, m) {
         false;
 #endif
 }
+
+}  // namespace pcb_scalar_maxwell
+
+#ifdef PCB_STANDALONE_MODULE
+PYBIND11_MODULE(_scalar_maxwell_native, m) { pcb_scalar_maxwell::register_module(m); }
+#endif

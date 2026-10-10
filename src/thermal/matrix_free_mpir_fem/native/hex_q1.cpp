@@ -38,6 +38,10 @@
 
 namespace py = pybind11;
 
+// Registered as electrical._pcbcore.thermal_hex; built on its own as _thermal_native
+// when PCB_STANDALONE_MODULE is defined (native/build.py).
+namespace pcb_thermal_hex {
+
 namespace {
 
 using ArrF32 = py::array_t<float, py::array::c_style | py::array::forcecast>;
@@ -784,7 +788,7 @@ py::tuple solve_mpir_thermal_hex(
         relative_residual, total_high_apps, total_low_apps, py::cast(history));
 }
 
-PYBIND11_MODULE(_thermal_native, m) {
+void register_module(py::module_& m) {
     m.doc() = "Fused C++ hexahedral Q1 conduction operator (float32 and float64), coarse assembly and full MPIR solver";
     m.def("apply_hex_q1", &apply_hex_q1, py::arg("vector"), py::arg("coefficients"), py::arg("unit"),
           py::arg("robin"), py::arg("free_nodes"),
@@ -820,3 +824,9 @@ PYBIND11_MODULE(_thermal_native, m) {
         false;
 #endif
 }
+
+}  // namespace pcb_thermal_hex
+
+#ifdef PCB_STANDALONE_MODULE
+PYBIND11_MODULE(_thermal_native, m) { pcb_thermal_hex::register_module(m); }
+#endif

@@ -62,6 +62,16 @@ Versions before 0.7.0 were not tagged; see the Git history.
   non-finite potentials on both paths (with objectives, `splu` used to raise
   `RuntimeError`).
 
+- One extension module: the kernels built as `_layered_dc_native`,
+  `_scalar_maxwell_native`, `_thermal_native`, `_dipole_native`,
+  `_voxelize_native` and `_sheet_pfft_native` are submodules of
+  `electrical._pcbcore` (`layered_dc`, `scalar_maxwell`, `thermal_hex`,
+  `dipole`, `voxelize`, `sheet_pfft_near`), compiled with the flags they had,
+  so one OpenMP runtime and one copy of Eigen are linked and the solver core
+  can call them directly. The per-package `native/build.py` scripts still
+  build each one as its own module where CMake is not available, and the
+  Python wrappers fall back to those.
+
 ### Breaking
 
 The default thread count of the native kernels changes from one to the

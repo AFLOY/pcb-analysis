@@ -25,6 +25,10 @@
 
 namespace py = pybind11;
 
+// Registered as electrical._pcbcore.voxelize; built on its own as _voxelize_native
+// when PCB_STANDALONE_MODULE is defined (native/build.py).
+namespace pcb_voxelize {
+
 namespace {
 
 using ArrF64 = py::array_t<double, py::array::c_style | py::array::forcecast>;
@@ -371,7 +375,7 @@ py::array_t<double> plane_section_coverage_graded(const std::vector<ArrF64>& tri
 
 }  // namespace
 
-PYBIND11_MODULE(_voxelize_native, m) {
+void register_module(py::module_& m) {
     m.doc() = "Generalized winding number point-in-solid tests for tessellated STEP solids";
     m.def("winding_numbers", &winding_numbers, py::arg("points"), py::arg("triangles"), py::arg("threads") = 1);
     m.def("contains", &contains, py::arg("points"), py::arg("triangles"), py::arg("threshold") = 0.5,
@@ -382,3 +386,9 @@ PYBIND11_MODULE(_voxelize_native, m) {
     m.def("plane_section_coverage", &plane_section_coverage, py::arg("triangle_sets"), py::arg("z"),
           py::arg("origin_x"), py::arg("origin_y"), py::arg("pitch"), py::arg("rows"), py::arg("cols"));
 }
+
+}  // namespace pcb_voxelize
+
+#ifdef PCB_STANDALONE_MODULE
+PYBIND11_MODULE(_voxelize_native, m) { pcb_voxelize::register_module(m); }
+#endif

@@ -45,6 +45,10 @@
 
 namespace py = pybind11;
 
+// Registered as electrical._pcbcore.layered_dc; built on its own as _layered_dc_native
+// when PCB_STANDALONE_MODULE is defined (native/build.py).
+namespace pcb_layered_dc {
+
 namespace {
 
 using ArrF32 = py::array_t<float, py::array::c_style | py::array::forcecast>;
@@ -803,7 +807,7 @@ py::tuple solve_mpir_layered_dc_q1(
         relative_residual, total_high_apps, total_low_apps, py::cast(history));
 }
 
-PYBIND11_MODULE(_layered_dc_native, m) {
+void register_module(py::module_& m) {
     m.doc() = "Fused C++ layered-PCB DC conduction operator (float32 and float64), coarse assembly and full MPIR solver";
     m.def("apply_layered_dc_q1", &apply_layered_dc_q1, py::arg("vector"), py::arg("coefficients"), py::arg("unit"),
           py::arg("free_nodes"), py::arg("free_mask"), py::arg("via_ptr"), py::arg("via_nbr"), py::arg("via_g"),
@@ -836,3 +840,9 @@ PYBIND11_MODULE(_layered_dc_native, m) {
         false;
 #endif
 }
+
+}  // namespace pcb_layered_dc
+
+#ifdef PCB_STANDALONE_MODULE
+PYBIND11_MODULE(_layered_dc_native, m) { pcb_layered_dc::register_module(m); }
+#endif

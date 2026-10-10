@@ -44,40 +44,29 @@ endif()
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
-# One native module: ``name`` is the importable module, ``package_dir`` the
-# package directory the module is written into (relative to src/).
-function(pcb_native_module name package_dir)
-  set(sources ${ARGN})
-  pybind11_add_module(${name} MODULE ${sources})
-  target_compile_options(${name} PRIVATE
-    -O3 -fcx-limited-range -fno-math-errno -DNDEBUG)
-  if(PCB_NATIVE_MARCH)
-    target_compile_options(${name} PRIVATE
-      "-march=${PCB_NATIVE_MARCH}" -mprefer-vector-width=512)
-  endif()
-  target_link_libraries(${name} PRIVATE Eigen3::Eigen)
-  # Eigen would otherwise run its products on an OpenMP team of its own size,
-  # outside the thread budget; MPL2_ONLY keeps the LGPL parts out.
-  target_compile_definitions(${name} PRIVATE EIGEN_DONT_PARALLELIZE EIGEN_MPL2_ONLY)
-  if(PCB_NATIVE_OPENMP)
-    target_link_libraries(${name} PRIVATE OpenMP::OpenMP_CXX)
-  endif()
-  set_target_properties(${name} PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/src/${package_dir}")
-endfunction()
 
-pcb_native_module(_scalar_maxwell_native electrical/matrix_free_mpir_fem
-  src/electrical/matrix_free_mpir_fem/native/scalar_maxwell_q1.cpp)
-pcb_native_module(_layered_dc_native electrical/matrix_free_mpir_fem
-  src/electrical/matrix_free_mpir_fem/native/layered_dc_q1.cpp)
-pcb_native_module(_thermal_native thermal/matrix_free_mpir_fem
-  src/thermal/matrix_free_mpir_fem/native/hex_q1.cpp)
-pcb_native_module(_dipole_native emc/tiled_dipole_superposition
-  src/emc/tiled_dipole_superposition/native/dipole_fields.cpp)
-pcb_native_module(_voxelize_native geometry/cad_import
-  src/geometry/cad_import/native/point_in_mesh.cpp)
-pcb_native_module(_sheet_pfft_native electrical/sheet_peec
+# The kernels that were separate modules (_layered_dc_native,
+# _scalar_maxwell_native, _thermal_native, _dipole_native, _voxelize_native,
+# _sheet_pfft_native) are submodules of electrical._pcbcore now, built with
+# the flags they always had: their OpenMP SIMD reductions follow the vector
+# width, so the same flags keep the same bits.  native/build.py still builds
+# each one on its own (PCB_STANDALONE_MODULE) where CMake is not available.
+add_library(pcbcore_kernels STATIC
+  src/electrical/matrix_free_mpir_fem/native/scalar_maxwell_q1.cpp
+  src/electrical/matrix_free_mpir_fem/native/layered_dc_q1.cpp
+  src/thermal/matrix_free_mpir_fem/native/hex_q1.cpp
+  src/emc/tiled_dipole_superposition/native/dipole_fields.cpp
+  src/geometry/cad_import/native/point_in_mesh.cpp
   src/electrical/sheet_peec/native/pfft_near.cpp)
+target_compile_options(pcbcore_kernels PRIVATE -O3 -fcx-limited-range -fno-math-errno -DNDEBUG)
+if(PCB_NATIVE_MARCH)
+  target_compile_options(pcbcore_kernels PRIVATE "-march=${PCB_NATIVE_MARCH}" -mprefer-vector-width=512)
+endif()
+target_compile_definitions(pcbcore_kernels PRIVATE EIGEN_DONT_PARALLELIZE EIGEN_MPL2_ONLY)
+target_link_libraries(pcbcore_kernels PRIVATE Eigen3::Eigen pybind11::module)
+if(PCB_NATIVE_OPENMP)
+  target_link_libraries(pcbcore_kernels PUBLIC OpenMP::OpenMP_CXX)
+endif()
 
 # ---------------------------------------------------------------------------
 # pcbcore: the C++ solver core (cpp/) and its one extension module,
@@ -141,6 +130,6 @@ endif()
 
 pybind11_add_module(_pcbcore MODULE cpp/bindings/module.cpp)
 target_compile_options(_pcbcore PRIVATE -O3 -DNDEBUG)
-target_link_libraries(_pcbcore PRIVATE pcbcore)
+target_link_libraries(_pcbcore PRIVATE pcbcore pcbcore_kernels)
 set_target_properties(_pcbcore PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/src/electrical")
