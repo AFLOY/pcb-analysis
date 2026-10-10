@@ -363,6 +363,31 @@ class SheetInductanceOperator:
 
         rows, cols = self.shape
         layer_count = len(self.stackup)
+        core = _backend.core()
+        if core is not None:
+            levels = list(self.vertical_levels)
+            index_of = {key: position for position, key in enumerate(levels)}
+            pairs = [(a, b) for a in range(layer_count) for b in range(a, layer_count)]
+            level_pairs = [(a, b) for a in range(len(levels)) for b in range(a, len(levels))]
+
+            def stacked(tables: dict, keys: list) -> np.ndarray:
+                return np.ascontiguousarray(np.stack([tables[k] for k in keys])) if keys else np.zeros((0, *self.padded))
+
+            def cells(group) -> np.ndarray:
+                return np.asarray(group, dtype=np.int64).reshape(-1, 3)
+
+            vias = np.asarray(
+                [(index_of[(v.lower_layer, v.upper_layer)], v.row, v.col) for v in mesh.via_branches] if levels else [],
+                dtype=np.int64,
+            ).reshape(-1, 3)
+            entries_i, entries_j, values = core.sheet.uniform_near_field(
+                layer_count, rows, cols, len(levels), int(radius_cells),
+                stacked(self._tables, [("x", a, b) for a, b in pairs]),
+                stacked(self._tables, [("y", a, b) for a, b in pairs]),
+                stacked(self._tables_z, level_pairs),
+                cells(mesh.branch_x), cells(mesh.branch_y), vias,
+            )
+            return sp.csr_matrix((values, (entries_i, entries_j)), shape=(mesh.branch_count, mesh.branch_count))
         tables = self._tables
         tables_z = self._tables_z
         padded_rows, padded_cols = self.padded
