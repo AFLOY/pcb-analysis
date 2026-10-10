@@ -122,7 +122,8 @@ add_library(pcbcore STATIC
   cpp/src/sheet/convolution_operator.cpp
   cpp/src/sheet/hoer_love.cpp
   cpp/src/sheet/near_field.cpp
-  cpp/src/sheet/pfft_operator.cpp)
+  cpp/src/sheet/pfft_operator.cpp
+  cpp/src/sheet/sheet_solve.cpp)
 target_include_directories(pcbcore PUBLIC cpp/include)
 target_include_directories(pcbcore PRIVATE ${pocketfft_SOURCE_DIR})
 target_compile_definitions(pcbcore PRIVATE POCKETFFT_NO_MULTITHREADING POCKETFFT_CACHE_SIZE=16)

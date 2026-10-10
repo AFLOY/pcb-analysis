@@ -37,7 +37,8 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 import numpy as np
 
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
-from electrical.threads import serial_blas
+from electrical import _backend
+from electrical.threads import serial_blas, thread_budget
 import scipy.sparse as sp
 import scipy.sparse.csgraph as csgraph
 import scipy.sparse.linalg as spla
@@ -545,6 +546,22 @@ def solve_sheet_case(
     if frequency_hz == 0.0 and float(np.max(np.abs(injected.imag))) > 1e-15:
         raise ValueError("DC terminal currents must be real")
 
+    if frequency_hz > 0.0:
+        levels = mesh.vertical_levels
+        if levels and tuple(levels) != tuple(operator.vertical_levels):
+            raise ValueError(
+                f"the mesh joins layer pairs {list(levels)} with vertical branches "
+                f"but the operator was built for {list(operator.vertical_levels)}; "
+                "build it with vertical_levels=mesh.vertical_levels"
+            )
+    native = _native_sheet_operator(operator) if frequency_hz > 0.0 else None
+    if _backend.core() is not None and (frequency_hz == 0.0 or native is not None):
+        return _solve_on_core(
+            mesh, operator, native, incidence, resistance, injected,
+            frequency_hz=frequency_hz, tolerance=tolerance, max_iterations=max_iterations,
+            restart=restart, preconditioner=preconditioner,
+        )
+
     # Potential is defined up to a constant per connected component, so each
     # component needs its own gauge.  Grounding one node and hoping the
     # conductor is one piece made the system exactly singular the moment it was
@@ -718,6 +735,113 @@ def solve_sheet_case(
         converged=info == 0 and residual < 1e-6,
         grounded_node=grounded,
         undriven_nodes=dropped,
+    )
+
+
+def _native_sheet_operator(operator: Any) -> tuple[str, Any] | None:
+    """The C++ object behind an operator, with its kind, or ``None``."""
+
+    if getattr(operator, "_native", None) is not None and hasattr(operator, "_tables"):
+        return "convolution", operator._native
+    if getattr(operator, "_core", None) is not None and hasattr(operator, "_core_family"):
+        return "pfft", operator._core
+    return None
+
+
+def _branch_positions_for(mesh: SheetMesh, kind: str, operator: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Each mesh branch's family (x 0, y 1, z 2) and flat index in that family's operator input."""
+
+    rows, cols = mesh.shape
+    layers = len(mesh.stackup)
+    index_of = {key: position for position, key in enumerate(mesh.vertical_levels)}
+    x = np.asarray(mesh.branch_x, dtype=np.int64).reshape(-1, 3)
+    y = np.asarray(mesh.branch_y, dtype=np.int64).reshape(-1, 3)
+    z = np.asarray(
+        [(index_of[(v.lower_layer, v.upper_layer)], v.row, v.col) for v in mesh.via_branches], dtype=np.int64
+    ).reshape(-1, 3)
+    if kind == "convolution":
+        px = (x[:, 0] * rows + x[:, 1]) * cols + x[:, 2]
+        py = (y[:, 0] * rows + y[:, 1]) * cols + y[:, 2]
+        sizes = np.array([layers * rows * cols, layers * rows * cols, len(index_of) * rows * cols], dtype=np.int64)
+    else:
+        px = x[:, 0] * (rows * (cols - 1)) + x[:, 1] * (cols - 1) + x[:, 2]
+        py = y[:, 0] * ((rows - 1) * cols) + y[:, 1] * cols + y[:, 2]
+        families = operator._core_family
+        # For the pFFT operator these name its families rather than sizes.
+        sizes = np.array([families["x"], families["y"], families.get("z", -1)], dtype=np.int64)
+    pz = (z[:, 0] * rows + z[:, 1]) * cols + z[:, 2]
+    family = np.concatenate(
+        [np.zeros(len(px), np.int8), np.ones(len(py), np.int8), np.full(len(pz), 2, np.int8)]
+    )
+    return family, np.concatenate([px, py, pz]).astype(np.int64), sizes
+
+
+def _solve_on_core(
+    mesh: SheetMesh,
+    operator: Any,
+    native: tuple[str, Any] | None,
+    incidence: sp.csr_matrix,
+    resistance: np.ndarray,
+    injected: np.ndarray,
+    *,
+    frequency_hz: float,
+    tolerance: float,
+    max_iterations: int,
+    restart: int,
+    preconditioner: str,
+) -> SheetSolution:
+    """The solve in the C++ core: components, gauge, nodal DC or preconditioned GMRES."""
+
+    core = _backend.core()
+    assert core is not None
+    coo = incidence.tocoo()
+    left = np.empty(mesh.branch_count, dtype=np.int64)
+    right = np.empty(mesh.branch_count, dtype=np.int64)
+    left[coo.row[coo.data > 0]] = coo.col[coo.data > 0]
+    right[coo.row[coo.data < 0]] = coo.col[coo.data < 0]
+    near = None
+    self_inductance = None
+    family = np.zeros(0, np.int8)
+    position = np.zeros(0, np.int64)
+    sizes = np.zeros(3, np.int64)
+    op = None
+    if frequency_hz > 0.0:
+        assert native is not None
+        kind, op = native
+        family, position, sizes = _branch_positions_for(mesh, kind, operator)
+        if not hasattr(operator, "near_inductance"):
+            preconditioner = "diagonal"
+        if preconditioner in ("auto", "near", "block"):
+            matrix = operator.near_inductance(mesh).tocsr()
+            near = (
+                matrix.indptr.astype(np.int64),
+                matrix.indices.astype(np.int64),
+                np.ascontiguousarray(matrix.data, dtype=np.float64),
+            )
+        if preconditioner in ("auto", "block", "diagonal"):
+            self_inductance = np.ascontiguousarray(
+                np.concatenate(
+                    [_inline_self_inductance(mesh, operator), _vertical_self_inductance(mesh, operator)]
+                ),
+                dtype=np.float64,
+            )
+    fields = core.sheet.solve_sheet(
+        mesh.node_count, left, right, np.ascontiguousarray(resistance, dtype=np.float64),
+        np.ascontiguousarray(injected, dtype=np.complex128), frequency_hz, float(tolerance),
+        int(max_iterations), int(restart), preconditioner, AUTO_BLOCK_FROM_UNKNOWNS, op,
+        family, position, sizes,
+        *(near if near is not None else (None, None, None)),
+        self_inductance=self_inductance, threads=thread_budget(),
+    )
+    return SheetSolution(
+        node_voltage=np.asarray(fields["node_voltage"], dtype=np.complex128),
+        branch_current=np.asarray(fields["branch_current"], dtype=np.complex128),
+        frequency_hz=frequency_hz,
+        iterations=int(fields["iterations"]),
+        residual=float(fields["residual"]),
+        converged=bool(fields["converged"]),
+        grounded_node=int(fields["grounded_node"]),
+        undriven_nodes=int(fields["undriven_nodes"]),
     )
 
 

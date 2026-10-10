@@ -183,6 +183,11 @@ def test_the_sheet_solve_runs_its_krylov_iterations_on_serial_blas(monkeypatch) 
         sheet_peec.Terminal("in", 0, tuple((row, 0) for row in range(rows)), 1.0),
         sheet_peec.Terminal("out", 0, tuple((row, cols - 1) for row in range(rows)), -1.0),
     ]
-    sheet_peec.solve_sheet_case(mesh, operator, terminals, frequency_hz=1e6)
+    # The NumPy reference is the path that calls SciPy's GMRES (and BLAS);
+    # the C++ core runs no BLAS at all.
+    from electrical import _backend
+
+    with _backend.use_reference():
+        sheet_peec.solve_sheet_case(mesh, operator, terminals, frequency_hz=1e6)
     assert seen and all(threads == [1] * len(threads) for threads in seen)
     assert _blas_threads() == [2] * len(seen[0])
