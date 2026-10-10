@@ -25,8 +25,7 @@
 
 namespace py = pybind11;
 
-// Registered as electrical._pcbcore.voxelize; built on its own as _voxelize_native
-// when PCB_STANDALONE_MODULE is defined (native/build.py).
+// Registered as electrical._pcbcore.voxelize.
 namespace pcb_voxelize {
 
 namespace {
@@ -389,6 +388,3 @@ void register_module(py::module_& m) {
 
 }  // namespace pcb_voxelize
 
-#ifdef PCB_STANDALONE_MODULE
-PYBIND11_MODULE(_voxelize_native, m) { pcb_voxelize::register_module(m); }
-#endif

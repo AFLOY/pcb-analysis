@@ -161,7 +161,7 @@ def run(
     if not native_available():
         raise SystemExit(
             "native extension not built; run "
-            "python -m electrical.matrix_free_mpir_fem.native.build"
+            "cmake -S . -B build/native && cmake --build build/native"
         )
     cases = [
         _case(rows, columns, repeats, orthogonalization, dot_accumulation)

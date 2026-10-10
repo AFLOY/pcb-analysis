@@ -19,7 +19,7 @@ from thermal.matrix_free_mpir_fem.native_hex import native_available
 
 pytestmark = pytest.mark.skipif(
     not native_available(),
-    reason="thermal native extension not built; run python -m thermal.matrix_free_mpir_fem.native.build",
+    reason="thermal native extension not built; run cmake -S . -B build/native && cmake --build build/native",
 )
 
 

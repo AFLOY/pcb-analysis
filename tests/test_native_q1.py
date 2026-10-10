@@ -17,7 +17,7 @@ from electrical.matrix_free_mpir_fem.native_q1 import native_available
 
 pytestmark = pytest.mark.skipif(
     not native_available(),
-    reason="native extension not built; run python -m electrical.matrix_free_mpir_fem.native.build",
+    reason="native extension not built; run cmake -S . -B build/native && cmake --build build/native",
 )
 
 

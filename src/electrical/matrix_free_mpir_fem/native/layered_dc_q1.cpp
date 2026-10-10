@@ -41,15 +41,14 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
-#include <xmmintrin.h>
+#include "pcbcore/flush_subnormals.hpp"
 
 #include "pcbcore/fem/layered_dc.hpp"
 #include "pcbcore/lane_sum.hpp"
 
 namespace py = pybind11;
 
-// Registered as electrical._pcbcore.layered_dc; built on its own as _layered_dc_native
-// when PCB_STANDALONE_MODULE is defined (native/build.py).
+// Registered as electrical._pcbcore.layered_dc.
 namespace pcb_layered_dc {
 
 namespace {
@@ -61,22 +60,7 @@ using ArrI64 = py::array_t<std::int64_t, py::array::c_style | py::array::forceca
 template <typename T>
 using Arr = py::array_t<T, py::array::c_style | py::array::forcecast>;
 
-class FlushSubnormals final {
-   public:
-    explicit FlushSubnormals() noexcept : saved_(_mm_getcsr()) {
-        _mm_setcsr(saved_ | 0x8040u);
-    }
-    ~FlushSubnormals() noexcept {
-        _mm_setcsr(saved_);
-    }
-    FlushSubnormals(const FlushSubnormals&) = delete;
-    FlushSubnormals& operator=(const FlushSubnormals&) = delete;
-    FlushSubnormals(FlushSubnormals&&) = delete;
-    FlushSubnormals& operator=(FlushSubnormals&&) = delete;
-
-   private:
-    unsigned int saved_{0U};
-};
+using pcbcore::FlushSubnormals;
 
 template <typename T, int F>
 [[nodiscard]] const T* data_of(const py::array_t<T, F>& a, py::ssize_t expected, const char* const name) {
@@ -122,7 +106,7 @@ struct LayeredOperatorT final {
         return acc;
     }
 
-    __attribute__((optimize("-ffp-contract=off")))
+    PCBCORE_NO_FP_CONTRACT
     [[nodiscard]] T gather(const T* const x, const int l, const int y, const int xi) const noexcept {
         const int nr = node_rows();
         const int nc = node_cols();
@@ -154,7 +138,7 @@ struct LayeredOperatorT final {
         return acc + via_terms(x, node);
     }
 
-    __attribute__((optimize("-ffp-contract=off")))
+    PCBCORE_NO_FP_CONTRACT
     void apply_lines(const T* const x, T* const out, const int line_begin, const int line_end) const noexcept {
         const int nr = node_rows();
         const int nc = node_cols();
@@ -970,6 +954,3 @@ MpirResult solve_mpir(const OperatorView<float>& low_view, const OperatorView<do
 
 }  // namespace pcbcore::fem::layered_dc
 
-#ifdef PCB_STANDALONE_MODULE
-PYBIND11_MODULE(_layered_dc_native, m) { pcb_layered_dc::register_module(m); }
-#endif

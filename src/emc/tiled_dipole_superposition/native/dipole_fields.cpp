@@ -19,8 +19,7 @@
 
 namespace py = pybind11;
 
-// Registered as electrical._pcbcore.dipole; built on its own as _dipole_native
-// when PCB_STANDALONE_MODULE is defined (native/build.py).
+// Registered as electrical._pcbcore.dipole.
 namespace pcb_dipole {
 
 namespace {
@@ -270,6 +269,3 @@ void register_module(py::module_& m) {
 
 }  // namespace pcb_dipole
 
-#ifdef PCB_STANDALONE_MODULE
-PYBIND11_MODULE(_dipole_native, m) { pcb_dipole::register_module(m); }
-#endif

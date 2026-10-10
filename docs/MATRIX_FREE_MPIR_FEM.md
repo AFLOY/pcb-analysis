@@ -725,7 +725,7 @@ The layered-PCB DC conduction operator (`MatrixFreePCBOperator`, the electrical
 half of the electro-thermal coupling) had only the NumPy path. `native=True`
 on the operator or on `solve_pcb_dc`, or `PCB_NATIVE_Q1=1` for the process,
 now selects `_layered_dc_native`, built together with the Maxwell kernel by
-`python -m electrical.matrix_free_mpir_fem.native.build`:
+`cmake -S . -B build/native && cmake --build build/native`:
 
 - the float32 action as a node-owned gather over the two adjacent element
   rows of the node's own layer (`low_operator_backend =

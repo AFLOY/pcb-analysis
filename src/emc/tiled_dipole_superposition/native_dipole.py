@@ -1,6 +1,6 @@
 """Optional C++ direct summation for the dipole fields.
 
-Built in place with ``python -m emc.tiled_dipole_superposition.native.build``.
+Built in place with ``cmake -S . -B build/native && cmake --build build/native``.
 It serves the CPU, complex128 evaluation only; CuPy and complex64 requests keep
 the array path.  When built it is the default for those calls; ``native=False``
 keeps the array path.  Every call runs an OpenMP team of
@@ -18,10 +18,7 @@ from electrical.threads import thread_budget
 try:  # pragma: no cover - depends on the local build
     from electrical._pcbcore import dipole as _native
 except ImportError:  # pragma: no cover
-    try:  # a module built on its own by native/build.py
-        from . import _dipole_native as _native
-    except ImportError:
-        _native = None
+    _native = None
 
 
 def native_available() -> bool:
@@ -44,7 +41,7 @@ def use_native(native: bool | None, backend: str, dtype: Any) -> bool:
         if _native is None:
             raise ImportError(
                 "the emc native extension is not built; run "
-                "python -m emc.tiled_dipole_superposition.native.build"
+                "cmake -S . -B build/native && cmake --build build/native"
             )
         if not eligible:
             raise ValueError("native=True requires backend='cpu' and complex128")

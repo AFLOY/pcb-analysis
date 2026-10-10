@@ -21,7 +21,7 @@ from tests.tolerance import DIRECT_RTOL, iterative_rtol
 
 pytestmark = pytest.mark.skipif(
     not native_available(),
-    reason="sheet pFFT native extension not built; run python -m electrical.sheet_peec.native.build",
+    reason="sheet pFFT native extension not built; run cmake -S . -B build/native && cmake --build build/native",
 )
 
 STACKUP = SheetStackup((SheetLayer("F", 0.0, 35e-6), SheetLayer("B", -1.6e-3, 35e-6)))

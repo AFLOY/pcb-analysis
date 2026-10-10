@@ -34,15 +34,14 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
-#include <xmmintrin.h>
+#include "pcbcore/flush_subnormals.hpp"
 
 #include "pcbcore/fem/thermal_hex.hpp"
 #include "pcbcore/lane_sum.hpp"
 
 namespace py = pybind11;
 
-// Registered as electrical._pcbcore.thermal_hex; built on its own as _thermal_native
-// when PCB_STANDALONE_MODULE is defined (native/build.py).
+// Registered as electrical._pcbcore.thermal_hex.
 namespace pcb_thermal_hex {
 
 namespace {
@@ -53,22 +52,7 @@ using ArrU8 = py::array_t<std::uint8_t, py::array::c_style | py::array::forcecas
 template <typename T>
 using Arr = py::array_t<T, py::array::c_style | py::array::forcecast>;
 
-class FlushSubnormals final {
-   public:
-    explicit FlushSubnormals() noexcept : saved_(_mm_getcsr()) {
-        _mm_setcsr(saved_ | 0x8040u);
-    }
-    ~FlushSubnormals() noexcept {
-        _mm_setcsr(saved_);
-    }
-    FlushSubnormals(const FlushSubnormals&) = delete;
-    FlushSubnormals& operator=(const FlushSubnormals&) = delete;
-    FlushSubnormals(FlushSubnormals&&) = delete;
-    FlushSubnormals& operator=(FlushSubnormals&&) = delete;
-
-   private:
-    unsigned int saved_{0U};
-};
+using pcbcore::FlushSubnormals;
 
 template <typename T, int F>
 [[nodiscard]] const T* data_of(const py::array_t<T, F>& a, py::ssize_t expected, const char* const name) {
@@ -939,6 +923,3 @@ MpirResult solve_mpir(const OperatorView<float>& low_view, const OperatorView<do
 
 }  // namespace pcbcore::fem::thermal_hex
 
-#ifdef PCB_STANDALONE_MODULE
-PYBIND11_MODULE(_thermal_native, m) { pcb_thermal_hex::register_module(m); }
-#endif
