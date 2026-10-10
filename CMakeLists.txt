@@ -42,6 +42,8 @@ if(PCB_NATIVE_OPENMP)
   find_package(OpenMP REQUIRED COMPONENTS CXX)
 endif()
 
+find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+
 # One native module: ``name`` is the importable module, ``package_dir`` the
 # package directory the module is written into (relative to src/).
 function(pcb_native_module name package_dir)
@@ -53,6 +55,7 @@ function(pcb_native_module name package_dir)
     target_compile_options(${name} PRIVATE
       "-march=${PCB_NATIVE_MARCH}" -mprefer-vector-width=512)
   endif()
+  target_link_libraries(${name} PRIVATE Eigen3::Eigen)
   if(PCB_NATIVE_OPENMP)
     target_link_libraries(${name} PRIVATE OpenMP::OpenMP_CXX)
   endif()
@@ -62,6 +65,8 @@ endfunction()
 
 pcb_native_module(_scalar_maxwell_native electrical/matrix_free_mpir_fem
   src/electrical/matrix_free_mpir_fem/native/scalar_maxwell_q1.cpp)
+pcb_native_module(_layered_dc_native electrical/matrix_free_mpir_fem
+  src/electrical/matrix_free_mpir_fem/native/layered_dc_q1.cpp)
 pcb_native_module(_thermal_native thermal/matrix_free_mpir_fem
   src/thermal/matrix_free_mpir_fem/native/hex_q1.cpp)
 pcb_native_module(_dipole_native emc/tiled_dipole_superposition
@@ -70,3 +75,4 @@ pcb_native_module(_voxelize_native geometry/cad_import
   src/geometry/cad_import/native/point_in_mesh.cpp)
 pcb_native_module(_sheet_pfft_native electrical/sheet_peec
   src/electrical/sheet_peec/native/pfft_near.cpp)
+
