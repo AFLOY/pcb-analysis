@@ -23,6 +23,7 @@
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 
+#include <Eigen/Cholesky>
 #include <Eigen/Core>
 #include <Eigen/Dense>
 
@@ -100,8 +101,6 @@ struct LayeredOperatorT final {
         return static_cast<py::ssize_t>(lines()) * static_cast<py::ssize_t>(node_cols());
     }
 
-    // Resistive links of one node: sum g (x_n - x_nbr) over the vias that
-    // end there.  Fixed neighbours contribute zero, like the masked gather.
     [[nodiscard]] T via_terms(const T* const x, const py::ssize_t node) const noexcept {
         T acc{static_cast<T>(0)};
         const T xn = x[node] * free_mask[node];
@@ -114,14 +113,6 @@ struct LayeredOperatorT final {
         return acc;
     }
 
-    // The corner weights are formed as fl(fl(a U_x) + fl(b U_y)) with two
-    // separate roundings, like the NumPy path.  With one rounding (an FMA)
-    // the four weights a row of a uniform element contributes to a constant
-    // vector no longer cancel exactly, and every element then leaves a bias
-    // of order eps32 * a in the constant mode -- the one mode a DC problem
-    // pins only through its reference node, so the inner PCG would spend
-    // its iterations on rounding noise.  Contraction is therefore off in the
-    // two gather functions.
     __attribute__((optimize("-ffp-contract=off")))
     [[nodiscard]] T gather(const T* const x, const int l, const int y, const int xi) const noexcept {
         const int nr = node_rows();
@@ -154,11 +145,6 @@ struct LayeredOperatorT final {
         return acc + via_terms(x, node);
     }
 
-    // y = A x on node lines [line_begin, line_end).  A line is one (layer, y)
-    // row of node_cols nodes.  Interior x use a branch-free form over the two
-    // adjacent element rows, unrolled over the two x-neighbour elements and
-    // the four local columns, so the x-loop vectorises; the ends of the line
-    // use the generic gather.
     __attribute__((optimize("-ffp-contract=off")))
     void apply_lines(const T* const x, T* const out, const int line_begin, const int line_end) const noexcept {
         const int nr = node_rows();
@@ -183,22 +169,22 @@ struct LayeredOperatorT final {
             const T* const uy = unit + 16;
             for (int ey = y0; ey <= y1; ++ey) {
                 const int lr_base = 2 * (y - ey);
-                const py::ssize_t e_row = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(rows) + static_cast<py::ssize_t>(ey)) * static_cast<py::ssize_t>(cols);  // element ex = 0
+                const py::ssize_t e_row = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(rows) + static_cast<py::ssize_t>(ey)) * static_cast<py::ssize_t>(cols);
                 const T* const ax = coef + e_row;
                 const T* const ay = coef + ne + e_row;
-                const py::ssize_t corner_row = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(nr) + static_cast<py::ssize_t>(ey)) * static_cast<py::ssize_t>(nc);  // corner ex = 0
+                const py::ssize_t corner_row = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(nr) + static_cast<py::ssize_t>(ey)) * static_cast<py::ssize_t>(nc);
 #pragma omp simd
                 for (int xi = 1; xi < cols; ++xi) {
                     T acc{static_cast<T>(0)};
 #pragma GCC unroll 2
                     for (int dx = 0; dx < 2; ++dx) {
-                        const int ex = xi - 1 + dx;        // element left (dx=0) or right (dx=1)
-                        const int lr = lr_base + (1 - dx);  // local x index of the node in it
+                        const int ex = xi - 1 + dx;
+                        const int lr = lr_base + (1 - dx);
                         const T a = ax[ex];
                         const T b = ay[ex];
                         const py::ssize_t corner = corner_row + static_cast<py::ssize_t>(ex);
 #pragma GCC unroll 4
-                    for (int c = 0; c < 4; ++c) {
+                        for (int c = 0; c < 4; ++c) {
                             const py::ssize_t cn = corner + static_cast<py::ssize_t>(c >> 1) * nc + static_cast<py::ssize_t>(c & 1);
                             const T w = (a * ux[4 * lr + c]) + (b * uy[4 * lr + c]);
                             acc += w * (x[cn] * free_mask[cn]);
@@ -207,7 +193,6 @@ struct LayeredOperatorT final {
                     o[xi] += acc;
                 }
             }
-            // Via links end at few nodes; a sparse pass over the line.
             for (int xi = 1; xi < cols; ++xi) {
                 const py::ssize_t node = base + static_cast<py::ssize_t>(xi);
                 if (via_ptr[node] != via_ptr[node + 1]) {
@@ -304,6 +289,189 @@ template <typename T>
     return out;
 }
 
+// Internal PCG core routine shared between Python entry and full MPIR solver.
+void pcg_layered_dc_q1_core(
+    const LayeredOperatorT<float>& op,
+    const double* const rhs_in,
+    const float* const diag,
+    const int block,
+    const float* const cinv,
+    const double inner_relative_tolerance,
+    const int max_inner_iterations,
+    float* const xsol,
+    int& total_iterations,
+    int& applications,
+    double& relative_residual,
+    bool& not_spd) {
+
+    const py::ssize_t n = op.node_count();
+    const int nr = op.node_rows();
+    const int nc = op.node_cols();
+    const int coarse_rows = (nr + block - 1) / block;
+    const int coarse_cols = (nc + block - 1) / block;
+    const py::ssize_t ncoarse = static_cast<py::ssize_t>(op.layers) * static_cast<py::ssize_t>(coarse_rows) * static_cast<py::ssize_t>(coarse_cols);
+    const bool two_level = (cinv != nullptr);
+
+    const int lines = op.lines();
+    const int team = std::max(1, std::min(op.threads, lines));
+    std::vector<float> rhs(static_cast<size_t>(n), 0.0f);
+    std::vector<float> r(static_cast<size_t>(n), 0.0f);
+    std::vector<float> z(static_cast<size_t>(n), 0.0f);
+    std::vector<float> p(static_cast<size_t>(n), 0.0f);
+    std::vector<float> q(static_cast<size_t>(n), 0.0f);
+    std::vector<double> coarse_part(static_cast<size_t>(team) * static_cast<size_t>(two_level ? ncoarse : 0), 0.0);
+    std::vector<float> coarse_r(static_cast<size_t>(two_level ? ncoarse : 0), 0.0f);
+    std::vector<float> coarse_z(static_cast<size_t>(two_level ? ncoarse : 0), 0.0f);
+    std::vector<Partial> partials(3U * static_cast<size_t>(team));
+
+#pragma omp parallel num_threads(team) if (team > 1)
+    {
+        const FlushSubnormals flush{};
+#ifdef _OPENMP
+        const int tid = omp_get_thread_num();
+        const int nt = omp_get_num_threads();
+#else
+        const int tid = 0;
+        const int nt = 1;
+#endif
+        int lb{0};
+        int le{lines};
+        LayeredOperatorT<float>::thread_lines(lines, lb, le);
+        const py::ssize_t lo = static_cast<py::ssize_t>(lb) * static_cast<py::ssize_t>(nc);
+        const py::ssize_t len = static_cast<py::ssize_t>(le - lb) * static_cast<py::ssize_t>(nc);
+        auto slot = [&](const int s) noexcept -> double& {
+            return partials[static_cast<size_t>(s) * static_cast<size_t>(nt) + static_cast<size_t>(tid)].a;
+        };
+        auto reduce = [&](const int s) noexcept -> double {
+            double acc{0.0};
+            for (int t = 0; t < nt; ++t) {
+                acc += partials[static_cast<size_t>(s) * static_cast<size_t>(nt) + static_cast<size_t>(t)].a;
+            }
+            return acc;
+        };
+        auto local_dot = [&](const float* const a, const float* const b) noexcept -> double {
+            double acc{0.0};
+#pragma omp simd reduction(+ : acc)
+            for (py::ssize_t i = lo; i < lo + len; ++i) {
+                acc += static_cast<double>(a[i]) * static_cast<double>(b[i]);
+            }
+            return acc;
+        };
+        auto precondition = [&]() noexcept {
+            Eigen::Map<Eigen::VectorXf>(z.data() + lo, len) =
+                Eigen::Map<const Eigen::VectorXf>(r.data() + lo, len)
+                    .cwiseQuotient(Eigen::Map<const Eigen::VectorXf>(diag + lo, len));
+
+            if (!two_level) {
+                return;
+            }
+            double* const part = coarse_part.data() + static_cast<size_t>(tid) * static_cast<size_t>(ncoarse);
+            std::fill(part, part + ncoarse, 0.0);
+            for (int line = lb; line < le; ++line) {
+                const int l = line / nr;
+                const int yy = line - (l * nr);
+                const py::ssize_t cbase = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(coarse_rows) + static_cast<py::ssize_t>(yy / block)) * static_cast<py::ssize_t>(coarse_cols);
+                const float* const rl = r.data() + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
+                const float* const ml = op.free_mask + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
+                for (int xi = 0; xi < nc; ++xi) {
+                    part[cbase + static_cast<py::ssize_t>(xi / block)] += static_cast<double>(rl[xi] * ml[xi]);
+                }
+            }
+#pragma omp barrier
+            const py::ssize_t cb = (ncoarse * static_cast<py::ssize_t>(tid)) / static_cast<py::ssize_t>(nt);
+            const py::ssize_t ce = (ncoarse * static_cast<py::ssize_t>(tid + 1)) / static_cast<py::ssize_t>(nt);
+            for (py::ssize_t i = cb; i < ce; ++i) {
+                double acc{0.0};
+                for (int t = 0; t < nt; ++t) {
+                    acc += coarse_part[static_cast<size_t>(t) * static_cast<size_t>(ncoarse) + static_cast<size_t>(i)];
+                }
+                coarse_r[i] = static_cast<float>(acc);
+            }
+#pragma omp barrier
+            if (ce > cb) {
+                const auto cinv_block = Eigen::Map<const Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
+                    cinv + cb * ncoarse, ce - cb, ncoarse);
+                const auto cr_vec = Eigen::Map<const Eigen::VectorXf>(coarse_r.data(), ncoarse);
+                Eigen::Map<Eigen::VectorXf>(coarse_z.data() + cb, ce - cb) = cinv_block * cr_vec;
+            }
+#pragma omp barrier
+            for (int line = lb; line < le; ++line) {
+                const int l = line / nr;
+                const int yy = line - (l * nr);
+                const py::ssize_t cbase = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(coarse_rows) + static_cast<py::ssize_t>(yy / block)) * static_cast<py::ssize_t>(coarse_cols);
+                float* const zl = z.data() + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
+                const float* const ml = op.free_mask + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
+                for (int xi = 0; xi < nc; ++xi) {
+                    zl[xi] += ml[xi] * coarse_z[cbase + static_cast<py::ssize_t>(xi / block)];
+                }
+            }
+        };
+
+        int iterations{0};
+        int applied{0};
+        double rel{1.0};
+        bool bad{false};
+        for (py::ssize_t i = lo; i < lo + len; ++i) {
+            rhs[i] = static_cast<float>(rhs_in[i]);
+            xsol[i] = 0.0f;
+            r[i] = rhs[i];
+        }
+        slot(0) = local_dot(rhs.data(), rhs.data());
+#pragma omp barrier
+        const double rhs_norm = std::sqrt(reduce(0));
+        if (rhs_norm == 0.0) {
+            rel = 0.0;
+        } else {
+            precondition();
+            Eigen::Map<Eigen::VectorXf>(p.data() + lo, len) = Eigen::Map<const Eigen::VectorXf>(z.data() + lo, len);
+            slot(2) = local_dot(r.data(), z.data());
+#pragma omp barrier
+            double rz = reduce(2);
+            while (iterations < max_inner_iterations) {
+                op.apply_lines(p.data(), q.data(), lb, le);
+                ++applied;
+                slot(1) = local_dot(p.data(), q.data());
+#pragma omp barrier
+                const double curvature = reduce(1);
+                if (!std::isfinite(curvature) || curvature <= 0.0) {
+                    bad = true;
+                    break;
+                }
+                const float alpha = static_cast<float>(rz / curvature);
+                Eigen::Map<Eigen::VectorXf>(xsol + lo, len) += alpha * Eigen::Map<const Eigen::VectorXf>(p.data() + lo, len);
+                Eigen::Map<Eigen::VectorXf>(r.data() + lo, len) -= alpha * Eigen::Map<const Eigen::VectorXf>(q.data() + lo, len);
+
+                slot(0) = local_dot(r.data(), r.data());
+#pragma omp barrier
+                rel = std::sqrt(reduce(0)) / rhs_norm;
+                ++iterations;
+                if (rel <= inner_relative_tolerance) {
+                    break;
+                }
+                precondition();
+                slot(2) = local_dot(r.data(), z.data());
+#pragma omp barrier
+                const double next_rz = reduce(2);
+                if (!std::isfinite(next_rz) || rz == 0.0) {
+                    break;
+                }
+                const float beta = static_cast<float>(next_rz / rz);
+                Eigen::Map<Eigen::VectorXf>(p.data() + lo, len) =
+                    Eigen::Map<const Eigen::VectorXf>(z.data() + lo, len) +
+                    beta * Eigen::Map<const Eigen::VectorXf>(p.data() + lo, len);
+                rz = next_rz;
+#pragma omp barrier
+            }
+        }
+        if (tid == 0) {
+            total_iterations = iterations;
+            applications = applied;
+            relative_residual = rel;
+            not_spd = bad;
+        }
+    }
+}
+
 }  // namespace
 
 ArrF32 apply_layered_dc_q1(ArrF32 vector, ArrF32 coef, ArrF32 unit, ArrU8 free_nodes, ArrF32 free_mask,
@@ -314,8 +482,6 @@ ArrF32 apply_layered_dc_q1(ArrF32 vector, ArrF32 coef, ArrF32 unit, ArrU8 free_n
     return apply_impl<float>(op, vector, true);
 }
 
-// y = A x in float64 for the outer MPIR residual and the coarse-space
-// assembly.  The MXCSR is left untouched so FP64 subnormals keep IEEE semantics.
 ArrF64 apply_layered_dc_q1_f64(ArrF64 vector, ArrF64 coef, ArrF64 unit, ArrU8 free_nodes, ArrF64 free_mask,
                                ArrI64 via_ptr, ArrI64 via_nbr, ArrF64 via_g, int layers, int rows, int cols,
                                int threads) {
@@ -324,14 +490,6 @@ ArrF64 apply_layered_dc_q1_f64(ArrF64 vector, ArrF64 coef, ArrF64 unit, ArrU8 fr
     return apply_impl<double>(op, vector, false);
 }
 
-// Inner PCG in float32 with the two-level preconditioner
-//   M^-1 r = D^-1 r + Z (Z^T A Z)^-1 Z^T r
-// (or Jacobi only when ``coarse_inverse`` is empty).  ``block`` is the
-// in-plane patch width; the coarse index of node (l, y, x) is
-// (l * coarse_rows + y / block) * coarse_cols + x / block.  Returns
-// (correction float32, iterations, relative_residual, applications) with the
-// control flow of solver._inner_pcg.  Threads run SPMD over a static partition
-// of node lines; reductions are per-thread partials summed in thread order.
 py::tuple pcg_layered_dc_q1(ArrF64 rhs_high, ArrF32 diagonal, ArrF32 coef, ArrF32 unit, ArrU8 free_nodes,
                             ArrF32 free_mask, ArrI64 via_ptr, ArrI64 via_nbr, ArrF32 via_g, int layers,
                             int rows, int cols, int block, ArrF32 coarse_inverse,
@@ -367,174 +525,9 @@ py::tuple pcg_layered_dc_q1(ArrF64 rhs_high, ArrF32 diagonal, ArrF32 coef, ArrF3
 
     {
         py::gil_scoped_release release;
-        const int lines = op.lines();
-        const int team = std::max(1, std::min(op.threads, lines));
-        std::vector<float> rhs(static_cast<size_t>(n), 0.0f);
-        std::vector<float> r(static_cast<size_t>(n), 0.0f);
-        std::vector<float> z(static_cast<size_t>(n), 0.0f);
-        std::vector<float> p(static_cast<size_t>(n), 0.0f);
-        std::vector<float> q(static_cast<size_t>(n), 0.0f);
-        std::vector<double> coarse_part(static_cast<size_t>(team) * static_cast<size_t>(two_level ? ncoarse : 0), 0.0);
-        std::vector<float> coarse_r(static_cast<size_t>(two_level ? ncoarse : 0), 0.0f);
-        std::vector<float> coarse_z(static_cast<size_t>(two_level ? ncoarse : 0), 0.0f);
-        // Slots: 0 norms, 1 curvature, 2 rz.
-        std::vector<Partial> partials(3U * static_cast<size_t>(team));
-
-#pragma omp parallel num_threads(team) if (team > 1)
-        {
-            const FlushSubnormals flush{};
-#ifdef _OPENMP
-            const int tid = omp_get_thread_num();
-            const int nt = omp_get_num_threads();
-#else
-            const int tid = 0;
-            const int nt = 1;
-#endif
-            int lb{0};
-            int le{lines};
-            LayeredOperatorT<float>::thread_lines(lines, lb, le);
-            const py::ssize_t lo = static_cast<py::ssize_t>(lb) * static_cast<py::ssize_t>(nc);
-            const py::ssize_t len = static_cast<py::ssize_t>(le - lb) * static_cast<py::ssize_t>(nc);
-            auto slot = [&](const int s) noexcept -> double& {
-                return partials[static_cast<size_t>(s) * static_cast<size_t>(nt) + static_cast<size_t>(tid)].a;
-            };
-            auto reduce = [&](const int s) noexcept -> double {
-                double acc{0.0};
-                for (int t = 0; t < nt; ++t) {
-                    acc += partials[static_cast<size_t>(s) * static_cast<size_t>(nt) + static_cast<size_t>(t)].a;
-                }
-                return acc;
-            };
-            auto local_dot = [&](const float* const a, const float* const b) noexcept -> double {
-                double acc{0.0};
-#pragma omp simd reduction(+ : acc)
-                for (py::ssize_t i = lo; i < lo + len; ++i) {
-                    acc += static_cast<double>(a[i]) * static_cast<double>(b[i]);
-                }
-                return acc;
-            };
-            // z = M^-1 r on the owned lines.  Three barriers when two-level.
-            auto precondition = [&]() noexcept {
-                // Vectorized diagonal Jacobi preconditioner using Eigen Map
-                Eigen::Map<Eigen::VectorXf>(z.data() + lo, len) =
-                    Eigen::Map<const Eigen::VectorXf>(r.data() + lo, len)
-                        .cwiseQuotient(Eigen::Map<const Eigen::VectorXf>(diag + lo, len));
-
-                if (!two_level) {
-                    return;
-                }
-                double* const part = coarse_part.data() + static_cast<size_t>(tid) * static_cast<size_t>(ncoarse);
-                std::fill(part, part + ncoarse, 0.0);
-                for (int line = lb; line < le; ++line) {
-                    const int l = line / nr;
-                    const int yy = line - (l * nr);
-                    const py::ssize_t cbase = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(coarse_rows) + static_cast<py::ssize_t>(yy / block)) * static_cast<py::ssize_t>(coarse_cols);
-                    const float* const rl = r.data() + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
-                    const float* const ml = op.free_mask + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
-                    for (int xi = 0; xi < nc; ++xi) {
-                        part[cbase + static_cast<py::ssize_t>(xi / block)] += static_cast<double>(rl[xi] * ml[xi]);
-                    }
-                }
-#pragma omp barrier
-                const py::ssize_t cb = (ncoarse * static_cast<py::ssize_t>(tid)) / static_cast<py::ssize_t>(nt);
-                const py::ssize_t ce = (ncoarse * static_cast<py::ssize_t>(tid + 1)) / static_cast<py::ssize_t>(nt);
-                for (py::ssize_t i = cb; i < ce; ++i) {
-                    double acc{0.0};
-                    for (int t = 0; t < nt; ++t) {
-                        acc += coarse_part[static_cast<size_t>(t) * static_cast<size_t>(ncoarse) + static_cast<size_t>(i)];
-                    }
-                    coarse_r[i] = static_cast<float>(acc);
-                }
-#pragma omp barrier
-                // Eigen GEMV acceleration for dense coarse-space solve:
-                // coarse_z[cb..ce) = cinv[cb..ce, :] * coarse_r[:]
-                if (ce > cb) {
-                    const auto cinv_block = Eigen::Map<const Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
-                        cinv + cb * ncoarse, ce - cb, ncoarse);
-                    const auto cr_vec = Eigen::Map<const Eigen::VectorXf>(coarse_r.data(), ncoarse);
-                    Eigen::Map<Eigen::VectorXf>(coarse_z.data() + cb, ce - cb) = cinv_block * cr_vec;
-                }
-#pragma omp barrier
-                for (int line = lb; line < le; ++line) {
-                    const int l = line / nr;
-                    const int yy = line - (l * nr);
-                    const py::ssize_t cbase = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(coarse_rows) + static_cast<py::ssize_t>(yy / block)) * static_cast<py::ssize_t>(coarse_cols);
-                    float* const zl = z.data() + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
-                    const float* const ml = op.free_mask + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
-                    for (int xi = 0; xi < nc; ++xi) {
-                        zl[xi] += ml[xi] * coarse_z[cbase + static_cast<py::ssize_t>(xi / block)];
-                    }
-                }
-            };
-
-            int iterations{0};
-            int applied{0};
-            double rel{1.0};
-            bool bad{false};
-            for (py::ssize_t i = lo; i < lo + len; ++i) {
-                rhs[i] = static_cast<float>(rhs_in[i]);
-                xsol[i] = 0.0f;
-                r[i] = rhs[i];
-            }
-            slot(0) = local_dot(rhs.data(), rhs.data());
-#pragma omp barrier
-            const double rhs_norm = std::sqrt(reduce(0));
-            if (rhs_norm == 0.0) {
-                rel = 0.0;
-            } else {
-                precondition();
-                // Vector copy p = z via Eigen Map
-                Eigen::Map<Eigen::VectorXf>(p.data() + lo, len) = Eigen::Map<const Eigen::VectorXf>(z.data() + lo, len);
-                slot(2) = local_dot(r.data(), z.data());
-#pragma omp barrier
-                double rz = reduce(2);
-                while (iterations < max_inner_iterations) {
-                    op.apply_lines(p.data(), q.data(), lb, le);
-                    ++applied;
-                    slot(1) = local_dot(p.data(), q.data());
-#pragma omp barrier
-                    const double curvature = reduce(1);
-                    if (!std::isfinite(curvature) || curvature <= 0.0) {
-                        bad = true;
-                        break;
-                    }
-                    const float alpha = static_cast<float>(rz / curvature);
-                    // Eigen vectorized AXPY for state updates:
-                    // xsol += alpha * p
-                    // r    -= alpha * q
-                    Eigen::Map<Eigen::VectorXf>(xsol + lo, len) += alpha * Eigen::Map<const Eigen::VectorXf>(p.data() + lo, len);
-                    Eigen::Map<Eigen::VectorXf>(r.data() + lo, len) -= alpha * Eigen::Map<const Eigen::VectorXf>(q.data() + lo, len);
-
-                    slot(0) = local_dot(r.data(), r.data());
-#pragma omp barrier
-                    rel = std::sqrt(reduce(0)) / rhs_norm;
-                    ++iterations;
-                    if (rel <= inner_relative_tolerance) {
-                        break;
-                    }
-                    precondition();
-                    slot(2) = local_dot(r.data(), z.data());
-#pragma omp barrier
-                    const double next_rz = reduce(2);
-                    if (!std::isfinite(next_rz) || rz == 0.0) {
-                        break;
-                    }
-                    const float beta = static_cast<float>(next_rz / rz);
-                    // Eigen vectorized update: p = z + beta * p
-                    Eigen::Map<Eigen::VectorXf>(p.data() + lo, len) =
-                        Eigen::Map<const Eigen::VectorXf>(z.data() + lo, len) +
-                        beta * Eigen::Map<const Eigen::VectorXf>(p.data() + lo, len);
-                    rz = next_rz;
-#pragma omp barrier  // p complete before the next stencil
-                }
-            }
-            if (tid == 0) {
-                total_iterations = iterations;
-                applications = applied;
-                relative_residual = rel;
-                not_spd = bad;
-            }
-        }
+        pcg_layered_dc_q1_core(op, rhs_in, diag, block, cinv, inner_relative_tolerance,
+                               max_inner_iterations, xsol, total_iterations, applications,
+                               relative_residual, not_spd);
     }
     if (not_spd) {
         throw std::runtime_error("inner PCG requires a finite symmetric positive-definite operator");
@@ -542,8 +535,251 @@ py::tuple pcg_layered_dc_q1(ArrF64 rhs_high, ArrF32 diagonal, ArrF32 coef, ArrF3
     return py::make_tuple(correction_out, total_iterations, relative_residual, applications);
 }
 
+// Full C++ Two-Level Coarse Matrix Assembly & Inversion using Eigen Cholesky (LLT).
+// Assembles Z^T A Z with 27 coloured FP64 applications and inverts it with Eigen.
+ArrF64 assemble_coarse_inverse_dc(
+    ArrF64 coef, ArrF64 unit, ArrU8 free_nodes, ArrF64 free_mask,
+    ArrI64 via_ptr, ArrI64 via_nbr, ArrF64 via_g,
+    int layers, int rows, int cols, int block, int threads) {
+
+    const LayeredOperatorT<double> op = make_operator<double>(
+        coef, unit, free_nodes, free_mask, via_ptr, via_nbr, via_g, layers, rows, cols, threads);
+
+    const int nr = op.node_rows();
+    const int nc = op.node_cols();
+    const int coarse_rows = (nr + block - 1) / block;
+    const int coarse_cols = (nc + block - 1) / block;
+    const py::ssize_t ncoarse = static_cast<py::ssize_t>(layers) * static_cast<py::ssize_t>(coarse_rows) * static_cast<py::ssize_t>(coarse_cols);
+    const py::ssize_t n_nodes = op.node_count();
+
+    Eigen::MatrixXd matrix = Eigen::MatrixXd::Zero(ncoarse, ncoarse);
+    Eigen::VectorXd counts = Eigen::VectorXd::Zero(ncoarse);
+
+    std::vector<double> fine(static_cast<size_t>(n_nodes), 0.0);
+    std::vector<double> action(static_cast<size_t>(n_nodes), 0.0);
+    std::vector<double> restricted(static_cast<size_t>(ncoarse), 0.0);
+
+    for (int l = 0; l < layers; ++l) {
+        for (int y = 0; y < nr; ++y) {
+            const int yc = y / block;
+            for (int x = 0; x < nc; ++x) {
+                const int xc = x / block;
+                const py::ssize_t node = (static_cast<py::ssize_t>(l) * nr + static_cast<py::ssize_t>(y)) * nc + static_cast<py::ssize_t>(x);
+                if (op.free_nodes[node] != 0U) {
+                    const py::ssize_t patch = (static_cast<py::ssize_t>(l) * coarse_rows + yc) * coarse_cols + xc;
+                    counts[patch] += 1.0;
+                }
+            }
+        }
+    }
+
+    {
+        py::gil_scoped_release release;
+        for (int colour = 0; colour < 27; ++colour) {
+            bool has_colour{false};
+            for (py::ssize_t i = 0; i < n_nodes; ++i) {
+                fine[static_cast<size_t>(i)] = 0.0;
+            }
+            for (int l = 0; l < layers; ++l) {
+                const int cl = l % 3;
+                for (int y = 0; y < nr; ++y) {
+                    const int yc = y / block;
+                    const int cy = yc % 3;
+                    for (int x = 0; x < nc; ++x) {
+                        const int xc = x / block;
+                        const int cx = xc % 3;
+                        const int col_idx = (cl * 9) + (cy * 3) + cx;
+                        if (col_idx == colour) {
+                            const py::ssize_t node = (static_cast<py::ssize_t>(l) * nr + static_cast<py::ssize_t>(y)) * nc + static_cast<py::ssize_t>(x);
+                            if (op.free_nodes[node] != 0U) {
+                                fine[static_cast<size_t>(node)] = 1.0;
+                                has_colour = true;
+                            }
+                        }
+                    }
+                }
+            }
+            if (!has_colour) {
+                continue;
+            }
+
+            op.apply_lines(fine.data(), action.data(), 0, op.lines());
+
+            std::fill(restricted.begin(), restricted.end(), 0.0);
+            for (int l = 0; l < layers; ++l) {
+                for (int y = 0; y < nr; ++y) {
+                    const int yc = y / block;
+                    for (int x = 0; x < nc; ++x) {
+                        const int xc = x / block;
+                        const py::ssize_t node = (static_cast<py::ssize_t>(l) * nr + static_cast<py::ssize_t>(y)) * nc + static_cast<py::ssize_t>(x);
+                        if (op.free_nodes[node] != 0U) {
+                            const py::ssize_t patch = (static_cast<py::ssize_t>(l) * coarse_rows + yc) * coarse_cols + xc;
+                            restricted[static_cast<size_t>(patch)] += action[static_cast<size_t>(node)];
+                        }
+                    }
+                }
+            }
+
+            for (int l = 0; l < layers; ++l) {
+                for (int yc = 0; yc < coarse_rows; ++yc) {
+                    for (int xc = 0; xc < coarse_cols; ++xc) {
+                        const py::ssize_t I = (static_cast<py::ssize_t>(l) * coarse_rows + yc) * coarse_cols + xc;
+                        for (int dl = -1; dl <= 1; ++dl) {
+                            const int sl = l + dl;
+                            if (sl < 0 || sl >= layers) continue;
+                            const int ncl = sl % 3;
+                            for (int dy = -1; dy <= 1; ++dy) {
+                                const int syc = yc + dy;
+                                if (syc < 0 || syc >= coarse_rows) continue;
+                                const int ncy = syc % 3;
+                                for (int dx = -1; dx <= 1; ++dx) {
+                                    const int sxc = xc + dx;
+                                    if (sxc < 0 || sxc >= coarse_cols) continue;
+                                    const int ncx = sxc % 3;
+                                    const int ncolour = (ncl * 9) + (ncy * 3) + ncx;
+                                    if (ncolour == colour) {
+                                        const py::ssize_t J = (static_cast<py::ssize_t>(sl) * coarse_rows + syc) * coarse_cols + sxc;
+                                        matrix(I, J) = restricted[static_cast<size_t>(I)];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for (py::ssize_t i = 0; i < ncoarse; ++i) {
+            if (counts[i] <= 0.0) {
+                matrix.row(i).setZero();
+                matrix.col(i).setZero();
+                matrix(i, i) = 1.0;
+            }
+        }
+    }
+
+    Eigen::LLT<Eigen::MatrixXd> llt(matrix);
+    if (llt.info() != Eigen::Success) {
+        throw std::runtime_error("coarse matrix is not positive definite");
+    }
+    Eigen::MatrixXd inv = llt.solve(Eigen::MatrixXd::Identity(ncoarse, ncoarse));
+    inv = 0.5 * (inv + inv.transpose());
+
+    ArrF64 out(ncoarse * ncoarse);
+    Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
+        out.mutable_data(), ncoarse, ncoarse) = inv;
+    return out;
+}
+
+// Complete C++ End-to-End MPIR Solver for Layered DC Conduction.
+// Executes the outer MPIR refinement iterations, high-precision residuals,
+// inner PCG solves, and convergence checks without returning to Python.
+py::tuple solve_mpir_layered_dc_q1(
+    ArrF64 rhs_high, ArrF64 initial_guess, ArrF32 diagonal,
+    ArrF32 coef_f32, ArrF32 unit_f32, ArrU8 free_nodes, ArrF32 free_mask_f32,
+    ArrI64 via_ptr, ArrI64 via_nbr, ArrF32 via_g_f32,
+    ArrF64 coef_f64, ArrF64 unit_f64, ArrF64 free_mask_f64, ArrF64 via_g_f64,
+    int layers, int rows, int cols, int block, ArrF32 coarse_inverse,
+    double relative_tolerance, double absolute_tolerance,
+    double inner_relative_tolerance, int max_outer_iterations,
+    int max_inner_iterations, int threads) {
+
+    const LayeredOperatorT<float> op_low = make_operator<float>(
+        coef_f32, unit_f32, free_nodes, free_mask_f32, via_ptr, via_nbr, via_g_f32,
+        layers, rows, cols, threads);
+    const LayeredOperatorT<double> op_high = make_operator<double>(
+        coef_f64, unit_f64, free_nodes, free_mask_f64, via_ptr, via_nbr, via_g_f64,
+        layers, rows, cols, threads);
+
+    const py::ssize_t n = op_low.node_count();
+    const double* const rhs_in = data_of(rhs_high, n, "rhs_high");
+    const float* const diag = data_of(diagonal, n, "diagonal");
+
+    const int nr = op_low.node_rows();
+    const int nc = op_low.node_cols();
+    const int coarse_rows = (nr + block - 1) / block;
+    const int coarse_cols = (nc + block - 1) / block;
+    const py::ssize_t ncoarse = static_cast<py::ssize_t>(layers) * static_cast<py::ssize_t>(coarse_rows) * static_cast<py::ssize_t>(coarse_cols);
+    const bool two_level = (coarse_inverse.size() > 0);
+    const float* cinv{nullptr};
+    if (two_level) {
+        cinv = data_of(coarse_inverse, ncoarse * ncoarse, "coarse_inverse");
+    }
+
+    ArrF64 solution_out(n);
+    double* const sol = solution_out.mutable_data();
+    if (initial_guess.size() == n) {
+        const double* const init_ptr = initial_guess.data();
+        std::copy(init_ptr, init_ptr + n, sol);
+    } else {
+        std::fill(sol, sol + n, 0.0);
+    }
+
+    int outer_iterations{0};
+    int total_inner_iterations{0};
+    int total_high_apps{0};
+    int total_low_apps{0};
+    double relative_residual{1.0};
+    bool converged{false};
+
+    {
+        py::gil_scoped_release release;
+        const double rhs_norm = Eigen::Map<const Eigen::VectorXd>(rhs_in, n).norm();
+        const double scale = (rhs_norm > 0.0) ? rhs_norm : 1.0;
+        const double target = absolute_tolerance + (relative_tolerance * scale);
+
+        std::vector<double> residual(static_cast<size_t>(n), 0.0);
+        std::vector<double> Ax(static_cast<size_t>(n), 0.0);
+        std::vector<float> correction(static_cast<size_t>(n), 0.0f);
+
+        for (int outer = 0; outer <= max_outer_iterations; ++outer) {
+            outer_iterations = outer;
+            op_high.apply_lines(sol, Ax.data(), 0, op_high.lines());
+            ++total_high_apps;
+
+            for (py::ssize_t i = 0; i < n; ++i) {
+                residual[static_cast<size_t>(i)] = rhs_in[i] - Ax[static_cast<size_t>(i)];
+            }
+            const double res_norm = Eigen::Map<const Eigen::VectorXd>(residual.data(), n).norm();
+            relative_residual = res_norm / scale;
+
+            if (res_norm <= target) {
+                converged = true;
+                break;
+            }
+            if (outer == max_outer_iterations) {
+                break;
+            }
+
+            int inner_iters{0};
+            int inner_apps{0};
+            double inner_rel{1.0};
+            bool not_spd{false};
+
+            pcg_layered_dc_q1_core(
+                op_low, residual.data(), diag, block, cinv,
+                inner_relative_tolerance, max_inner_iterations,
+                correction.data(), inner_iters, inner_apps, inner_rel, not_spd);
+
+            if (not_spd) {
+                throw std::runtime_error("inner PCG requires a finite SPD operator");
+            }
+
+            total_inner_iterations += inner_iters;
+            total_low_apps += inner_apps;
+
+            Eigen::Map<Eigen::VectorXd>(sol, n) +=
+                Eigen::Map<const Eigen::VectorXf>(correction.data(), n).cast<double>();
+        }
+    }
+
+    return py::make_tuple(
+        solution_out, converged, outer_iterations, total_inner_iterations,
+        relative_residual, total_high_apps, total_low_apps);
+}
+
 PYBIND11_MODULE(_layered_dc_native, m) {
-    m.doc() = "Fused C++ layered-PCB DC conduction operator (float32 and float64) and two-level inner PCG";
+    m.doc() = "Fused C++ layered-PCB DC conduction operator (float32 and float64), coarse assembly and full MPIR solver";
     m.def("apply_layered_dc_q1", &apply_layered_dc_q1, py::arg("vector"), py::arg("coefficients"), py::arg("unit"),
           py::arg("free_nodes"), py::arg("free_mask"), py::arg("via_ptr"), py::arg("via_nbr"), py::arg("via_g"),
           py::arg("layers"), py::arg("rows"), py::arg("cols"), py::arg("threads") = 1);
@@ -555,6 +791,19 @@ PYBIND11_MODULE(_layered_dc_native, m) {
           py::arg("via_g"), py::arg("layers"), py::arg("rows"), py::arg("cols"), py::arg("block"),
           py::arg("coarse_inverse"), py::arg("inner_relative_tolerance"), py::arg("max_inner_iterations"),
           py::arg("threads") = 1);
+    m.def("assemble_coarse_inverse_dc", &assemble_coarse_inverse_dc,
+          py::arg("coefficients"), py::arg("unit"), py::arg("free_nodes"), py::arg("free_mask"),
+          py::arg("via_ptr"), py::arg("via_nbr"), py::arg("via_g"),
+          py::arg("layers"), py::arg("rows"), py::arg("cols"), py::arg("block"), py::arg("threads") = 1);
+    m.def("solve_mpir_layered_dc_q1", &solve_mpir_layered_dc_q1,
+          py::arg("rhs_high"), py::arg("initial_guess"), py::arg("diagonal"),
+          py::arg("coefficients_f32"), py::arg("unit_f32"), py::arg("free_nodes"), py::arg("free_mask_f32"),
+          py::arg("via_ptr"), py::arg("via_nbr"), py::arg("via_g_f32"),
+          py::arg("coefficients_f64"), py::arg("unit_f64"), py::arg("free_mask_f64"), py::arg("via_g_f64"),
+          py::arg("layers"), py::arg("rows"), py::arg("cols"), py::arg("block"), py::arg("coarse_inverse"),
+          py::arg("relative_tolerance"), py::arg("absolute_tolerance"),
+          py::arg("inner_relative_tolerance"), py::arg("max_outer_iterations"),
+          py::arg("max_inner_iterations"), py::arg("threads") = 1);
     m.attr("openmp") =
 #ifdef _OPENMP
         true;
