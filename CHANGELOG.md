@@ -6,6 +6,16 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
+- `electrical._pcbcore_cuda` (built with `-DPCB_NATIVE_CUDA=ON`): the FP32
+  inner PCG of the layered DC and thermal hex solves on a CUDA device, the
+  FP64 refinement on the host. Opt-in through `operator.device_system()` and
+  `solver.solve_mpir_device`; compiled in CI, not yet run on a GPU (see
+  `docs/CUDA_HANDOFF.md`). Additive.
+- The C++ core builds with GCC, Clang and MSVC, on x86-64 and aarch64 Linux,
+  macOS and Windows (subnormal flush per ISA, flags per compiler, Eigen
+  fetched when not installed). The per-package `native/build.py` scripts are
+  gone; `cmake -S . -B build/native && cmake --build build/native` is the one
+  build. `electrical.backend` (public) replaces the private `_backend`.
 - Removed `electrical.dice_peec` (the DICE delta scorer, its runtime
   controller and CUDA calibration) and the `pcb-analysis-calibrate` console
   script. Its scalar interaction kernel was a ranking proxy that no consumer
