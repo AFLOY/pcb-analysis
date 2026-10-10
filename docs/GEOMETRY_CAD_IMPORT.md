@@ -113,7 +113,7 @@ acceptance on a busbar and the pitch-versus-skin-depth caveat are in
 ## Point classification
 
 Three paths answer "is this point inside this solid", selectable per call
-(`method=`) or per process (`PCB_GEOMETRY_CLASSIFY`); they serve the 3D
+(`method=`); they serve the 3D
 voxelisation and remain available for layers (`"occ"`, `"numpy"`, `"native"`):
 
 - `occ`: `BRepClass3d_SolidClassifier` per point after a bounding-box

@@ -8,7 +8,6 @@ is used, so the experiment never changes results for users without a compiler.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import numpy as np
@@ -29,39 +28,32 @@ def native_available() -> bool:
 
 
 def native_requested() -> bool:
-    """True when ``PCB_NATIVE_Q1`` selects the built extension by default."""
+    """The built extension is the default CPU path; ``native=False`` opts out."""
 
-    flag = os.environ.get("PCB_NATIVE_Q1", "").strip().lower()
-    return flag in {"1", "true", "yes", "on"} and native_available()
+    return native_available()
 
 
 ORTHOGONALIZATIONS = ("mgs", "cgs2")
 
 
 def native_orthogonalization() -> str:
-    """Inner Gram-Schmidt variant; ``PCB_NATIVE_ORTHO`` selects ``mgs`` or ``cgs2``."""
+    """Inner Gram-Schmidt variant: modified Gram-Schmidt (``cgs2`` is the alternative)."""
 
-    value = os.environ.get("PCB_NATIVE_ORTHO", "").strip().lower() or "mgs"
-    if value not in ORTHOGONALIZATIONS:
-        raise ValueError(f"PCB_NATIVE_ORTHO must be one of {ORTHOGONALIZATIONS}, got {value!r}")
-    return value
+    return "mgs"
 
 
 DOT_ACCUMULATIONS = ("float64", "float32")
 
 
 def native_dot_accumulation() -> str:
-    """Gram-Schmidt dot-product accumulation; ``PCB_NATIVE_DOT`` selects it.
+    """Gram-Schmidt dot-product accumulation.
 
     ``float64`` accumulates every term in double like the portable runtime;
     ``float32`` accumulates 1,024-element blocks in float and sums the blocks
-    in double.
+    in double.  The default is ``float64``.
     """
 
-    value = os.environ.get("PCB_NATIVE_DOT", "").strip().lower() or "float64"
-    if value not in DOT_ACCUMULATIONS:
-        raise ValueError(f"PCB_NATIVE_DOT must be one of {DOT_ACCUMULATIONS}, got {value!r}")
-    return value
+    return "float64"
 
 
 class NativeScalarMaxwellQ1:

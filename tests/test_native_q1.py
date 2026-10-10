@@ -46,7 +46,7 @@ def _problem(rows: int, columns: int, *, conductive: bool) -> ScalarMaxwellProbl
 @pytest.mark.parametrize("conductive", [False, True])
 def test_native_apply_matches_portable_complex64(shape, conductive) -> None:
     problem = _problem(*shape, conductive=conductive)
-    portable = MatrixFreeScalarMaxwellOperator(problem, runtime=NumpyComplex64Runtime())
+    portable = MatrixFreeScalarMaxwellOperator(problem, runtime=NumpyComplex64Runtime(), native=False)
     native = MatrixFreeScalarMaxwellOperator(
         problem, runtime=NumpyComplex64Runtime(), native=True
     )
@@ -75,7 +75,7 @@ def test_native_inner_gmres_reaches_the_same_fp64_solution(
     orthogonalization, dot_accumulation
 ) -> None:
     problem = _problem(12, 48, conductive=True)
-    portable = MatrixFreeScalarMaxwellOperator(problem, runtime=NumpyComplex64Runtime())
+    portable = MatrixFreeScalarMaxwellOperator(problem, runtime=NumpyComplex64Runtime(), native=False)
     native = MatrixFreeScalarMaxwellOperator(
         problem,
         runtime=NumpyComplex64Runtime(),

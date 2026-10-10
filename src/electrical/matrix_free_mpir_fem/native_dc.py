@@ -3,14 +3,13 @@
 The compiled module ``_layered_dc_native`` is built in place with
 ``python -m electrical.matrix_free_mpir_fem.native.build`` (which also builds
 the scalar Maxwell kernel).  Without it every entry point reports
-unavailability and the portable NumPy path is used.  ``PCB_NATIVE_Q1`` selects
-the built extension by default for both Q1 kernels of this package; the
-results are the same either way, only the speed differs.
+unavailability and the portable NumPy path is used.  When built it is the
+default CPU path for both Q1 kernels of this package (``native=False`` keeps
+NumPy); the two agree within the solver tolerance, not bit for bit.
 """
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import numpy as np
@@ -32,10 +31,9 @@ def native_available() -> bool:
 
 
 def native_requested() -> bool:
-    """True when ``PCB_NATIVE_Q1`` selects the built extension by default."""
+    """The built extension is the default CPU path; ``native=False`` opts out."""
 
-    flag = os.environ.get("PCB_NATIVE_Q1", "").strip().lower()
-    return flag in {"1", "true", "yes", "on"} and native_available()
+    return native_available()
 
 
 def via_adjacency(

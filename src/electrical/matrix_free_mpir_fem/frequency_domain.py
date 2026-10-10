@@ -233,9 +233,8 @@ class MatrixFreeScalarMaxwellOperator:
             )
             self.low_operator_backend = self._cuda_apply.kernel_name
         elif native or (native is None and native_requested()):
-            # Fused C++ host path.  It is opt-in: ``native=True`` demands it
-            # and ``PCB_NATIVE_Q1=1`` selects it for every CPU operator, so the
-            # portable NumPy path stays the default contract.
+            # Fused C++ host path, the CPU default when built: ``native=True``
+            # demands it and ``native=False`` keeps the portable NumPy path.
             self._native = NativeScalarMaxwellQ1(
                 self.mesh.element_shape,
                 self._inverse_mu_high,

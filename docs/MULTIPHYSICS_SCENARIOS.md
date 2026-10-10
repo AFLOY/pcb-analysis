@@ -334,7 +334,8 @@ decade in field and that the FCC Class B limits at 3 m are read correctly.
 
 `run_electro_thermal(native=)` hands one selection to both
 solvers, `solve_pcb_dc` and `solve_thermal_conduction`; `None` (the default)
-leaves each to its own flag, `PCB_NATIVE_Q1` and `PCB_NATIVE_THERMAL`. Both
+runs each natively when its extension is built (until this release each
+waited for its own flag, `PCB_NATIVE_Q1` and `PCB_NATIVE_THERMAL`). Both
 kernels run on the process-wide thread budget (`electrical.set_thread_budget`);
 until 0.9.3 they took `native_threads=` (default `PCB_NATIVE_THREADS`, else
 one), and the thread counts measured below are budgets now. The

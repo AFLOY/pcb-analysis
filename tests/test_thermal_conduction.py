@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from tests.tolerance import iterative_rtol
+
 from electrical.matrix_free_mpir_fem import MPIRConfig, solve_mpir
 from thermal.matrix_free_mpir_fem import (
     ConvectionBoundary,
@@ -119,12 +121,19 @@ def test_fixed_faces_give_a_linear_profile_and_the_exact_flux() -> None:
 
     assert solution.solve.converged
     expected = 300.0 + 12.5 * np.arange(5)
+    # The solve stops at a relative residual of 1e-10 (the default MPIRConfig);
+    # the temperatures are exact only to that times the conditioning.
     for face, temperature in zip(expected, solution.temperature_k):
-        np.testing.assert_allclose(temperature, face, rtol=1.0e-9)
+        np.testing.assert_allclose(temperature, face, rtol=iterative_rtol(1.0e-10))
     np.testing.assert_allclose(
         solution.heat_flux_w_per_m2[..., 2], -50.0 / 2.0e-3, rtol=1.0e-7
     )
-    np.testing.assert_allclose(solution.heat_flux_w_per_m2[..., :2], 0.0, atol=1e-4)
+    # In-plane flux is a difference of nodal temperatures over a 0.5 mm cell
+    # (k = 1 W/m/K): two temperature errors of the size allowed above.
+    temperature_error_k = iterative_rtol(1.0e-10) * 350.0
+    np.testing.assert_allclose(
+        solution.heat_flux_w_per_m2[..., :2], 0.0, atol=2.0 * temperature_error_k / 0.5e-3
+    )
     # The two fixed faces exchange equal and opposite heat.
     assert solution.fixed_temperature_heat_w == pytest.approx(0.0, abs=1.0e-9)
     assert solution.heat_balance_error_w == pytest.approx(0.0, abs=1.0e-9)

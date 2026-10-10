@@ -12,7 +12,6 @@ curved faces carry the linear deflection the tessellation was asked for.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Literal
 
@@ -34,20 +33,14 @@ def native_available() -> bool:
 
 
 def default_method() -> ClassifyMethod:
-    """``PCB_GEOMETRY_CLASSIFY`` overrides; else native when built, else NumPy."""
+    """Native when built, else NumPy; a call may still name its method."""
 
-    flag = os.environ.get("PCB_GEOMETRY_CLASSIFY", "").strip().lower()
-    if flag in ("occ", "numpy", "native", "section"):
-        return flag  # type: ignore[return-value]
     return "native" if native_available() else "numpy"
 
 
 def default_plane_method() -> ClassifyMethod:
     """Layer sampling: the exact section rasteriser when built, else the point path."""
 
-    flag = os.environ.get("PCB_GEOMETRY_CLASSIFY", "").strip().lower()
-    if flag in ("occ", "numpy", "native", "section"):
-        return flag  # type: ignore[return-value]
     return "section" if native_available() else "numpy"
 
 

@@ -37,6 +37,16 @@ Versions before 0.7.0 were not tagged; see the Git history.
   the OpenMP team keeps the budget. Threaded BLAS made these solves no
   faster and kept every core spinning (docs/SHEET_PEEC.md).
 
+- The native extensions are the default CPU path whenever they are built:
+  the layered DC and scalar Maxwell Q1 kernels, the thermal hexahedral Q1
+  kernel and the dipole direct summation (CPU, complex128) no longer wait for
+  `PCB_NATIVE_Q1`, `PCB_NATIVE_THERMAL` or `PCB_NATIVE_EMC`. `native=False` on
+  the operators and solves keeps the NumPy path. The native MPIR runs the
+  whole refinement in C++ (FP64 outer residual, FP32 inner PCG, two-level
+  coarse space assembled and inverted with Eigen); its answers agree with the
+  NumPy path to the solver tolerance, not bit for bit, and are bit-identical
+  across thread budgets.
+
 ### Breaking
 
 The default thread count of the native kernels changes from one to the
@@ -53,11 +63,15 @@ around a block). Removed:
   the exported `electrical.matrix_free_mpir_fem.port_basis_workers()`;
 - `geometry.cad_import.StepSolid.contains(threads=)` and
   `TriangleMesh.contains(threads=)` / `TriangleMesh.winding_numbers(threads=)`;
-- the environment variables `PCB_NATIVE_THREADS` and `PCB_PORT_BASIS_WORKERS`
+- the environment variables `PCB_NATIVE_THREADS`, `PCB_PORT_BASIS_WORKERS`,
+  `PCB_NATIVE_Q1`, `PCB_NATIVE_THERMAL`, `PCB_NATIVE_EMC`, `PCB_NATIVE_ORTHO`,
+  `PCB_NATIVE_DOT` and `PCB_GEOMETRY_CLASSIFY` (the Maxwell inner GMRES keeps
+  modified Gram-Schmidt with float64 dots; a classification method is chosen
+  per call with `method=`)
   and the `native_threads()` helpers of the native modules
   (`geometry.cad_import.mesh.native_threads` was in that module's `__all__`).
-  `PCB_NATIVE_Q1`, `PCB_NATIVE_THERMAL` and `PCB_NATIVE_EMC`, which select a
-  path rather than a thread count, stay;
+  `PCB_NATIVE_Q1`, `PCB_NATIVE_THERMAL` and `PCB_NATIVE_EMC` went with them
+  (see below);
 - `electrical.voxel_peec.default_tolerance` no longer reads
   `settings["scipy_workers"]` and raises `ValueError` when it is given.
 

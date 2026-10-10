@@ -67,7 +67,7 @@ def _board(rows: int, cols: int, *, layers: int = 2, vias: bool = True, graded: 
 @pytest.mark.parametrize("threads", [1, 3])
 def test_native_apply_matches_portable_float32(shape, graded, threads) -> None:
     problem = _board(*shape, graded=graded)
-    portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner="jacobi")
+    portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner="jacobi", native=False)
     with thread_budget_scope(threads):
         native = MatrixFreePCBOperator(
             problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner="jacobi",
@@ -90,7 +90,7 @@ def test_native_apply_matches_portable_float32(shape, graded, threads) -> None:
 @pytest.mark.parametrize("threads", [1, 3])
 def test_native_apply_high_matches_portable_float64(shape, graded, threads) -> None:
     problem = _board(*shape, graded=graded)
-    portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner="jacobi")
+    portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner="jacobi", native=False)
     with thread_budget_scope(threads):
         native = MatrixFreePCBOperator(
             problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner="jacobi",
@@ -110,7 +110,7 @@ def test_native_apply_high_matches_portable_float64(shape, graded, threads) -> N
 
 def test_native_coarse_space_matches_portable() -> None:
     problem = _board(9, 14)
-    portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias)
+    portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, native=False)
     with thread_budget_scope(2):
         native = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, native=True)
     np.testing.assert_allclose(
@@ -135,7 +135,7 @@ def test_via_adjacency_lists_every_link_under_both_ends() -> None:
 def test_native_inner_pcg_reaches_the_same_fp64_solution(preconditioner, threads) -> None:
     problem = _board(16, 24, graded=True)
     config = MPIRConfig(max_outer_iterations=16, max_inner_iterations=3000)
-    portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner=preconditioner)
+    portable = MatrixFreePCBOperator(problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner=preconditioner, native=False)
     with thread_budget_scope(threads):
         native = MatrixFreePCBOperator(
             problem.mesh, reference_node=problem.reference_node, vias=problem.vias, preconditioner=preconditioner,
@@ -153,7 +153,7 @@ def test_native_inner_pcg_reaches_the_same_fp64_solution(preconditioner, threads
 
 def test_native_solve_pcb_dc_matches_the_portable_currents_and_losses() -> None:
     problem = _board(10, 16)
-    portable = solve_pcb_dc(problem)
+    portable = solve_pcb_dc(problem, native=False)
     with thread_budget_scope(2):
         native = solve_pcb_dc(problem, native=True)
     assert native.solve.converged
@@ -173,7 +173,7 @@ def test_native_voltage_driven_solve_matches_portable() -> None:
         voltage_terminals=(VoltageTerminal(source.nodes, 3.0e-3, "source"), VoltageTerminal(sink.nodes, 0.0, "sink")),
         vias=current.vias,
     )
-    portable = solve_pcb_dc(problem)
+    portable = solve_pcb_dc(problem, native=False)
     with thread_budget_scope(2):
         native = solve_pcb_dc(problem, native=True)
     assert native.solve.converged and portable.solve.converged
@@ -191,7 +191,7 @@ def test_native_port_basis_matches_portable() -> None:
     source, sink = current.terminals
     mid = tuple((1, r, 8) for r in range(3, 7))
     ports = PortSet(pads=(source.nodes, mid, sink.nodes), names=("source", "tap", "sink"), reference=2)
-    portable = dc_port_basis(current.mesh, ports, vias=current.vias)
+    portable = dc_port_basis(current.mesh, ports, vias=current.vias, native=False)
     with thread_budget_scope(2):
         native = dc_port_basis(current.mesh, ports, vias=current.vias, native=True)
     assert native.converged and portable.converged

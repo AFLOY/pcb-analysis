@@ -182,8 +182,8 @@ def far_field_pattern(
     by ``1/r``; it has to be in the far zone of the source for the numbers to
     mean what a test site measures.  ``native=True`` sums the phase-weighted
     moments in the optional C++ extension (CPU, complex128, an OpenMP team of
-    :func:`electrical.threads.thread_budget` threads); ``None`` follows
-    ``PCB_NATIVE_EMC``.
+    :func:`electrical.threads.thread_budget` threads); ``None`` uses it when
+    built and eligible.
     """
 
     k = wavenumber_per_m(frequency_hz)

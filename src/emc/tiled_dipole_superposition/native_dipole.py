@@ -2,14 +2,13 @@
 
 Built in place with ``python -m emc.tiled_dipole_superposition.native.build``.
 It serves the CPU, complex128 evaluation only; CuPy and complex64 requests keep
-the array path.  Opt in per call with ``native=True`` or for the process with
-``PCB_NATIVE_EMC=1``.  Every call runs an OpenMP team of
+the array path.  When built it is the default for those calls; ``native=False``
+keeps the array path.  Every call runs an OpenMP team of
 :func:`electrical.threads.thread_budget` threads.
 """
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import numpy as np
@@ -27,8 +26,9 @@ def native_available() -> bool:
 
 
 def native_requested() -> bool:
-    flag = os.environ.get("PCB_NATIVE_EMC", "").strip().lower()
-    return flag in {"1", "true", "yes", "on"} and native_available()
+    """The built extension is the default for eligible calls; ``native=False`` opts out."""
+
+    return native_available()
 
 
 def use_native(native: bool | None, backend: str, dtype: Any) -> bool:

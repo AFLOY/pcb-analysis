@@ -175,8 +175,8 @@ def evaluate_fields(
 
     ``native=True`` sums the pairs in the optional C++ extension (CPU,
     complex128 only, an OpenMP team of
-    :func:`electrical.threads.thread_budget` threads); ``None`` follows
-    ``PCB_NATIVE_EMC``.  The result is the same sum in a different order.
+    :func:`electrical.threads.thread_budget` threads); ``None`` uses it when
+    built and eligible.  The result is the same sum in a different order.
     """
 
     points = np.asarray(points_m, dtype=np.float64)
