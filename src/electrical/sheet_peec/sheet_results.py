@@ -70,6 +70,16 @@ def cell_current_density_phasor(
     if len(thickness_m) != layers:
         raise ValueError("one thickness per layer is needed")
 
+    topology = mesh.__dict__.get("_topology")
+    if topology is not None:
+        density_x, density_y = topology.cell_density(
+            np.ascontiguousarray(solution.branch_current, dtype=np.complex128),
+            np.ascontiguousarray(mesh.grid.pitch_x_m, dtype=np.float64),  # type: ignore[union-attr]
+            np.ascontiguousarray(mesh.grid.pitch_y_m, dtype=np.float64),  # type: ignore[union-attr]
+            np.asarray(thickness_m, dtype=np.float64),
+        )
+        return dict(zip(mesh.node_index, zip(density_x.tolist(), density_y.tolist())))
+
     along_x = np.zeros((layers, rows, cols), dtype=np.complex128)
     along_y = np.zeros_like(along_x)
     for index, (layer, row, col) in enumerate(mesh.branch_x):

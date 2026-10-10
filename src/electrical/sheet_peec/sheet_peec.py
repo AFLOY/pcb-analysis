@@ -161,6 +161,21 @@ class SheetMesh:
         self.shape = (rows, cols)
         self.occupancy = occupancy
 
+        core = _backend.core()
+        if core is not None:
+            via_cells = np.asarray(
+                [(via.lower_layer, via.upper_layer, via.row, via.col) for via in self.vias], dtype=np.int64
+            ).reshape(-1, 4)
+            topology = core.sheet.MeshTopology(np.ascontiguousarray(occupancy, dtype=np.uint8), via_cells)
+            self.__dict__["_topology"] = topology
+            coordinates = np.argwhere(topology.node_of >= 0)
+            self.node_index = dict(zip(map(tuple, coordinates.tolist()), range(topology.node_count)))
+            self.branch_x = list(map(tuple, topology.branch_x.tolist()))
+            self.branch_y = list(map(tuple, topology.branch_y.tolist()))
+            self.via_branches = tuple(self.vias[index] for index in topology.via_kept.tolist())
+            return
+        self.__dict__["_topology"] = None
+
         self.node_index = {}
         for layer in range(len(self.stackup)):
             for row in range(rows):
@@ -253,6 +268,15 @@ class SheetMesh:
         node it enters, so that ``A V`` is the drop along each branch and
         ``A^T I`` is the current leaving each node.
         """
+        topology = self.__dict__.get("_topology")
+        if topology is not None:
+            count = self.branch_count
+            rows_ = np.repeat(np.arange(count, dtype=np.int64), 2)
+            cols_ = np.empty(2 * count, dtype=np.int64)
+            cols_[0::2] = topology.left
+            cols_[1::2] = topology.right
+            data_ = np.tile(np.array([1.0, -1.0]), count)
+            return sp.csr_matrix((data_, (rows_, cols_)), shape=(count, self.node_count))
         rows: list[int] = []
         cols: list[int] = []
         data: list[float] = []
@@ -292,6 +316,16 @@ class SheetMesh:
         resistance is the layer's sheet resistance times that ratio; on a
         uniform grid the ratio is one whatever the pitch is.
         """
+        topology = self.__dict__.get("_topology")
+        if topology is not None:
+            grid = self.grid
+            assert grid is not None
+            return topology.resistances(
+                np.asarray([layer.sheet_resistance_ohm for layer in self.stackup.layers], dtype=np.float64),
+                np.ascontiguousarray(grid.pitch_x_m, dtype=np.float64),
+                np.ascontiguousarray(grid.pitch_y_m, dtype=np.float64),
+                np.asarray([via.resistance_ohm for via in self.vias], dtype=np.float64),
+            )
         values = np.empty(self.branch_count, dtype=np.float64)
         position = 0
         for axis, group in (("x", self.branch_x), ("y", self.branch_y)):
@@ -471,6 +505,30 @@ def _components_with_terminals(
 
 def _source_vector(mesh: SheetMesh, terminals: Sequence[Terminal]) -> np.ndarray:
     """Spread each terminal's current over the mesh cells its pad covers."""
+    topology = mesh.__dict__.get("_topology")
+    if topology is not None:
+        terminals = list(terminals)
+        counts = [len(terminal.cells) for terminal in terminals]
+        cell_start = np.concatenate([[0], np.cumsum(counts)]).astype(np.int64)
+        cells = np.asarray(
+            [cell for terminal in terminals for cell in terminal.cells], dtype=np.int64
+        ).reshape(-1, 2)
+        injected, usable = topology.source_vector(
+            np.asarray([terminal.layer for terminal in terminals], dtype=np.int64),
+            cell_start,
+            cells,
+            np.asarray([terminal.current_a for terminal in terminals], dtype=np.complex128),
+        )
+        for terminal, count in zip(terminals, usable.tolist()):
+            if count == 0:
+                raise ValueError(f"terminal {terminal.name} has no cell on the conductor")
+        total = sum(terminal.current_a for terminal in terminals)
+        if abs(total) > 1e-9 * max(1.0, sum(abs(terminal.current_a) for terminal in terminals)):
+            raise ValueError(
+                f"the case injects a net {total:.6g} A into an isolated conductor; "
+                "terminal currents have to sum to zero"
+            )
+        return np.asarray(injected, dtype=np.complex128)
     injected = np.zeros(mesh.node_count, dtype=np.complex128)
     total = 0.0
     for terminal in terminals:
