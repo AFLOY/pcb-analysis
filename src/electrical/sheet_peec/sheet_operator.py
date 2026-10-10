@@ -37,6 +37,7 @@ from typing import Any, Sequence
 import numpy as np
 import scipy.fft
 
+from electrical import _backend
 from electrical.threads import thread_budget
 
 from .sheet_inductance import (
@@ -149,7 +150,7 @@ class SheetInductanceOperator:
         # cell, so both are built rather than one inferred from the other: the
         # spectrum of a real transform is not square and cannot be transposed
         # at all.
-        self._kernels: dict[tuple[str, int, int], np.ndarray] = {}
+        self._tables: dict[tuple[str, int, int], np.ndarray] = {}
         for first in range(len(stackup)):
             for second in range(first, len(stackup)):
                 # The two layers need not be equally thick.  A conductor thick
@@ -175,7 +176,7 @@ class SheetInductanceOperator:
                         axis=axis,
                         near_radius_cells=near_radius_cells,
                     )
-                    self._kernels[(axis, first, second)] = np.fft.rfft2(table)
+                    self._tables[(axis, first, second)] = table
 
         # Vertical branches carry current along z.  They couple to no in-plane
         # branch, being perpendicular to both, but they are parallel to one
@@ -204,7 +205,7 @@ class SheetInductanceOperator:
             )
             for lower, upper in self.vertical_levels
         ]
-        self._kernels_z: dict[tuple[int, int], np.ndarray] = {}
+        self._tables_z: dict[tuple[int, int], np.ndarray] = {}
         for first in range(len(self.vertical_levels)):
             span_a, center_a = self._vertical_geometry[first]
             for second in range(first, len(self.vertical_levels)):
@@ -217,7 +218,33 @@ class SheetInductanceOperator:
                     center_b - center_a,
                     near_radius_cells=near_radius_cells,
                 )
-                self._kernels_z[(first, second)] = np.fft.rfft2(table)
+                self._tables_z[(first, second)] = table
+
+        # The C++ core applies the operator when it is built; it keeps the
+        # spectra of these tables.  Otherwise NumPy does, from spectra kept here.
+        core = _backend.core()
+        self._native: Any = None
+        self._kernels: dict[tuple[str, int, int], np.ndarray] = {}
+        self._kernels_z: dict[tuple[int, int], np.ndarray] = {}
+        if core is not None:
+            def stacked(tables: dict, keys: list) -> np.ndarray:
+                if not keys:
+                    return np.zeros((0, *self.padded))
+                return np.ascontiguousarray(np.stack([tables[key] for key in keys]))
+
+            pairs = [(first, second) for first in range(len(stackup)) for second in range(first, len(stackup))]
+            levels = len(self.vertical_levels)
+            level_pairs = [(first, second) for first in range(levels) for second in range(first, levels)]
+            self._native = core.sheet.ConvolutionOperator(
+                len(stackup), rows, cols, levels,
+                stacked(self._tables, [("x", a, b) for a, b in pairs]),
+                stacked(self._tables, [("y", a, b) for a, b in pairs]),
+                stacked(self._tables_z, level_pairs),
+                thread_budget(),
+            )
+        else:
+            self._kernels = {key: np.fft.rfft2(table) for key, table in self._tables.items()}
+            self._kernels_z = {key: np.fft.rfft2(table) for key, table in self._tables_z.items()}
 
     def _kernel(self, axis: str, first: int, second: int) -> np.ndarray:
         # The coupling of a pair does not depend on which of the two is asked
@@ -232,7 +259,9 @@ class SheetInductanceOperator:
 
     @property
     def kernel_bytes(self) -> int:
-        """Report what the prepared tables occupy."""
+        """Report what the prepared spectra occupy."""
+        if self._native is not None:
+            return int(self._native.spectrum_bytes)
         return sum(table.nbytes for table in self._kernels.values()) + sum(
             table.nbytes for table in self._kernels_z.values()
         )
@@ -288,6 +317,20 @@ class SheetInductanceOperator:
             if currents_z is not None and levels:
                 stacked.append(currents_z)
 
+        if self._native is not None:
+            # The C++ core applies one set at a time, each to the bits it gives alone.
+            results: list[tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+            for currents_x, currents_y, currents_z in currents:
+                vertical = currents_z if (currents_z is not None and levels) else None
+                flux_x, flux_y, flux_z = self._native.apply(currents_x, currents_y, vertical, threads=thread_budget())
+                if currents_z is None:
+                    results.append((flux_x, flux_y))
+                else:
+                    results.append(
+                        (flux_x, flux_y, flux_z if flux_z is not None else np.zeros_like(currents_z, dtype=np.float64))
+                    )
+            return results
+
         workers = thread_budget()
         spectra = scipy.fft.rfft2(np.concatenate(stacked, axis=0), s=self.padded, workers=workers)
         accumulated = np.zeros_like(spectra)
@@ -330,10 +373,8 @@ class SheetInductanceOperator:
 
         rows, cols = self.shape
         layer_count = len(self.stackup)
-        tables = {
-            key: np.fft.irfft2(spectrum, s=self.padded) for key, spectrum in self._kernels.items()
-        }
-        tables_z = {key: np.fft.irfft2(spectrum, s=self.padded) for key, spectrum in self._kernels_z.items()}
+        tables = self._tables
+        tables_z = self._tables_z
         padded_rows, padded_cols = self.padded
         count = mesh.branch_count
         span = range(-radius_cells, radius_cells + 1)
