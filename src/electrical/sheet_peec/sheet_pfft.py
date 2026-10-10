@@ -145,6 +145,11 @@ def _projection_matrix(
     return total.tocsr()
 
 
+def _csr(parts: tuple) -> sp.csr_matrix:
+    indptr, indices, data, shape = parts
+    return sp.csr_matrix((data, indices, indptr), shape=tuple(shape))
+
+
 class PfftSheetInductanceOperator:
     """Partial inductance of a graded sheet mesh, applied by precorrected FFT.
 
@@ -216,10 +221,31 @@ class PfftSheetInductanceOperator:
         distinct = sorted(set(round(v, 15) for v in separations.values()))
         self._spectra = {sep: np.fft.rfft2(self.grid.kernel_table(sep)) for sep in distinct}
         self._separation = {key: round(v, 15) for key, v in separations.items()}
+        core = _backend.core()
+        separation_table = np.array(
+            [[self._separation[(a, b)] for b in range(len(layers))] for a in range(len(layers))], dtype=np.float64
+        )
         for axis in ("x", "y"):
             cx, cy, length, width_ = mesh.branch_geometry(axis)
             self._geometry[axis] = (cx, cy, length, width_)
             extent_x, extent_y = (length, width_) if axis == "x" else (width_, length)
+            if core is not None:
+                # NumPy's mean picks which way the bars are sampled; the core
+                # takes the decision rather than re-deriving it.
+                along_x = bool(np.mean(extent_x) >= np.mean(extent_y)) if extent_x.size else True
+                parts = core.sheet.pfft_inplane_family(
+                    *self._grid_arguments(), axis == "x", along_x,
+                    np.ascontiguousarray(cx), np.ascontiguousarray(cy),
+                    np.ascontiguousarray(length), np.ascontiguousarray(width_),
+                    np.asarray([layer.z_m for layer in layers], dtype=np.float64),
+                    np.asarray([layer.thickness_m for layer in layers], dtype=np.float64),
+                    separation_table, thread_budget(),
+                )
+                self._projection[axis] = _csr(parts["projection"])
+                self._correction[axis] = _csr(parts["correction"])
+                self._near_exact[axis] = _csr(parts["near_exact"])
+                self._self[axis] = np.asarray(parts["self"])
+                continue
             self._projection[axis] = _projection_matrix(cx, cy, extent_x, extent_y, self.grid, self.order)
             self._correction[axis], self._self[axis] = self._build_correction(axis)
 
@@ -236,18 +262,45 @@ class PfftSheetInductanceOperator:
             yc = 0.5 * (tensor.y_edges_m[:-1] + tensor.y_edges_m[1:]) - tensor.y_edges_m[0]
             centre_x = np.broadcast_to(xc[None, :], self.shape)
             centre_y = np.broadcast_to(yc[:, None], self.shape)
-            self._projection_z = _projection_matrix(
-                centre_x, centre_y, tensor.pitch_x_m[None, :], tensor.pitch_y_m[:, None], self.grid, self.order
-            )
-            for a in range(len(self.vertical_levels)):
-                for b in range(len(self.vertical_levels)):
+            levels = len(self.vertical_levels)
+            vertical_separation = np.zeros((levels, levels))
+            for a in range(levels):
+                for b in range(levels):
                     sep = round(abs(self._vertical_geometry[b][1] - self._vertical_geometry[a][1]), 15)
+                    vertical_separation[a, b] = sep
                     if sep not in self._spectra_z:
                         self._spectra_z[sep] = np.fft.rfft2(self.grid.kernel_table(sep))
-            self._correction_z, self._self_z = self._build_vertical_correction(centre_x, centre_y)
+            if core is not None:
+                extent_x = np.broadcast_to(tensor.pitch_x_m[None, :], self.shape)
+                extent_y = np.broadcast_to(tensor.pitch_y_m[:, None], self.shape)
+                parts = core.sheet.pfft_vertical_family(
+                    *self._grid_arguments(), bool(np.mean(extent_x) >= np.mean(extent_y)),
+                    np.ascontiguousarray(centre_x), np.ascontiguousarray(centre_y),
+                    np.ascontiguousarray(tensor.pitch_x_m, dtype=np.float64),
+                    np.ascontiguousarray(tensor.pitch_y_m, dtype=np.float64),
+                    np.asarray([span for span, _ in self._vertical_geometry], dtype=np.float64),
+                    np.asarray([z for _, z in self._vertical_geometry], dtype=np.float64),
+                    vertical_separation, thread_budget(),
+                )
+                self._projection_z = _csr(parts["projection"])
+                self._correction_z = _csr(parts["correction"])
+                self._near_exact_z = _csr(parts["near_exact"])
+                self._self_z = np.asarray(parts["self"])
+            else:
+                self._projection_z = _projection_matrix(
+                    centre_x, centre_y, tensor.pitch_x_m[None, :], tensor.pitch_y_m[:, None], self.grid, self.order
+                )
+                self._correction_z, self._self_z = self._build_vertical_correction(centre_x, centre_y)
         self._core = self._build_core()
 
     # ------------------------------------------------------------- construction
+    def _grid_arguments(self) -> tuple:
+        return (
+            float(self.grid.origin_x_m), float(self.grid.origin_y_m), float(self.grid.pitch_m),
+            int(self.grid.nodes_x), int(self.grid.nodes_y), int(self.order),
+            int(self.near_radius_cells), int(self.preconditioner_radius_cells),
+        )
+
     def _near_pairs(self, coords: np.ndarray, half_extent: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Index pairs of a sorted 1D coordinate array within the near radius plus both half extents."""
 
