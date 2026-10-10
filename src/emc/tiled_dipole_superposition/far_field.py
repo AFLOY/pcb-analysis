@@ -30,6 +30,8 @@ from .fields import (
     to_host,
     wavenumber_per_m,
 )
+from electrical import _backend
+
 from .native_dipole import far_field_pattern_native, use_native
 
 
@@ -202,6 +204,26 @@ def far_field_pattern(
         pattern = _array_pattern(sources, sampling, k, backend, tile_directions, dtype)
 
     eta = FREE_SPACE_IMPEDANCE_OHM
+    core = _backend.core()
+    if core is not None:
+        field, e_theta, e_phi, power = core.emc.far_field(
+            np.ascontiguousarray(pattern, dtype=np.complex128),
+            np.ascontiguousarray(sampling.theta_rad, dtype=np.float64),
+            np.ascontiguousarray(sampling.phi_rad, dtype=np.float64),
+            np.ascontiguousarray(sampling.weight_sr, dtype=np.float64),
+            k,
+            float(distance_m),
+            eta,
+        )
+        return FarFieldPattern(
+            frequency_hz=float(frequency_hz),
+            distance_m=float(distance_m),
+            sampling=sampling,
+            electric_v_per_m=field,
+            e_theta_v_per_m=e_theta,
+            e_phi_v_per_m=e_phi,
+            radiated_power_w=float(power),
+        )
     field = (1j * eta * k / (4.0 * np.pi)) * np.exp(-1j * k * distance_m) / distance_m * pattern
     theta_hat = np.stack(
         (

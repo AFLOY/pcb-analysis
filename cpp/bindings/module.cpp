@@ -41,6 +41,7 @@ namespace pcb_sheet_pfft_near { void register_module(py::module_& m); }
 namespace pcbcore_bindings {
 void register_fem(py::module_& m);
 void register_thermal(py::module_& m);
+void register_emc(py::module_& m);
 }  // namespace pcbcore_bindings
 
 namespace {
@@ -510,6 +511,10 @@ PYBIND11_MODULE(_pcbcore, m) {
     {
         py::module_ sub = m.def_submodule("thermal", "Steady and transient heat conduction");
         pcbcore_bindings::register_thermal(sub);
+    }
+    {
+        py::module_ sub = m.def_submodule("emc", "Far field, dipole moments and current elements");
+        pcbcore_bindings::register_emc(sub);
     }
 
     py::module_ network = m.def_submodule("network", "Conductance networks: the zero-frequency sheet mesh");

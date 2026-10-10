@@ -20,6 +20,8 @@ from typing import Sequence
 
 import numpy as np
 
+from electrical import _backend
+
 from electrical.matrix_free_mpir_fem.pcb import (
     PCBConductionProblem,
     PCBConductionSolution,
@@ -61,6 +63,21 @@ def terminal_closure_dipoles(
         driven += [(terminal.nodes, float(current)) for terminal, current in zip(problem.voltage_terminals, solved)]
     mesh = problem.mesh
     heights = np.asarray(layer_height_m, dtype=np.float64)
+    core = _backend.core()
+    if core is not None:
+        offsets = np.zeros(len(driven) + 1, dtype=np.int64)
+        np.cumsum([len(nodes) for nodes, _ in driven], out=offsets[1:])
+        positions, moments = core.emc.terminal_closure(
+            mesh.element_active.shape[1],
+            mesh.element_active.shape[2],
+            mesh.pitch_x_m,
+            mesh.pitch_y_m,
+            heights,
+            offsets,
+            np.asarray([node for nodes, _ in driven for node in nodes], dtype=np.int64).reshape(-1),
+            np.asarray([current for _, current in driven], dtype=np.float64),
+        )
+        return CurrentDipoles(positions, moments)
     x_nodes = np.concatenate(([0.0], np.cumsum(mesh.pitch_x_m)))
     y_nodes = np.concatenate(([0.0], np.cumsum(mesh.pitch_y_m)))
     centroids = []
@@ -124,6 +141,28 @@ def dipoles_from_pcb_dc(
     if density.shape != (layers, rows, cols, 2):
         raise ValueError("current density must have shape (layers, rows, cols, 2)")
     thickness = np.asarray(mesh.layer_thickness_m, dtype=np.float64)
+    core = _backend.core()
+    if core is not None:
+        node_shape = mesh.node_shape
+        positions, moments = core.emc.dc_dipoles(
+            np.ascontiguousarray(mesh.element_active, dtype=np.uint8),
+            thickness,
+            mesh.pitch_x_m,
+            mesh.pitch_y_m,
+            heights,
+            np.ascontiguousarray(density),
+            np.asarray([np.ravel_multi_index(via.lower, node_shape) for via in problem.vias], dtype=np.int64),
+            np.asarray([np.ravel_multi_index(via.upper, node_shape) for via in problem.vias], dtype=np.int64),
+            np.asarray(solution.via_current_a, dtype=np.float64).reshape(-1),
+        )
+        dipoles = CurrentDipoles(positions, moments)
+        if close_terminals:
+            dipoles = dipoles.concatenate(
+                terminal_closure_dipoles(
+                    problem, heights, voltage_terminal_current_a=solution.voltage_terminal_current_a
+                )
+            )
+        return dipoles
     volume = thickness[:, None, None] * mesh.cell_area_m2[None, :, :]
     x_nodes = np.concatenate(([0.0], np.cumsum(mesh.pitch_x_m)))
     y_nodes = np.concatenate(([0.0], np.cumsum(mesh.pitch_y_m)))
