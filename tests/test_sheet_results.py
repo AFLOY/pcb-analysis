@@ -145,8 +145,10 @@ class DensityConventionTests(unittest.TestCase):
 class TerminalExclusionTests(unittest.TestCase):
     def test_the_bulk_percentile_leaves_the_terminal_cells_out(self):
         # A lead's own singularity is not a property of the shape being judged,
-        # so the bulk figure has to be below the overall maximum where the
-        # terminals are where the current crowds.
+        # so the bulk figure is the percentile over the cells that are not
+        # terminal cells.  (On this strip the densest cells are the ones next
+        # to the leads, not the leads, so "bulk below the maximum" held only
+        # by a last-bit asymmetry between the two ends and is not asserted.)
         rows, cols = 7, 11
         stackup = SheetStackup((SheetLayer("F.Cu", 0.0, COPPER_M, RESISTIVITY),))
         mesh = SheetMesh(
@@ -160,11 +162,14 @@ class TerminalExclusionTests(unittest.TestCase):
         solution = solve_sheet_case(mesh, operator, terminals, frequency_hz=0.0)
         fields = sheet_fields(mesh, solution, terminals)
         self.assertEqual(fields.metrics["terminal_cell_count"], 2)
-        self.assertLess(
-            fields.metrics["bulk_p99_current_density_a_per_mm2"],
-            fields.metrics["max_current_density_a_per_mm2"],
-        )
         self.assertEqual(len(fields.terminal_cells), 2)
+        bulk = [
+            value for cell, value in fields.current_density.items() if cell not in fields.terminal_cells
+        ]
+        self.assertEqual(len(bulk), rows * cols - 2)
+        self.assertEqual(
+            fields.metrics["bulk_p99_current_density_a_per_mm2"], float(np.percentile(bulk, 99.0))
+        )
 
 
 class VerticalCurrentTests(unittest.TestCase):

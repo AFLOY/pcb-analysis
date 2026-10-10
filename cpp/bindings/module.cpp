@@ -6,6 +6,7 @@
 // package's dataclasses.
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/complex.h>
 #include <pybind11/stl.h>
 
 #include <cstdint>
@@ -21,6 +22,7 @@
 #include "pcbcore/sheet/hoer_love.hpp"
 #include "pcbcore/sheet/near_field.hpp"
 #include "pcbcore/sheet/pfft_operator.hpp"
+#include "pcbcore/sheet/sheet_solve.hpp"
 
 namespace py = pybind11;
 
@@ -114,7 +116,7 @@ const double* stacked_tables(const Input<double>& tables, const std::int64_t pai
     return tables.data();
 }
 
-std::unique_ptr<pcbcore::sheet::ConvolutionOperator> make_convolution_operator(
+std::shared_ptr<pcbcore::sheet::ConvolutionOperator> make_convolution_operator(
     const std::int64_t layers, const std::int64_t rows, const std::int64_t cols, const std::int64_t levels,
     const Input<double>& tables_x, const Input<double>& tables_y, const Input<double>& tables_z, const int threads) {
     const std::int64_t pairs = layers * (layers + 1) / 2;
@@ -123,7 +125,7 @@ std::unique_ptr<pcbcore::sheet::ConvolutionOperator> make_convolution_operator(
     const double* y = stacked_tables(tables_y, pairs, rows, cols, "tables_y");
     const double* z = stacked_tables(tables_z, vertical, rows, cols, "tables_z");
     py::gil_scoped_release release;
-    return std::make_unique<pcbcore::sheet::ConvolutionOperator>(layers, rows, cols, levels, x, y, z, threads);
+    return std::make_shared<pcbcore::sheet::ConvolutionOperator>(layers, rows, cols, levels, x, y, z, threads);
 }
 
 py::tuple apply_convolution(const pcbcore::sheet::ConvolutionOperator& op, const Input<double>& currents_x,
@@ -283,6 +285,88 @@ py::array_t<double> pfft_apply(const pcbcore::sheet::PfftOperator& op, const std
     return to_array(std::move(flux), {static_cast<py::ssize_t>(planes), static_cast<py::ssize_t>(n)});
 }
 
+// One excitation: ``op`` is a ConvolutionOperator or a PfftOperator (or None
+// for DC); ``family``/``position`` place each mesh branch in its inputs.
+py::dict solve_sheet(const std::int64_t node_count, const Input<std::int64_t>& left, const Input<std::int64_t>& right,
+                     const Input<double>& resistance, const Input<std::complex<double>>& injection,
+                     const double frequency_hz, const double tolerance, const std::int64_t max_iterations,
+                     const std::int64_t restart, const std::string& preconditioner,
+                     const std::int64_t auto_block_from_unknowns, const py::object& op,
+                     const Input<std::int8_t>& family, const Input<std::int64_t>& position,
+                     const Input<std::int64_t>& family_sizes, const std::optional<Input<std::int64_t>>& near_indptr,
+                     const std::optional<Input<std::int64_t>>& near_indices,
+                     const std::optional<Input<double>>& near_data,
+                     const std::optional<Input<double>>& self_inductance, const int threads) {
+    const std::int64_t branches = left.size();
+    if (right.size() != branches || resistance.size() != branches || injection.size() != node_count) {
+        throw pcbcore::InvalidInput("left, right, resistance must have one entry per branch and injection per node");
+    }
+    std::unique_ptr<pcbcore::sheet::FluxOperator> flux;
+    if (!op.is_none()) {
+        std::vector<std::int8_t> fam(family.data(), family.data() + family.size());
+        std::vector<std::int64_t> pos(position.data(), position.data() + position.size());
+        if (static_cast<std::int64_t>(fam.size()) != branches || family_sizes.size() != 3) {
+            throw pcbcore::InvalidInput("family/position need one entry per branch and family_sizes three");
+        }
+        const std::int64_t* sizes = family_sizes.data();
+        if (py::isinstance<pcbcore::sheet::ConvolutionOperator>(op)) {
+            flux = std::make_unique<pcbcore::sheet::ConvolutionFlux>(
+                op.cast<std::shared_ptr<pcbcore::sheet::ConvolutionOperator>>(), std::move(fam), std::move(pos),
+                sizes[0], sizes[2]);
+        } else if (py::isinstance<pcbcore::sheet::PfftOperator>(op)) {
+            flux = std::make_unique<pcbcore::sheet::PfftFlux>(
+                op.cast<std::shared_ptr<pcbcore::sheet::PfftOperator>>(), std::move(fam), std::move(pos),
+                std::vector<std::int64_t>(sizes, sizes + 3));
+        } else {
+            throw pcbcore::InvalidInput("op must be a ConvolutionOperator or a PfftOperator");
+        }
+    }
+    pcbcore::sheet::NearInductance near;
+    const bool has_near = near_indptr.has_value() && near_indices.has_value() && near_data.has_value();
+    if (has_near) {
+        if (near_indptr->size() != branches + 1 || near_indices->size() != near_data->size()) {
+            throw pcbcore::InvalidInput("near inductance must be a branch_count square CSR matrix");
+        }
+        near.indptr.assign(near_indptr->data(), near_indptr->data() + near_indptr->size());
+        near.indices.assign(near_indices->data(), near_indices->data() + near_indices->size());
+        near.data.assign(near_data->data(), near_data->data() + near_data->size());
+    }
+    if (self_inductance.has_value() && self_inductance->size() != branches) {
+        throw pcbcore::InvalidInput("self_inductance needs one entry per branch");
+    }
+    pcbcore::sheet::SheetProblem problem;
+    problem.node_count = node_count;
+    problem.branch_count = branches;
+    problem.left = left.data();
+    problem.right = right.data();
+    problem.resistance = resistance.data();
+    problem.injection = injection.data();
+    problem.frequency_hz = frequency_hz;
+    problem.tolerance = tolerance;
+    problem.max_iterations = max_iterations;
+    problem.restart = restart;
+    problem.preconditioner = preconditioner;
+    problem.auto_block_from_unknowns = auto_block_from_unknowns;
+    problem.flux = flux.get();
+    problem.near = has_near ? &near : nullptr;
+    problem.self_inductance = self_inductance.has_value() ? self_inductance->data() : nullptr;
+    pcbcore::sheet::SheetResult result;
+    {
+        py::gil_scoped_release release;
+        result = pcbcore::sheet::solve_sheet(problem, threads);
+    }
+    py::dict out;
+    out["node_voltage"] = to_array(std::move(result.node_voltage));
+    out["branch_current"] = to_array(std::move(result.branch_current));
+    out["iterations"] = result.iterations;
+    out["residual"] = result.residual;
+    out["converged"] = result.converged;
+    out["grounded_node"] = result.grounded_node;
+    out["undriven_nodes"] = result.undriven_nodes;
+    out["preconditioner"] = result.preconditioner;
+    return out;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_pcbcore, m) {
@@ -309,7 +393,7 @@ PYBIND11_MODULE(_pcbcore, m) {
                 py::arg("right"), py::arg("conductance"), py::arg("branch_product"), py::arg("in_plane"));
 
     py::module_ sheet = m.def_submodule("sheet", "Sheet PEEC: operators, preconditioners and solves");
-    py::class_<pcbcore::sheet::ConvolutionOperator>(sheet, "ConvolutionOperator")
+    py::class_<pcbcore::sheet::ConvolutionOperator, std::shared_ptr<pcbcore::sheet::ConvolutionOperator>>(sheet, "ConvolutionOperator")
         .def(py::init(&make_convolution_operator), py::arg("layers"), py::arg("rows"), py::arg("cols"),
              py::arg("levels"), py::arg("tables_x"), py::arg("tables_y"), py::arg("tables_z"), py::arg("threads"))
         .def("apply", &apply_convolution, py::arg("currents_x"), py::arg("currents_y"),
@@ -321,7 +405,7 @@ PYBIND11_MODULE(_pcbcore, m) {
     sheet.def("build_vertical_kernel", &build_vertical_kernel, py::arg("rows"), py::arg("cols"), py::arg("pitch"),
               py::arg("span_a"), py::arg("span_b"), py::arg("center_separation"), py::arg("near_radius_cells"),
               py::arg("threads"));
-    py::class_<pcbcore::sheet::PfftOperator>(sheet, "PfftOperator")
+    py::class_<pcbcore::sheet::PfftOperator, std::shared_ptr<pcbcore::sheet::PfftOperator>>(sheet, "PfftOperator")
         .def(py::init<std::int64_t, std::int64_t>(), py::arg("nodes_y"), py::arg("nodes_x"))
         .def(
             "add_kernel",
@@ -335,6 +419,12 @@ PYBIND11_MODULE(_pcbcore, m) {
              py::arg("nodes"))
         .def("apply", &pfft_apply, py::arg("family"), py::arg("currents"), py::arg("threads"))
         .def_property_readonly("bytes", &pcbcore::sheet::PfftOperator::bytes);
+    sheet.def("solve_sheet", &solve_sheet, py::arg("node_count"), py::arg("left"), py::arg("right"),
+              py::arg("resistance"), py::arg("injection"), py::arg("frequency_hz"), py::arg("tolerance"),
+              py::arg("max_iterations"), py::arg("restart"), py::arg("preconditioner"),
+              py::arg("auto_block_from_unknowns"), py::arg("op"), py::arg("family"), py::arg("position"),
+              py::arg("family_sizes"), py::arg("near_indptr") = py::none(), py::arg("near_indices") = py::none(),
+              py::arg("near_data") = py::none(), py::arg("self_inductance") = py::none(), py::arg("threads"));
     sheet.def("uniform_near_field", &uniform_near_field, py::arg("layers"), py::arg("rows"), py::arg("cols"),
               py::arg("levels"), py::arg("radius"), py::arg("tables_x"), py::arg("tables_y"), py::arg("tables_z"),
               py::arg("branch_x"), py::arg("branch_y"), py::arg("vias"));
