@@ -330,6 +330,30 @@ decade in field and that the FCC Class B limits at 3 m are read correctly.
   is the small in-plane variation, whose residual is accurate, and the solve
   finishes in a few more outer steps.
 
+## The coupling loops in the C++ core
+
+With `electrical._pcbcore` built and a CPU backend, `run_electro_thermal`,
+`run_circuit_coupled`, `run_board_enclosure_thermal` and
+`run_electro_thermal_enclosure` iterate in the core
+(`cpp/src/coupling/`, facade helpers in
+`multiphysics/staggered_coupling/native_loops.py`): the DC solve or the
+N-port bases, the Joule heat placed in the thermal slabs and at the via ends,
+the thermal solve, the copper and via resistivity update, the contact
+exchange with the bodies and the Aitken fixed points, without returning to
+Python between iterations.  A thermal system whose operator does not change
+(the board without radiation, every body) is prepared once and reused while
+only its load changes; the loads are summed in the order of the Python loops.
+`run_circuit_coupled` calls `scenario.circuit.excite` once per iteration with
+the GIL held, outside every parallel region, so a SPICE adapter is called as
+often as before.  `native=False` (where the function takes it) or a CUDA
+backend run the Python loops (`_python_*`), which are kept as the reference:
+`tests/test_native_coupling.py` runs both on the same C++ solvers and checks
+the same iteration and circuit-call counts, an identical first iterate (the
+Aitken factor's dot products are lane sums in C++, BLAS in NumPy, so later
+iterates agree to the solver tolerance) and identical bits at budgets 1, 2,
+3 and 8.  The emission sweeps (`run_sheet_peec_emission`) still loop in
+Python over solves and field sums that run in the core.
+
 ## Fused C++ host paths in the coupled solve (measured on `exp/cpp-multiphysics-dc-emc`)
 
 `run_electro_thermal(native=)` hands one selection to both
