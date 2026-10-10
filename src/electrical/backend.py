@@ -18,6 +18,11 @@ try:  # pragma: no cover - depends on the local build
 except ImportError:  # pragma: no cover
     _core = None
 
+try:  # pragma: no cover - built only with -DPCB_NATIVE_CUDA=ON
+    from . import _pcbcore_cuda as _cuda
+except ImportError:  # pragma: no cover
+    _cuda = None
+
 _reference_forced = False
 
 
@@ -38,6 +43,19 @@ def core() -> ModuleType | None:
     """The C++ core when it should answer, else ``None`` (use the reference)."""
 
     return None if _reference_forced else _core
+
+
+def cuda_core() -> ModuleType | None:
+    """The CUDA module when it is built and a device is present, else ``None``.
+
+    It runs the FP32 inner solves of prepared systems on a device
+    (``operator.device_system()``); it is opt-in until it has been checked
+    on a CUDA machine, so no solver selects it on its own.
+    """
+
+    if _reference_forced or _cuda is None or _core is None:
+        return None
+    return _cuda if _cuda.device_count() > 0 else None
 
 
 @contextmanager

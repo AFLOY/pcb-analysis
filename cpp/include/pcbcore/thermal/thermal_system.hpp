@@ -124,6 +124,11 @@ public:
     [[nodiscard]] const std::vector<double>& diagonal() const noexcept { return diagonal_; }
     [[nodiscard]] const fem::CoarseSpace& coarse() const noexcept { return coarse_; }
     [[nodiscard]] std::size_t robin_count() const noexcept { return robin_.size(); }
+    // The FP32 operator, diagonal and coarse inverse the inner solve reads
+    // (empty inverse without the two-level preconditioner), for a device copy.
+    [[nodiscard]] fem::thermal_hex::OperatorView<float> low_view() const noexcept;
+    [[nodiscard]] const std::vector<float>& diagonal_low() const noexcept { return diagonal_low_; }
+    [[nodiscard]] const std::vector<float>& coarse_inverse_low() const noexcept { return coarse_inverse_low_; }
 
     void apply_high(const double* x, double* y, int threads) const;
     void apply_low(const float* x, float* y, int threads) const;
@@ -147,7 +152,6 @@ public:
 private:
     [[nodiscard]] fem::thermal_hex::OperatorView<double> high_view() const noexcept;
     [[nodiscard]] fem::thermal_hex::OperatorView<double> stiffness_view() const noexcept;
-    [[nodiscard]] fem::thermal_hex::OperatorView<float> low_view() const noexcept;
 
     const ThermalProblem* problem_{nullptr};
     Index size_{0};

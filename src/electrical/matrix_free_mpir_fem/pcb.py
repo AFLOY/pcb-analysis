@@ -497,6 +497,18 @@ class MatrixFreePCBOperator:
         operator._adopt_system(core, system, preconditioner)
         return operator
 
+    def device_system(self, device: int = 0) -> Any:
+        """This operator's inner solve resident on CUDA ``device``.
+
+        Pass it to :func:`.solver.solve_mpir_device`.  Needs the C++ system
+        and ``electrical._pcbcore_cuda`` with a device present.
+        """
+
+        cuda = _backend.cuda_core()
+        if cuda is None or self._system is None:
+            raise RuntimeError("no CUDA device, or electrical._pcbcore_cuda or the C++ system is missing")
+        return cuda.DeviceSystem.layered_dc(self._system, int(device))
+
     def _set_native_team(self, threads: int) -> None:
         """OpenMP team of the C++ system when this operator shares the budget.
 
