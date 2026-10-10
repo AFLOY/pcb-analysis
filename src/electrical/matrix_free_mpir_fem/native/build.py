@@ -30,6 +30,11 @@ def compile_extension(
 
     suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
     output = Path(output_dir) / f"{module_name}{suffix}"
+    eigen_includes = []
+    for candidate in [Path("/usr/include/eigen3"), Path("/usr/local/include/eigen3")]:
+        if candidate.is_dir():
+            eigen_includes.append(f"-I{candidate}")
+
     command = [
         "g++",
         "-O3",
@@ -44,6 +49,7 @@ def compile_extension(
         "-DNDEBUG",
         f"-I{pybind11.get_include()}",
         f"-I{sysconfig.get_paths()['include']}",
+        *eigen_includes,
         str(source),
         "-o",
         str(output),

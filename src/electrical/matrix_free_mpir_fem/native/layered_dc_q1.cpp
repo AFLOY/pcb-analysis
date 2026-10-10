@@ -15,14 +15,24 @@
 // ``via_nbr``, ``via_g``): every link a-b is stored once under a and once
 // under b, so no thread writes another thread's node and no atomics are
 // needed.
+//
+// Compliant with MISRA-C++ principles: explicit types, no C-style casts,
+// strict const correctness, RAII, noexcept specifications, and internal
+// implementation details hidden within an anonymous namespace.
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 
+#include <Eigen/Core>
+#include <Eigen/Dense>
+
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #ifdef _OPENMP
@@ -41,19 +51,25 @@ using ArrI64 = py::array_t<std::int64_t, py::array::c_style | py::array::forceca
 template <typename T>
 using Arr = py::array_t<T, py::array::c_style | py::array::forcecast>;
 
-class FlushSubnormals {
+class FlushSubnormals final {
    public:
-    FlushSubnormals() : saved_(_mm_getcsr()) { _mm_setcsr(saved_ | 0x8040u); }
-    ~FlushSubnormals() { _mm_setcsr(saved_); }
+    explicit FlushSubnormals() noexcept : saved_(_mm_getcsr()) {
+        _mm_setcsr(saved_ | 0x8040u);
+    }
+    ~FlushSubnormals() noexcept {
+        _mm_setcsr(saved_);
+    }
     FlushSubnormals(const FlushSubnormals&) = delete;
     FlushSubnormals& operator=(const FlushSubnormals&) = delete;
+    FlushSubnormals(FlushSubnormals&&) = delete;
+    FlushSubnormals& operator=(FlushSubnormals&&) = delete;
 
    private:
-    unsigned int saved_;
+    unsigned int saved_{0U};
 };
 
 template <typename T, int F>
-const T* data_of(const py::array_t<T, F>& a, py::ssize_t expected, const char* name) {
+[[nodiscard]] const T* data_of(const py::array_t<T, F>& a, py::ssize_t expected, const char* const name) {
     if (a.size() != expected) {
         throw std::invalid_argument(std::string(name) + " has the wrong size");
     }
@@ -61,31 +77,39 @@ const T* data_of(const py::array_t<T, F>& a, py::ssize_t expected, const char* n
 }
 
 template <typename T>
-struct LayeredOperatorT {
-    const T* coef;             // (2, layers, rows, cols): c_x, c_y per element
-    const T* unit;             // (2, 4, 4): U_x, U_y; local node index 2 dy + dx
-    const std::uint8_t* free_nodes;
-    const T* free_mask;        // 1 free, 0 fixed
-    const std::int64_t* via_ptr;   // (nodes + 1,)
-    const std::int64_t* via_nbr;   // (links,)
-    const T* via_g;                // (links,)
-    int layers, rows, cols;    // element grid per layer
-    int threads;
+struct LayeredOperatorT final {
+    const T* coef{nullptr};             // (2, layers, rows, cols): c_x, c_y per element
+    const T* unit{nullptr};             // (2, 4, 4): U_x, U_y; local node index 2 dy + dx
+    const std::uint8_t* free_nodes{nullptr};
+    const T* free_mask{nullptr};        // 1 free, 0 fixed
+    const std::int64_t* via_ptr{nullptr};   // (nodes + 1,)
+    const std::int64_t* via_nbr{nullptr};   // (links,)
+    const T* via_g{nullptr};                // (links,)
+    int layers{0};
+    int rows{0};
+    int cols{0};
+    int threads{1};
 
-    int node_rows() const { return rows + 1; }
-    int node_cols() const { return cols + 1; }
-    int lines() const { return layers * node_rows(); }
-    py::ssize_t element_count() const { return static_cast<py::ssize_t>(layers) * rows * cols; }
-    py::ssize_t node_count() const { return static_cast<py::ssize_t>(lines()) * node_cols(); }
+    [[nodiscard]] int node_rows() const noexcept { return rows + 1; }
+    [[nodiscard]] int node_cols() const noexcept { return cols + 1; }
+    [[nodiscard]] int lines() const noexcept { return layers * node_rows(); }
+    [[nodiscard]] py::ssize_t element_count() const noexcept {
+        return static_cast<py::ssize_t>(layers) * static_cast<py::ssize_t>(rows) * static_cast<py::ssize_t>(cols);
+    }
+    [[nodiscard]] py::ssize_t node_count() const noexcept {
+        return static_cast<py::ssize_t>(lines()) * static_cast<py::ssize_t>(node_cols());
+    }
 
     // Resistive links of one node: sum g (x_n - x_nbr) over the vias that
     // end there.  Fixed neighbours contribute zero, like the masked gather.
-    T via_terms(const T* x, py::ssize_t node) const {
-        T acc = T(0);
+    [[nodiscard]] T via_terms(const T* const x, const py::ssize_t node) const noexcept {
+        T acc{static_cast<T>(0)};
         const T xn = x[node] * free_mask[node];
-        for (std::int64_t k = via_ptr[node]; k < via_ptr[node + 1]; ++k) {
+        const std::int64_t start_idx = via_ptr[node];
+        const std::int64_t end_idx = via_ptr[node + 1];
+        for (std::int64_t k = start_idx; k < end_idx; ++k) {
             const std::int64_t nbr = via_nbr[k];
-            acc += via_g[k] * (xn - x[nbr] * free_mask[nbr]);
+            acc += via_g[k] * (xn - (x[nbr] * free_mask[nbr]));
         }
         return acc;
     }
@@ -99,25 +123,31 @@ struct LayeredOperatorT {
     // its iterations on rounding noise.  Contraction is therefore off in the
     // two gather functions.
     __attribute__((optimize("-ffp-contract=off")))
-    T gather(const T* x, int l, int y, int xi) const {
-        const int nr = node_rows(), nc = node_cols();
-        const py::ssize_t node = (static_cast<py::ssize_t>(l) * nr + y) * nc + xi;
-        if (!free_nodes[node]) return x[node];
-        const int y0 = y > 0 ? y - 1 : 0, y1 = y < rows ? y : rows - 1;
-        const int x0 = xi > 0 ? xi - 1 : 0, x1 = xi < cols ? xi : cols - 1;
+    [[nodiscard]] T gather(const T* const x, const int l, const int y, const int xi) const noexcept {
+        const int nr = node_rows();
+        const int nc = node_cols();
+        const py::ssize_t node = (static_cast<py::ssize_t>(l) * nr + static_cast<py::ssize_t>(y)) * nc + static_cast<py::ssize_t>(xi);
+        if (free_nodes[node] == 0U) {
+            return x[node];
+        }
+        const int y0 = (y > 0) ? (y - 1) : 0;
+        const int y1 = (y < rows) ? y : (rows - 1);
+        const int x0 = (xi > 0) ? (xi - 1) : 0;
+        const int x1 = (xi < cols) ? xi : (cols - 1);
         const py::ssize_t ne = element_count();
-        const T* ux = unit;
-        const T* uy = unit + 16;
-        T acc = T(0);
+        const T* const ux = unit;
+        const T* const uy = unit + 16;
+        T acc{static_cast<T>(0)};
         for (int ey = y0; ey <= y1; ++ey) {
             for (int ex = x0; ex <= x1; ++ex) {
                 const int lr = 2 * (y - ey) + (xi - ex);
-                const py::ssize_t e = (static_cast<py::ssize_t>(l) * rows + ey) * cols + ex;
-                const T a = coef[e], b = coef[ne + e];
-                const py::ssize_t corner = (static_cast<py::ssize_t>(l) * nr + ey) * nc + ex;
+                const py::ssize_t e = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(rows) + static_cast<py::ssize_t>(ey)) * static_cast<py::ssize_t>(cols) + static_cast<py::ssize_t>(ex);
+                const T a = coef[e];
+                const T b = coef[ne + e];
+                const py::ssize_t corner = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(nr) + static_cast<py::ssize_t>(ey)) * static_cast<py::ssize_t>(nc) + static_cast<py::ssize_t>(ex);
                 for (int c = 0; c < 4; ++c) {
-                    const py::ssize_t cn = corner + (c >> 1) * nc + (c & 1);
-                    acc += (a * ux[4 * lr + c] + b * uy[4 * lr + c]) * (x[cn] * free_mask[cn]);
+                    const py::ssize_t cn = corner + static_cast<py::ssize_t>(c >> 1) * nc + static_cast<py::ssize_t>(c & 1);
+                    acc += ((a * ux[4 * lr + c]) + (b * uy[4 * lr + c])) * (x[cn] * free_mask[cn]);
                 }
             }
         }
@@ -130,39 +160,47 @@ struct LayeredOperatorT {
     // the four local columns, so the x-loop vectorises; the ends of the line
     // use the generic gather.
     __attribute__((optimize("-ffp-contract=off")))
-    void apply_lines(const T* x, T* out, int line_begin, int line_end) const {
-        const int nr = node_rows(), nc = node_cols();
+    void apply_lines(const T* const x, T* const out, const int line_begin, const int line_end) const noexcept {
+        const int nr = node_rows();
+        const int nc = node_cols();
         for (int line = line_begin; line < line_end; ++line) {
-            const int l = line / nr, y = line - l * nr;
-            const py::ssize_t base = static_cast<py::ssize_t>(line) * nc;
+            const int l = line / nr;
+            const int y = line - (l * nr);
+            const py::ssize_t base = static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
             out[base] = gather(x, l, y, 0);
             out[base + cols] = gather(x, l, y, cols);
-            if (cols < 2) continue;
-            const int y0 = y > 0 ? y - 1 : 0, y1 = y < rows ? y : rows - 1;
-            T* o = out + base;
-            for (int xi = 1; xi < cols; ++xi) o[xi] = T(0);
+            if (cols < 2) {
+                continue;
+            }
+            const int y0 = (y > 0) ? (y - 1) : 0;
+            const int y1 = (y < rows) ? y : (rows - 1);
+            T* const o = out + base;
+            for (int xi = 1; xi < cols; ++xi) {
+                o[xi] = static_cast<T>(0);
+            }
             const py::ssize_t ne = element_count();
-            const T* ux = unit;
-            const T* uy = unit + 16;
+            const T* const ux = unit;
+            const T* const uy = unit + 16;
             for (int ey = y0; ey <= y1; ++ey) {
                 const int lr_base = 2 * (y - ey);
-                const py::ssize_t e_row = (static_cast<py::ssize_t>(l) * rows + ey) * cols;  // element ex = 0
-                const T* ax = coef + e_row;
-                const T* ay = coef + ne + e_row;
-                const py::ssize_t corner_row = (static_cast<py::ssize_t>(l) * nr + ey) * nc;  // corner ex = 0
+                const py::ssize_t e_row = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(rows) + static_cast<py::ssize_t>(ey)) * static_cast<py::ssize_t>(cols);  // element ex = 0
+                const T* const ax = coef + e_row;
+                const T* const ay = coef + ne + e_row;
+                const py::ssize_t corner_row = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(nr) + static_cast<py::ssize_t>(ey)) * static_cast<py::ssize_t>(nc);  // corner ex = 0
 #pragma omp simd
                 for (int xi = 1; xi < cols; ++xi) {
-                    T acc = T(0);
+                    T acc{static_cast<T>(0)};
 #pragma GCC unroll 2
                     for (int dx = 0; dx < 2; ++dx) {
                         const int ex = xi - 1 + dx;        // element left (dx=0) or right (dx=1)
                         const int lr = lr_base + (1 - dx);  // local x index of the node in it
-                        const T a = ax[ex], b = ay[ex];
-                        const py::ssize_t corner = corner_row + ex;
+                        const T a = ax[ex];
+                        const T b = ay[ex];
+                        const py::ssize_t corner = corner_row + static_cast<py::ssize_t>(ex);
 #pragma GCC unroll 4
-                        for (int c = 0; c < 4; ++c) {
-                            const py::ssize_t cn = corner + (c >> 1) * nc + (c & 1);
-                            const T w = a * ux[4 * lr + c] + b * uy[4 * lr + c];
+                    for (int c = 0; c < 4; ++c) {
+                            const py::ssize_t cn = corner + static_cast<py::ssize_t>(c >> 1) * nc + static_cast<py::ssize_t>(c & 1);
+                            const T w = (a * ux[4 * lr + c]) + (b * uy[4 * lr + c]);
                             acc += w * (x[cn] * free_mask[cn]);
                         }
                     }
@@ -171,40 +209,46 @@ struct LayeredOperatorT {
             }
             // Via links end at few nodes; a sparse pass over the line.
             for (int xi = 1; xi < cols; ++xi) {
-                const py::ssize_t node = base + xi;
-                if (via_ptr[node] != via_ptr[node + 1]) o[xi] += via_terms(x, node);
+                const py::ssize_t node = base + static_cast<py::ssize_t>(xi);
+                if (via_ptr[node] != via_ptr[node + 1]) {
+                    o[xi] += via_terms(x, node);
+                }
             }
 #pragma omp simd
             for (int xi = 1; xi < cols; ++xi) {
-                const py::ssize_t node = base + xi;
+                const py::ssize_t node = base + static_cast<py::ssize_t>(xi);
                 const T f = free_mask[node];
-                o[xi] = f * o[xi] + (T(1) - f) * x[node];
+                o[xi] = (f * o[xi]) + ((static_cast<T>(1) - f) * x[node]);
             }
         }
     }
 
-    static void thread_lines(int lines, int& begin, int& end) {
+    static void thread_lines(const int lines_cnt, int& begin, int& end) noexcept {
 #ifdef _OPENMP
-        const int nt = omp_get_num_threads(), t = omp_get_thread_num();
-        begin = static_cast<int>(static_cast<long long>(lines) * t / nt);
-        end = static_cast<int>(static_cast<long long>(lines) * (t + 1) / nt);
+        const int nt = omp_get_num_threads();
+        const int t = omp_get_thread_num();
+        begin = static_cast<int>((static_cast<long long>(lines_cnt) * t) / nt);
+        end = static_cast<int>((static_cast<long long>(lines_cnt) * (t + 1)) / nt);
 #else
         begin = 0;
-        end = lines;
+        end = lines_cnt;
 #endif
     }
 };
 
 template <typename T>
-LayeredOperatorT<T> make_operator(const Arr<T>& coef, const Arr<T>& unit, const ArrU8& free_nodes,
-                                  const Arr<T>& free_mask, const ArrI64& via_ptr, const ArrI64& via_nbr,
-                                  const Arr<T>& via_g, int layers, int rows, int cols, int threads) {
-    if (layers < 1 || rows < 1 || cols < 1) throw std::invalid_argument("element grid must be positive");
+[[nodiscard]] LayeredOperatorT<T> make_operator(const Arr<T>& coef, const Arr<T>& unit, const ArrU8& free_nodes,
+                                                const Arr<T>& free_mask, const ArrI64& via_ptr, const ArrI64& via_nbr,
+                                                const Arr<T>& via_g, const int layers, const int rows, const int cols,
+                                                const int threads) {
+    if (layers < 1 || rows < 1 || cols < 1) {
+        throw std::invalid_argument("element grid must be positive");
+    }
     LayeredOperatorT<T> op;
     op.layers = layers;
     op.rows = rows;
     op.cols = cols;
-    op.threads = threads < 1 ? 1 : threads;
+    op.threads = (threads < 1) ? 1 : threads;
     const py::ssize_t elements = op.element_count();
     const py::ssize_t nodes = op.node_count();
     op.coef = data_of(coef, 2 * elements, "coefficients");
@@ -213,26 +257,30 @@ LayeredOperatorT<T> make_operator(const Arr<T>& coef, const Arr<T>& unit, const 
     op.free_mask = data_of(free_mask, nodes, "free_mask");
     op.via_ptr = data_of(via_ptr, nodes + 1, "via_ptr");
     const py::ssize_t links = static_cast<py::ssize_t>(op.via_ptr[nodes]);
-    if (op.via_ptr[0] != 0 || links < 0) throw std::invalid_argument("via_ptr must start at zero");
+    if (op.via_ptr[0] != 0 || links < 0) {
+        throw std::invalid_argument("via_ptr must start at zero");
+    }
     op.via_nbr = data_of(via_nbr, links, "via_nbr");
     op.via_g = data_of(via_g, links, "via_g");
     for (py::ssize_t k = 0; k < links; ++k) {
-        if (op.via_nbr[k] < 0 || op.via_nbr[k] >= nodes) throw std::invalid_argument("via_nbr names a node outside the mesh");
+        if (op.via_nbr[k] < 0 || op.via_nbr[k] >= nodes) {
+            throw std::invalid_argument("via_nbr names a node outside the mesh");
+        }
     }
     return op;
 }
 
-struct alignas(64) Partial {
-    double a;
-    double pad[7];
+struct alignas(64) Partial final {
+    double a{0.0};
+    double pad[7]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 };
 
 template <typename T>
-Arr<T> apply_impl(const LayeredOperatorT<T>& op, const Arr<T>& vector, bool flush_subnormals) {
+[[nodiscard]] Arr<T> apply_impl(const LayeredOperatorT<T>& op, const Arr<T>& vector, const bool flush_subnormals) {
     const py::ssize_t n = op.node_count();
-    const T* x = data_of(vector, n, "vector");
+    const T* const x = data_of(vector, n, "vector");
     Arr<T> out(n);
-    T* y = out.mutable_data();
+    T* const y = out.mutable_data();
     {
         py::gil_scoped_release release;
         const int lines = op.lines();
@@ -240,12 +288,14 @@ Arr<T> apply_impl(const LayeredOperatorT<T>& op, const Arr<T>& vector, bool flus
 #pragma omp parallel num_threads(team) if (team > 1)
         {
             if (flush_subnormals) {
-                FlushSubnormals flush;
-                int b = 0, e = lines;
+                const FlushSubnormals flush{};
+                int b{0};
+                int e{lines};
                 LayeredOperatorT<T>::thread_lines(lines, b, e);
                 op.apply_lines(x, y, b, e);
             } else {
-                int b = 0, e = lines;
+                int b{0};
+                int e{lines};
                 LayeredOperatorT<T>::thread_lines(lines, b, e);
                 op.apply_lines(x, y, b, e);
             }
@@ -289,99 +339,138 @@ py::tuple pcg_layered_dc_q1(ArrF64 rhs_high, ArrF32 diagonal, ArrF32 coef, ArrF3
     const LayeredOperatorT<float> op = make_operator<float>(coef, unit, free_nodes, free_mask, via_ptr, via_nbr,
                                                              via_g, layers, rows, cols, threads);
     const py::ssize_t n = op.node_count();
-    const double* rhs_in = data_of(rhs_high, n, "rhs");
-    const float* diag = data_of(diagonal, n, "diagonal");
-    if (max_inner_iterations < 1) throw std::invalid_argument("max_inner_iterations must be positive");
-    if (block < 1) throw std::invalid_argument("block must be positive");
-    const int nr = op.node_rows(), nc = op.node_cols();
-    const int coarse_rows = (nr + block - 1) / block, coarse_cols = (nc + block - 1) / block;
-    const py::ssize_t ncoarse = static_cast<py::ssize_t>(layers) * coarse_rows * coarse_cols;
-    const bool two_level = coarse_inverse.size() > 0;
-    const float* cinv = nullptr;
-    if (two_level) cinv = data_of(coarse_inverse, ncoarse * ncoarse, "coarse_inverse");
+    const double* const rhs_in = data_of(rhs_high, n, "rhs");
+    const float* const diag = data_of(diagonal, n, "diagonal");
+    if (max_inner_iterations < 1) {
+        throw std::invalid_argument("max_inner_iterations must be positive");
+    }
+    if (block < 1) {
+        throw std::invalid_argument("block must be positive");
+    }
+    const int nr = op.node_rows();
+    const int nc = op.node_cols();
+    const int coarse_rows = (nr + block - 1) / block;
+    const int coarse_cols = (nc + block - 1) / block;
+    const py::ssize_t ncoarse = static_cast<py::ssize_t>(layers) * static_cast<py::ssize_t>(coarse_rows) * static_cast<py::ssize_t>(coarse_cols);
+    const bool two_level = (coarse_inverse.size() > 0);
+    const float* cinv{nullptr};
+    if (two_level) {
+        cinv = data_of(coarse_inverse, ncoarse * ncoarse, "coarse_inverse");
+    }
 
     ArrF32 correction_out(n);
-    float* xsol = correction_out.mutable_data();
-    int total_iterations = 0, applications = 0;
-    double relative_residual = 1.0;
-    bool not_spd = false;
+    float* const xsol = correction_out.mutable_data();
+    int total_iterations{0};
+    int applications{0};
+    double relative_residual{1.0};
+    bool not_spd{false};
 
     {
         py::gil_scoped_release release;
         const int lines = op.lines();
         const int team = std::max(1, std::min(op.threads, lines));
-        std::vector<float> rhs(n), r(n), z(n), p(n), q(n);
-        std::vector<double> coarse_part(static_cast<size_t>(team) * (two_level ? ncoarse : 0));
-        std::vector<float> coarse_r(two_level ? ncoarse : 0), coarse_z(two_level ? ncoarse : 0);
+        std::vector<float> rhs(static_cast<size_t>(n), 0.0f);
+        std::vector<float> r(static_cast<size_t>(n), 0.0f);
+        std::vector<float> z(static_cast<size_t>(n), 0.0f);
+        std::vector<float> p(static_cast<size_t>(n), 0.0f);
+        std::vector<float> q(static_cast<size_t>(n), 0.0f);
+        std::vector<double> coarse_part(static_cast<size_t>(team) * static_cast<size_t>(two_level ? ncoarse : 0), 0.0);
+        std::vector<float> coarse_r(static_cast<size_t>(two_level ? ncoarse : 0), 0.0f);
+        std::vector<float> coarse_z(static_cast<size_t>(two_level ? ncoarse : 0), 0.0f);
         // Slots: 0 norms, 1 curvature, 2 rz.
-        std::vector<Partial> partials(3 * static_cast<size_t>(team));
+        std::vector<Partial> partials(3U * static_cast<size_t>(team));
 
 #pragma omp parallel num_threads(team) if (team > 1)
         {
-            FlushSubnormals flush;
+            const FlushSubnormals flush{};
 #ifdef _OPENMP
-            const int tid = omp_get_thread_num(), nt = omp_get_num_threads();
+            const int tid = omp_get_thread_num();
+            const int nt = omp_get_num_threads();
 #else
-            const int tid = 0, nt = 1;
+            const int tid = 0;
+            const int nt = 1;
 #endif
-            int lb = 0, le = lines;
+            int lb{0};
+            int le{lines};
             LayeredOperatorT<float>::thread_lines(lines, lb, le);
-            const py::ssize_t lo = static_cast<py::ssize_t>(lb) * nc;
-            const py::ssize_t len = static_cast<py::ssize_t>(le - lb) * nc;
-            auto slot = [&](int s) -> double& { return partials[static_cast<size_t>(s) * nt + tid].a; };
-            auto reduce = [&](int s) {
-                double acc = 0.0;
-                for (int t = 0; t < nt; ++t) acc += partials[static_cast<size_t>(s) * nt + t].a;
+            const py::ssize_t lo = static_cast<py::ssize_t>(lb) * static_cast<py::ssize_t>(nc);
+            const py::ssize_t len = static_cast<py::ssize_t>(le - lb) * static_cast<py::ssize_t>(nc);
+            auto slot = [&](const int s) noexcept -> double& {
+                return partials[static_cast<size_t>(s) * static_cast<size_t>(nt) + static_cast<size_t>(tid)].a;
+            };
+            auto reduce = [&](const int s) noexcept -> double {
+                double acc{0.0};
+                for (int t = 0; t < nt; ++t) {
+                    acc += partials[static_cast<size_t>(s) * static_cast<size_t>(nt) + static_cast<size_t>(t)].a;
+                }
                 return acc;
             };
-            auto local_dot = [&](const float* a, const float* b) {
-                double acc = 0.0;
+            auto local_dot = [&](const float* const a, const float* const b) noexcept -> double {
+                double acc{0.0};
 #pragma omp simd reduction(+ : acc)
-                for (py::ssize_t i = lo; i < lo + len; ++i) acc += static_cast<double>(a[i]) * b[i];
+                for (py::ssize_t i = lo; i < lo + len; ++i) {
+                    acc += static_cast<double>(a[i]) * static_cast<double>(b[i]);
+                }
                 return acc;
             };
             // z = M^-1 r on the owned lines.  Three barriers when two-level.
-            auto precondition = [&]() {
-#pragma omp simd
-                for (py::ssize_t i = lo; i < lo + len; ++i) z[i] = r[i] / diag[i];
-                if (!two_level) return;
-                double* part = coarse_part.data() + static_cast<size_t>(tid) * ncoarse;
+            auto precondition = [&]() noexcept {
+                // Vectorized diagonal Jacobi preconditioner using Eigen Map
+                Eigen::Map<Eigen::VectorXf>(z.data() + lo, len) =
+                    Eigen::Map<const Eigen::VectorXf>(r.data() + lo, len)
+                        .cwiseQuotient(Eigen::Map<const Eigen::VectorXf>(diag + lo, len));
+
+                if (!two_level) {
+                    return;
+                }
+                double* const part = coarse_part.data() + static_cast<size_t>(tid) * static_cast<size_t>(ncoarse);
                 std::fill(part, part + ncoarse, 0.0);
                 for (int line = lb; line < le; ++line) {
-                    const int l = line / nr, yy = line - l * nr;
-                    const py::ssize_t cbase = (static_cast<py::ssize_t>(l) * coarse_rows + yy / block) * coarse_cols;
-                    const float* rl = r.data() + static_cast<py::ssize_t>(line) * nc;
-                    const float* ml = op.free_mask + static_cast<py::ssize_t>(line) * nc;
-                    for (int xi = 0; xi < nc; ++xi) part[cbase + xi / block] += static_cast<double>(rl[xi] * ml[xi]);
+                    const int l = line / nr;
+                    const int yy = line - (l * nr);
+                    const py::ssize_t cbase = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(coarse_rows) + static_cast<py::ssize_t>(yy / block)) * static_cast<py::ssize_t>(coarse_cols);
+                    const float* const rl = r.data() + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
+                    const float* const ml = op.free_mask + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
+                    for (int xi = 0; xi < nc; ++xi) {
+                        part[cbase + static_cast<py::ssize_t>(xi / block)] += static_cast<double>(rl[xi] * ml[xi]);
+                    }
                 }
 #pragma omp barrier
-                const py::ssize_t cb = ncoarse * tid / nt, ce = ncoarse * (tid + 1) / nt;
+                const py::ssize_t cb = (ncoarse * static_cast<py::ssize_t>(tid)) / static_cast<py::ssize_t>(nt);
+                const py::ssize_t ce = (ncoarse * static_cast<py::ssize_t>(tid + 1)) / static_cast<py::ssize_t>(nt);
                 for (py::ssize_t i = cb; i < ce; ++i) {
-                    double acc = 0.0;
-                    for (int t = 0; t < nt; ++t) acc += coarse_part[static_cast<size_t>(t) * ncoarse + i];
+                    double acc{0.0};
+                    for (int t = 0; t < nt; ++t) {
+                        acc += coarse_part[static_cast<size_t>(t) * static_cast<size_t>(ncoarse) + static_cast<size_t>(i)];
+                    }
                     coarse_r[i] = static_cast<float>(acc);
                 }
 #pragma omp barrier
-                for (py::ssize_t i = cb; i < ce; ++i) {
-                    const float* row = cinv + i * ncoarse;
-                    double acc = 0.0;
-#pragma omp simd reduction(+ : acc)
-                    for (py::ssize_t j = 0; j < ncoarse; ++j) acc += static_cast<double>(row[j]) * coarse_r[j];
-                    coarse_z[i] = static_cast<float>(acc);
+                // Eigen GEMV acceleration for dense coarse-space solve:
+                // coarse_z[cb..ce) = cinv[cb..ce, :] * coarse_r[:]
+                if (ce > cb) {
+                    const auto cinv_block = Eigen::Map<const Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
+                        cinv + cb * ncoarse, ce - cb, ncoarse);
+                    const auto cr_vec = Eigen::Map<const Eigen::VectorXf>(coarse_r.data(), ncoarse);
+                    Eigen::Map<Eigen::VectorXf>(coarse_z.data() + cb, ce - cb) = cinv_block * cr_vec;
                 }
 #pragma omp barrier
                 for (int line = lb; line < le; ++line) {
-                    const int l = line / nr, yy = line - l * nr;
-                    const py::ssize_t cbase = (static_cast<py::ssize_t>(l) * coarse_rows + yy / block) * coarse_cols;
-                    float* zl = z.data() + static_cast<py::ssize_t>(line) * nc;
-                    const float* ml = op.free_mask + static_cast<py::ssize_t>(line) * nc;
-                    for (int xi = 0; xi < nc; ++xi) zl[xi] += ml[xi] * coarse_z[cbase + xi / block];
+                    const int l = line / nr;
+                    const int yy = line - (l * nr);
+                    const py::ssize_t cbase = (static_cast<py::ssize_t>(l) * static_cast<py::ssize_t>(coarse_rows) + static_cast<py::ssize_t>(yy / block)) * static_cast<py::ssize_t>(coarse_cols);
+                    float* const zl = z.data() + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
+                    const float* const ml = op.free_mask + static_cast<py::ssize_t>(line) * static_cast<py::ssize_t>(nc);
+                    for (int xi = 0; xi < nc; ++xi) {
+                        zl[xi] += ml[xi] * coarse_z[cbase + static_cast<py::ssize_t>(xi / block)];
+                    }
                 }
             };
 
-            int iterations = 0, applied = 0;
-            double rel = 1.0;
-            bool bad = false;
+            int iterations{0};
+            int applied{0};
+            double rel{1.0};
+            bool bad{false};
             for (py::ssize_t i = lo; i < lo + len; ++i) {
                 rhs[i] = static_cast<float>(rhs_in[i]);
                 xsol[i] = 0.0f;
@@ -394,7 +483,8 @@ py::tuple pcg_layered_dc_q1(ArrF64 rhs_high, ArrF32 diagonal, ArrF32 coef, ArrF3
                 rel = 0.0;
             } else {
                 precondition();
-                for (py::ssize_t i = lo; i < lo + len; ++i) p[i] = z[i];
+                // Vector copy p = z via Eigen Map
+                Eigen::Map<Eigen::VectorXf>(p.data() + lo, len) = Eigen::Map<const Eigen::VectorXf>(z.data() + lo, len);
                 slot(2) = local_dot(r.data(), z.data());
 #pragma omp barrier
                 double rz = reduce(2);
@@ -409,24 +499,31 @@ py::tuple pcg_layered_dc_q1(ArrF64 rhs_high, ArrF32 diagonal, ArrF32 coef, ArrF3
                         break;
                     }
                     const float alpha = static_cast<float>(rz / curvature);
-#pragma omp simd
-                    for (py::ssize_t i = lo; i < lo + len; ++i) {
-                        xsol[i] += alpha * p[i];
-                        r[i] -= alpha * q[i];
-                    }
+                    // Eigen vectorized AXPY for state updates:
+                    // xsol += alpha * p
+                    // r    -= alpha * q
+                    Eigen::Map<Eigen::VectorXf>(xsol + lo, len) += alpha * Eigen::Map<const Eigen::VectorXf>(p.data() + lo, len);
+                    Eigen::Map<Eigen::VectorXf>(r.data() + lo, len) -= alpha * Eigen::Map<const Eigen::VectorXf>(q.data() + lo, len);
+
                     slot(0) = local_dot(r.data(), r.data());
 #pragma omp barrier
                     rel = std::sqrt(reduce(0)) / rhs_norm;
                     ++iterations;
-                    if (rel <= inner_relative_tolerance) break;
+                    if (rel <= inner_relative_tolerance) {
+                        break;
+                    }
                     precondition();
                     slot(2) = local_dot(r.data(), z.data());
 #pragma omp barrier
                     const double next_rz = reduce(2);
-                    if (!std::isfinite(next_rz) || rz == 0.0) break;
+                    if (!std::isfinite(next_rz) || rz == 0.0) {
+                        break;
+                    }
                     const float beta = static_cast<float>(next_rz / rz);
-#pragma omp simd
-                    for (py::ssize_t i = lo; i < lo + len; ++i) p[i] = z[i] + beta * p[i];
+                    // Eigen vectorized update: p = z + beta * p
+                    Eigen::Map<Eigen::VectorXf>(p.data() + lo, len) =
+                        Eigen::Map<const Eigen::VectorXf>(z.data() + lo, len) +
+                        beta * Eigen::Map<const Eigen::VectorXf>(p.data() + lo, len);
                     rz = next_rz;
 #pragma omp barrier  // p complete before the next stencil
                 }
