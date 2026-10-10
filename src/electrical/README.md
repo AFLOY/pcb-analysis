@@ -140,7 +140,7 @@ print(f"FEM: drop {np.nanmax(dc.potential_v) - np.nanmin(dc.potential_v):.3e} V,
   [docs/MATRIX_FREE_MPIR_FEM.md](../../docs/MATRIX_FREE_MPIR_FEM.md)
 - 3D voxel PEEC (PyPEEC) for conductors too thick for a sheet:
   [docs/VOXEL_PEEC.md](../../docs/VOXEL_PEEC.md)
-- DICE delta scoring for ranking candidate edits: [docs/DESIGN.md](../../docs/DESIGN.md)
+- Package layout and the C++ core: [docs/DESIGN.md](../../docs/DESIGN.md)
 - Requirements the solvers are held to: [docs/REQUIREMENTS.md](../../docs/REQUIREMENTS.md)
 
 Other packages: [thermal](../thermal/README.md) ·

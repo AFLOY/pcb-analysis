@@ -14,8 +14,8 @@ The frequency-domain equation retains displacement current and wave
 propagation. Conductivity produces eddy currents and skin effect; complex
 permittivity produces dielectric loss. It is an exact Maxwell reduction for
 geometry and material fields invariant in `z`, not an arbitrary 3D vector
-Maxwell solver. DICE-PEEC remains the applicable path for the existing
-magneto-quasistatic PCB conductor model.
+Maxwell solver. The sheet PEEC (`electrical.sheet_peec`) remains the
+applicable path for the magneto-quasistatic PCB conductor model.
 
 ## Why MPIR
 

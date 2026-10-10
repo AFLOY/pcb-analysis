@@ -1,4 +1,4 @@
-"""A physical DICE-PEEC solve on a layered sheet mesh.
+"""A physical PEEC solve on a layered sheet mesh.
 
 This is the circuit half of the sheet formulation: :mod:`sheet_operator`
 supplies the inductance, and this supplies the conductor, the sources, and the
