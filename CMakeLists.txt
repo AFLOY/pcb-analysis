@@ -56,6 +56,9 @@ function(pcb_native_module name package_dir)
       "-march=${PCB_NATIVE_MARCH}" -mprefer-vector-width=512)
   endif()
   target_link_libraries(${name} PRIVATE Eigen3::Eigen)
+  # Eigen would otherwise run its products on an OpenMP team of its own size,
+  # outside the thread budget; MPL2_ONLY keeps the LGPL parts out.
+  target_compile_definitions(${name} PRIVATE EIGEN_DONT_PARALLELIZE EIGEN_MPL2_ONLY)
   if(PCB_NATIVE_OPENMP)
     target_link_libraries(${name} PRIVATE OpenMP::OpenMP_CXX)
   endif()

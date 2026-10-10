@@ -86,7 +86,6 @@ py::array_t<double> winding_numbers(const ArrF64& points, const ArrF64& triangle
     {
         py::gil_scoped_release release;
 #ifdef _OPENMP
-        omp_set_dynamic(0);
 #pragma omp parallel for schedule(static) num_threads(threads > 0 ? threads : 1)
 #endif
         for (py::ssize_t i = 0; i < count; ++i) {
@@ -122,7 +121,6 @@ py::array_t<bool> contains(const ArrF64& points, const ArrF64& triangles, double
     {
         py::gil_scoped_release release;
 #ifdef _OPENMP
-        omp_set_dynamic(0);
 #pragma omp parallel for schedule(dynamic, 256) num_threads(threads > 0 ? threads : 1)
 #endif
         for (py::ssize_t i = 0; i < count; ++i) {

@@ -47,6 +47,8 @@ def compile_extension(
         "-fPIC",
         "-fvisibility=hidden",
         "-DNDEBUG",
+        "-DEIGEN_DONT_PARALLELIZE",
+        "-DEIGEN_MPL2_ONLY",
         f"-I{pybind11.get_include()}",
         f"-I{sysconfig.get_paths()['include']}",
         *eigen_includes,

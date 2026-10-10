@@ -65,11 +65,11 @@ using ArrI32 = py::array_t<std::int32_t, py::array::c_style | py::array::forceca
 
     {
         py::gil_scoped_release release;
+        // The team is named on the region: omp_set_num_threads would change the
+        // calling thread's default for every later region, ours or not.
+        const int team = (threads > 0) ? threads : 1;
 #ifdef _OPENMP
-        if (threads > 0) {
-            omp_set_num_threads(threads);
-        }
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for schedule(static) num_threads(team) if (team > 1)
 #endif
         for (py::ssize_t p = 0; p < count; ++p) {
             const std::int64_t i = pi[p];
