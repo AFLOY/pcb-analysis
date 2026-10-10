@@ -180,7 +180,7 @@ class NativeScalarMaxwellQ1:
         rhs_high: np.ndarray,
         config: Any,
         initial_guess: np.ndarray | None = None,
-    ) -> tuple[np.ndarray, bool, int, int, float, int, int]:
+    ) -> tuple[np.ndarray, bool, int, int, float, int, int, list[tuple[int, float, int, float]]]:
         rhs_high = np.ascontiguousarray(rhs_high, dtype=np.complex128).reshape(-1)
         if rhs_high.size != self.size:
             raise ValueError(f"rhs has size {rhs_high.size}, expected {self.size}")
@@ -189,7 +189,7 @@ class NativeScalarMaxwellQ1:
             if initial_guess is not None
             else np.zeros(0, dtype=np.complex128)
         )
-        sol, conv, outer, inner, rel, n_high, n_low = _native.solve_mpir_scalar_maxwell_q1(
+        sol, conv, outer, inner, rel, n_high, n_low, history = _native.solve_mpir_scalar_maxwell_q1(
             rhs_high,
             init_guess,
             self._diagonal,
@@ -224,5 +224,6 @@ class NativeScalarMaxwellQ1:
             float(rel),
             int(n_high),
             int(n_low),
+            [(int(o), float(h), int(k), float(r)) for o, h, k, r in history],
         )
 

@@ -546,7 +546,7 @@ def solve_mpir(
     if native_solve is not None:
         native_result = native_solve(rhs_high, config, initial_guess)
         if native_result is not None:
-            sol, conv, outer, inner, rel, n_high, n_low = native_result
+            sol, conv, outer, inner, rel, n_high, n_low, steps = native_result
             return MPIRResult(
                 solution=np.asarray(sol, dtype=high_dtype),
                 converged=bool(conv),
@@ -556,7 +556,15 @@ def solve_mpir(
                 high_operator_applications=int(n_high),
                 low_operator_applications=int(n_low),
                 low_runtime=system.runtime.name,
-                history=(),
+                history=tuple(
+                    MPIRStep(
+                        outer_iteration=step,
+                        high_relative_residual=high,
+                        inner_iterations=count,
+                        inner_relative_residual=inner_relative,
+                    )
+                    for step, high, count, inner_relative in steps
+                ),
             )
 
     rhs_norm = float(np.linalg.norm(rhs_high))

@@ -92,12 +92,12 @@ class AggregationCoarseCorrection:
         if diagonal.size != free.size:
             raise ValueError("diagonal_high must hold one value per node")
 
-        native_assembler = getattr(native_operator, "assemble_coarse_inverse", None)
+        native_assembler = getattr(native_operator, "assemble_coarse", None)
         if native_assembler is not None:
-            self._coarse_inverse_high = np.asarray(
-                native_assembler(self.block), dtype=np.float64
-            ).reshape(self.coarse_size, self.coarse_size)
-            self.coarse_matrix = None
+            matrix, inverse = native_assembler(self.block)
+            shape = (self.coarse_size, self.coarse_size)
+            self.coarse_matrix = np.asarray(matrix, dtype=np.float64).reshape(shape)
+            self._coarse_inverse_high = np.asarray(inverse, dtype=np.float64).reshape(shape)
         else:
             coarse_matrix = self._assemble_coarse(apply_high, free)
             counts = self._restrict(free.astype(np.float64), np)

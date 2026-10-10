@@ -12,6 +12,7 @@
 
 #include <pybind11/complex.h>
 #include <pybind11/numpy.h>
+#include <pybind11/stl.h>
 #include <pybind11/pybind11.h>
 
 #include <Eigen/Core>
@@ -25,6 +26,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #ifdef _OPENMP
@@ -694,6 +696,9 @@ py::tuple solve_mpir_scalar_maxwell_q1(
 
     int outer_iterations{0};
     int total_inner_iterations{0};
+    // One (outer step, FP64 relative residual before it, inner iterations,
+    // inner relative residual) per correction, as the Python loop records.
+    std::vector<std::tuple<int, double, int, double>> history;
     int total_high_apps{0};
     int total_low_apps{0};
     double relative_residual{1.0};
@@ -748,6 +753,7 @@ py::tuple solve_mpir_scalar_maxwell_q1(
 
             total_inner_iterations += inner_iters;
             total_low_apps += inner_apps;
+            history.emplace_back(outer + 1, relative_residual, inner_iters, inner_rel);
 
             for (py::ssize_t i = 0; i < n; ++i) {
                 sol[i] += c128(static_cast<double>(correction[static_cast<size_t>(i)].real()),
@@ -758,7 +764,7 @@ py::tuple solve_mpir_scalar_maxwell_q1(
 
     return py::make_tuple(
         solution_out, converged, outer_iterations, total_inner_iterations,
-        relative_residual, total_high_apps, total_low_apps);
+        relative_residual, total_high_apps, total_low_apps, py::cast(history));
 }
 
 int default_threads() noexcept {

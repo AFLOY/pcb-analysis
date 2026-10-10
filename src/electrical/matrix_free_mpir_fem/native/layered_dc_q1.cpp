@@ -21,6 +21,7 @@
 // implementation details hidden within an anonymous namespace.
 
 #include <pybind11/numpy.h>
+#include <pybind11/stl.h>
 #include <pybind11/pybind11.h>
 
 #include <Eigen/Cholesky>
@@ -34,6 +35,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #ifdef _OPENMP
@@ -259,6 +261,22 @@ struct alignas(64) Partial final {
     double a{0.0};
     double pad[7]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 };
+
+// The whole action on the operator's team, for callers already outside the
+// GIL (the coarse assembly and the outer MPIR residual).  Lines are split as
+// in apply_impl, so the result does not depend on the team size.
+template <typename T>
+void apply_parallel(const LayeredOperatorT<T>& op, const T* const x, T* const y) noexcept {
+    const int lines = op.lines();
+    const int team = std::max(1, std::min(op.threads, lines));
+#pragma omp parallel num_threads(team) if (team > 1)
+    {
+        int b{0};
+        int e{lines};
+        LayeredOperatorT<T>::thread_lines(lines, b, e);
+        op.apply_lines(x, y, b, e);
+    }
+}
 
 template <typename T>
 [[nodiscard]] Arr<T> apply_impl(const LayeredOperatorT<T>& op, const Arr<T>& vector, const bool flush_subnormals) {
@@ -537,7 +555,7 @@ py::tuple pcg_layered_dc_q1(ArrF64 rhs_high, ArrF32 diagonal, ArrF32 coef, ArrF3
 
 // Full C++ Two-Level Coarse Matrix Assembly & Inversion using Eigen Cholesky (LLT).
 // Assembles Z^T A Z with 27 coloured FP64 applications and inverts it with Eigen.
-ArrF64 assemble_coarse_inverse_dc(
+py::tuple assemble_coarse_dc(
     ArrF64 coef, ArrF64 unit, ArrU8 free_nodes, ArrF64 free_mask,
     ArrI64 via_ptr, ArrI64 via_nbr, ArrF64 via_g,
     int layers, int rows, int cols, int block, int threads) {
@@ -603,7 +621,7 @@ ArrF64 assemble_coarse_inverse_dc(
                 continue;
             }
 
-            op.apply_lines(fine.data(), action.data(), 0, op.lines());
+            apply_parallel(op, fine.data(), action.data());
 
             std::fill(restricted.begin(), restricted.end(), 0.0);
             for (int l = 0; l < layers; ++l) {
@@ -665,10 +683,13 @@ ArrF64 assemble_coarse_inverse_dc(
     Eigen::MatrixXd inv = llt.solve(Eigen::MatrixXd::Identity(ncoarse, ncoarse));
     inv = 0.5 * (inv + inv.transpose());
 
+    ArrF64 matrix_out(ncoarse * ncoarse);
+    Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
+        matrix_out.mutable_data(), ncoarse, ncoarse) = matrix;
     ArrF64 out(ncoarse * ncoarse);
     Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>(
         out.mutable_data(), ncoarse, ncoarse) = inv;
-    return out;
+    return py::make_tuple(matrix_out, out);
 }
 
 // Complete C++ End-to-End MPIR Solver for Layered DC Conduction.
@@ -717,6 +738,9 @@ py::tuple solve_mpir_layered_dc_q1(
 
     int outer_iterations{0};
     int total_inner_iterations{0};
+    // One (outer step, FP64 relative residual before it, inner iterations,
+    // inner relative residual) per correction, as the Python loop records.
+    std::vector<std::tuple<int, double, int, double>> history;
     int total_high_apps{0};
     int total_low_apps{0};
     double relative_residual{1.0};
@@ -734,7 +758,7 @@ py::tuple solve_mpir_layered_dc_q1(
 
         for (int outer = 0; outer <= max_outer_iterations; ++outer) {
             outer_iterations = outer;
-            op_high.apply_lines(sol, Ax.data(), 0, op_high.lines());
+            apply_parallel(op_high, sol, Ax.data());
             ++total_high_apps;
 
             for (py::ssize_t i = 0; i < n; ++i) {
@@ -767,6 +791,7 @@ py::tuple solve_mpir_layered_dc_q1(
 
             total_inner_iterations += inner_iters;
             total_low_apps += inner_apps;
+            history.emplace_back(outer + 1, relative_residual, inner_iters, inner_rel);
 
             Eigen::Map<Eigen::VectorXd>(sol, n) +=
                 Eigen::Map<const Eigen::VectorXf>(correction.data(), n).cast<double>();
@@ -775,7 +800,7 @@ py::tuple solve_mpir_layered_dc_q1(
 
     return py::make_tuple(
         solution_out, converged, outer_iterations, total_inner_iterations,
-        relative_residual, total_high_apps, total_low_apps);
+        relative_residual, total_high_apps, total_low_apps, py::cast(history));
 }
 
 PYBIND11_MODULE(_layered_dc_native, m) {
@@ -791,7 +816,7 @@ PYBIND11_MODULE(_layered_dc_native, m) {
           py::arg("via_g"), py::arg("layers"), py::arg("rows"), py::arg("cols"), py::arg("block"),
           py::arg("coarse_inverse"), py::arg("inner_relative_tolerance"), py::arg("max_inner_iterations"),
           py::arg("threads") = 1);
-    m.def("assemble_coarse_inverse_dc", &assemble_coarse_inverse_dc,
+    m.def("assemble_coarse_dc", &assemble_coarse_dc,
           py::arg("coefficients"), py::arg("unit"), py::arg("free_nodes"), py::arg("free_mask"),
           py::arg("via_ptr"), py::arg("via_nbr"), py::arg("via_g"),
           py::arg("layers"), py::arg("rows"), py::arg("cols"), py::arg("block"), py::arg("threads") = 1);
