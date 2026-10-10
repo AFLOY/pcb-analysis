@@ -37,7 +37,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 import numpy as np
 
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
-from electrical import _backend
+from electrical import backend as _backend
 from electrical.threads import serial_blas, thread_budget
 import scipy.sparse as sp
 import scipy.sparse.csgraph as csgraph

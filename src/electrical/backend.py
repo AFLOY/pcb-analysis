@@ -27,6 +27,13 @@ def native_available() -> bool:
     return _core is not None
 
 
+def native_core() -> ModuleType | None:
+    """The built extension whatever :func:`use_reference` says, for kernels
+    that keep their own ``native`` switch (dipole sums, point-in-solid tests)."""
+
+    return _core
+
+
 def core() -> ModuleType | None:
     """The C++ core when it should answer, else ``None`` (use the reference)."""
 

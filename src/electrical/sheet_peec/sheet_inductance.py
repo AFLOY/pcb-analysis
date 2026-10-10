@@ -44,7 +44,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from electrical import _backend
+from electrical import backend as _backend
 from electrical.threads import thread_budget
 
 VACUUM_PERMEABILITY = 4.0e-7 * math.pi

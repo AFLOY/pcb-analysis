@@ -35,7 +35,7 @@ from typing import Any, Sequence
 import numpy as np
 import scipy.sparse as sp
 
-from electrical import _backend
+from electrical import backend as _backend
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
 from electrical.threads import thread_budget
 

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from electrical import _backend
+from electrical import backend as _backend
 
 from .fields import FREE_SPACE_IMPEDANCE_OHM, CurrentDipoles, wavenumber_per_m
 

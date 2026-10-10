@@ -15,7 +15,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from electrical import _backend
+from electrical import backend as _backend
 from thermal.matrix_free_mpir_fem import HeatSource, LayeredThermalMesh, ThermalConductionProblem
 from thermal.matrix_free_mpir_fem.mesh import _flat_index
 from thermal.matrix_free_mpir_fem.native_system import native_problem, solve_options

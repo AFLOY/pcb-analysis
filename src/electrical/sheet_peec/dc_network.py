@@ -31,7 +31,7 @@ from dataclasses import dataclass
 import numpy as np
 import scipy.sparse as sp
 
-from .. import _backend
+from .. import backend as _backend
 from . import _dc_network_reference as _reference
 
 

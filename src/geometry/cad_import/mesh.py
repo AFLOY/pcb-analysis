@@ -19,10 +19,9 @@ import numpy as np
 
 from electrical.threads import thread_budget
 
-try:  # pragma: no cover - depends on the local build
-    from electrical._pcbcore import voxelize as _native
-except ImportError:  # pragma: no cover
-    _native = None
+from electrical import backend
+
+_native = getattr(backend.native_core(), "voxelize", None)
 
 
 ClassifyMethod = Literal["auto", "occ", "numpy", "native", "section"]

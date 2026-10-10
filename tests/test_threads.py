@@ -185,7 +185,7 @@ def test_the_sheet_solve_runs_its_krylov_iterations_on_serial_blas(monkeypatch) 
     ]
     # The NumPy reference is the path that calls SciPy's GMRES (and BLAS);
     # the C++ core runs no BLAS at all.
-    from electrical import _backend
+    from electrical import backend as _backend
 
     with _backend.use_reference():
         sheet_peec.solve_sheet_case(mesh, operator, terminals, frequency_hz=1e6)
