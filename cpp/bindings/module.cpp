@@ -28,6 +28,14 @@
 
 namespace py = pybind11;
 
+// The kernels that were modules of their own (see CMakeLists.txt).
+namespace pcb_layered_dc { void register_module(py::module_& m); }
+namespace pcb_scalar_maxwell { void register_module(py::module_& m); }
+namespace pcb_thermal_hex { void register_module(py::module_& m); }
+namespace pcb_dipole { void register_module(py::module_& m); }
+namespace pcb_voxelize { void register_module(py::module_& m); }
+namespace pcb_sheet_pfft_near { void register_module(py::module_& m); }
+
 namespace {
 
 template <typename T>
@@ -481,6 +489,31 @@ PYBIND11_MODULE(_pcbcore, m) {
             PyErr_SetString(PyExc_FloatingPointError, error.what());
         }
     });
+
+    {
+        py::module_ sub = m.def_submodule("layered_dc", "Layered-PCB DC Q1 operator and MPIR");
+        pcb_layered_dc::register_module(sub);
+    }
+    {
+        py::module_ sub = m.def_submodule("scalar_maxwell", "Scalar Maxwell Q1 operator and MPIR");
+        pcb_scalar_maxwell::register_module(sub);
+    }
+    {
+        py::module_ sub = m.def_submodule("thermal_hex", "Hexahedral Q1 conduction operator and MPIR");
+        pcb_thermal_hex::register_module(sub);
+    }
+    {
+        py::module_ sub = m.def_submodule("dipole", "Hertzian dipole field sums");
+        pcb_dipole::register_module(sub);
+    }
+    {
+        py::module_ sub = m.def_submodule("voxelize", "Point-in-mesh and section rasterisation");
+        pcb_voxelize::register_module(sub);
+    }
+    {
+        py::module_ sub = m.def_submodule("sheet_pfft_near", "pFFT near-field grid coupling");
+        pcb_sheet_pfft_near::register_module(sub);
+    }
 
     py::module_ network = m.def_submodule("network", "Conductance networks: the zero-frequency sheet mesh");
     network.def("solve_conductance_network", &solve_conductance_network, py::arg("node_count"), py::arg("left"),

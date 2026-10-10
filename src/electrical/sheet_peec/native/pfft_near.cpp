@@ -28,6 +28,10 @@
 
 namespace py = pybind11;
 
+// Registered as electrical._pcbcore.sheet_pfft_near; built on its own as _sheet_pfft_native
+// when PCB_STANDALONE_MODULE is defined (native/build.py).
+namespace pcb_sheet_pfft_near {
+
 namespace {
 
 using ArrF64 = py::array_t<double, py::array::c_style | py::array::forcecast>;
@@ -112,8 +116,14 @@ using ArrI32 = py::array_t<std::int32_t, py::array::c_style | py::array::forceca
 
 }  // namespace
 
-PYBIND11_MODULE(_sheet_pfft_native, m) {
+void register_module(py::module_& m) {
     m.doc() = "Near-field grid coupling of the precorrected-FFT sheet inductance operator";
     m.def("grid_pair_coupling", &grid_pair_coupling, py::arg("indptr"), py::arg("indices"), py::arg("data"),
           py::arg("nodes_x"), py::arg("table"), py::arg("pair_i"), py::arg("pair_j"), py::arg("threads") = 0);
 }
+
+}  // namespace pcb_sheet_pfft_near
+
+#ifdef PCB_STANDALONE_MODULE
+PYBIND11_MODULE(_sheet_pfft_native, m) { pcb_sheet_pfft_near::register_module(m); }
+#endif

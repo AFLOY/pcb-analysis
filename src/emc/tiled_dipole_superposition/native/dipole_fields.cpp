@@ -19,6 +19,10 @@
 
 namespace py = pybind11;
 
+// Registered as electrical._pcbcore.dipole; built on its own as _dipole_native
+// when PCB_STANDALONE_MODULE is defined (native/build.py).
+namespace pcb_dipole {
+
 namespace {
 
 using c128 = std::complex<double>;
@@ -235,7 +239,7 @@ ArrC128 far_field_pattern_impl(
 
 }  // namespace
 
-PYBIND11_MODULE(_dipole_native, m) {
+void register_module(py::module_& m) {
     m.doc() = "Direct Hertzian-dipole superposition on the host with MISRA-C++ compliance";
     m.def(
         "evaluate_fields",
@@ -263,3 +267,9 @@ PYBIND11_MODULE(_dipole_native, m) {
         false;
 #endif
 }
+
+}  // namespace pcb_dipole
+
+#ifdef PCB_STANDALONE_MODULE
+PYBIND11_MODULE(_dipole_native, m) { pcb_dipole::register_module(m); }
+#endif

@@ -138,7 +138,7 @@ is adequate for the magnetic near field on a GPU without fast FP64.
 The tiled array path materialises `(tile × sources × 3)` complex temporaries
 about thirty times per tile, so it is memory bound.  `native=True` on
 `evaluate_fields` and `far_field_pattern` (the default whenever
-`_dipole_native` is built; `native=False` keeps the array path) sums the pairs point
+`electrical._pcbcore.dipole` is built; `native=False` keeps the array path) sums the pairs point
 by point in C++ with the same complex128 formulas; OpenMP threads own disjoint
 observation points (as many as the process-wide thread budget,
 `electrical.set_thread_budget`; until 0.9.3 `native_threads=` or

@@ -17,9 +17,12 @@ import numpy as np
 from ..threads import thread_budget
 
 try:  # pragma: no cover - depends on the local build
-    from . import _layered_dc_native as _native
+    from electrical._pcbcore import layered_dc as _native
 except ImportError:  # pragma: no cover
-    _native = None
+    try:  # a module built on its own by native/build.py
+        from . import _layered_dc_native as _native
+    except ImportError:
+        _native = None
 
 
 NATIVE_KERNEL_NAME = "cpp-fused-node-gather-layered-dc-q1"

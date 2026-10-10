@@ -55,6 +55,7 @@ def compile_extension(
         "-fPIC",
         "-fvisibility=hidden",
         "-DNDEBUG",
+        "-DPCB_STANDALONE_MODULE",
         "-DEIGEN_DONT_PARALLELIZE",
         "-DEIGEN_MPL2_ONLY",
         f"-I{pybind11.get_include()}",

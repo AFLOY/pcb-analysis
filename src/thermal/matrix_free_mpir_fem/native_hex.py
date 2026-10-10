@@ -14,9 +14,12 @@ import numpy as np
 from electrical.threads import thread_budget
 
 try:  # pragma: no cover - depends on the local build
-    from . import _thermal_native as _native
+    from electrical._pcbcore import thermal_hex as _native
 except ImportError:  # pragma: no cover
-    _native = None
+    try:  # a module built on its own by native/build.py
+        from . import _thermal_native as _native
+    except ImportError:
+        _native = None
 
 
 NATIVE_KERNEL_NAME = "cpp-fused-node-gather-hex-q1"

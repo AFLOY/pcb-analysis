@@ -44,9 +44,12 @@ from .sheet_operator import SheetStackup
 from .sheet_peec import SheetMesh
 
 try:  # pragma: no cover - depends on the local build
-    from . import _sheet_pfft_native as _native
+    from electrical._pcbcore import sheet_pfft_near as _native
 except ImportError:  # pragma: no cover
-    _native = None
+    try:  # a module built on its own by native/build.py
+        from . import _sheet_pfft_native as _native
+    except ImportError:
+        _native = None
 
 
 def native_available() -> bool:

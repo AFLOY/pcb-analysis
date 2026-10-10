@@ -124,7 +124,7 @@ voxelisation and remain available for layers (`"occ"`, `"numpy"`, `"native"`):
   signed solid angles of the triangles over `4π`, is 1 inside and 0 outside.
   Unlike ray parity it has no degenerate ray/edge cases. `numpy` evaluates
   it in chunks; `native` is the same sum in C++ (`native/point_in_mesh.cpp`,
-  OpenMP over points, module `_voxelize_native`), built by the root
+  OpenMP over points, `electrical._pcbcore.voxelize`), built by the root
   `CMakeLists.txt` with the other kernels. Its OpenMP team is the
   process-wide thread budget (`electrical.set_thread_budget`); `contains` and
   `winding_numbers` take no thread argument (until 0.9.3 `threads=` or
