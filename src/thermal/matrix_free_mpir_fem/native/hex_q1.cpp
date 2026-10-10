@@ -386,9 +386,9 @@ void pcg_hex_q1_core(
             return pcbcore::ordered_sum(lines, [part](const std::ptrdiff_t line) { return part[line]; });
         };
         auto precondition = [&]() noexcept {
-            Eigen::Map<Eigen::VectorXf>(z.data() + lo, len) =
-                Eigen::Map<const Eigen::VectorXf>(r.data() + lo, len)
-                    .cwiseQuotient(Eigen::Map<const Eigen::VectorXf>(diag + lo, len));
+            for (py::ssize_t i = lo; i < lo + len; ++i) {
+                z[static_cast<size_t>(i)] = r[static_cast<size_t>(i)] / diag[i];
+            }
 
             if (!two_level) {
                 return;
@@ -447,7 +447,7 @@ void pcg_hex_q1_core(
             rel = 0.0;
         } else {
             precondition();
-            Eigen::Map<Eigen::VectorXf>(p.data() + lo, len) = Eigen::Map<const Eigen::VectorXf>(z.data() + lo, len);
+            std::copy(z.begin() + lo, z.begin() + lo + len, p.begin() + lo);
             store(2, r.data(), z.data());
 #pragma omp barrier
             double rz = reduce(2);
@@ -462,8 +462,10 @@ void pcg_hex_q1_core(
                     break;
                 }
                 const float alpha = static_cast<float>(rz / curvature);
-                Eigen::Map<Eigen::VectorXf>(xsol + lo, len) += alpha * Eigen::Map<const Eigen::VectorXf>(p.data() + lo, len);
-                Eigen::Map<Eigen::VectorXf>(r.data() + lo, len) -= alpha * Eigen::Map<const Eigen::VectorXf>(q.data() + lo, len);
+                for (py::ssize_t i = lo; i < lo + len; ++i) {
+                    xsol[i] += alpha * p[static_cast<size_t>(i)];
+                    r[static_cast<size_t>(i)] -= alpha * q[static_cast<size_t>(i)];
+                }
 
                 store(0, r.data(), r.data());
 #pragma omp barrier
@@ -480,9 +482,9 @@ void pcg_hex_q1_core(
                     break;
                 }
                 const float beta = static_cast<float>(next_rz / rz);
-                Eigen::Map<Eigen::VectorXf>(p.data() + lo, len) =
-                    Eigen::Map<const Eigen::VectorXf>(z.data() + lo, len) +
-                    beta * Eigen::Map<const Eigen::VectorXf>(p.data() + lo, len);
+                for (py::ssize_t i = lo; i < lo + len; ++i) {
+                    p[static_cast<size_t>(i)] = z[static_cast<size_t>(i)] + beta * p[static_cast<size_t>(i)];
+                }
                 rz = next_rz;
 #pragma omp barrier
             }

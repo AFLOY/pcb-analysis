@@ -108,13 +108,10 @@ add_library(pcbcore_kernels STATIC
   src/emc/tiled_dipole_superposition/native/dipole_fields.cpp
   src/geometry/cad_import/native/point_in_mesh.cpp
   src/electrical/sheet_peec/native/pfft_near.cpp)
-target_compile_options(pcbcore_kernels PRIVATE ${PCB_OPT_FLAGS} ${PCB_ARCH_FLAGS} ${PCB_WIDE_VECTOR_FLAGS})
-# GCC turns contraction off in the two gather functions only
-# (PCBCORE_NO_FP_CONTRACT); Clang has no per-function switch, so its whole
-# kernel library is built without contraction.
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  target_compile_options(pcbcore_kernels PRIVATE ${PCB_NO_CONTRACT_FLAGS})
-endif()
+# No contraction anywhere: a loop the vectoriser splits into a vector body
+# and scalar head and tail must round the same in all three, or the bits
+# depend on where an array lands and on how a team splits it.
+target_compile_options(pcbcore_kernels PRIVATE ${PCB_OPT_FLAGS} ${PCB_NO_CONTRACT_FLAGS} ${PCB_ARCH_FLAGS} ${PCB_WIDE_VECTOR_FLAGS})
 target_compile_definitions(pcbcore_kernels PRIVATE EIGEN_DONT_PARALLELIZE EIGEN_MPL2_ONLY)
 target_include_directories(pcbcore_kernels PRIVATE cpp/include)
 target_link_libraries(pcbcore_kernels PRIVATE Eigen3::Eigen pybind11::module)
