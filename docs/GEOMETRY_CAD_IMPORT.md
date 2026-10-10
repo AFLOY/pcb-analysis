@@ -345,9 +345,9 @@ faces, and rasterises them onto the routing grid:
   supersampled inside fraction on the point paths (`n = 3` by default); it
   is also kept as a float array for the thermal conductivity blend.
 - Vias are solids whose section is a disc on two or more consecutive layer
-  planes with the same centre; they become `ViaSpec` entries of a `ViaSet`.
+  planes with the same centre; they become `BoardVia` entries of a `BoardVias`.
 - A plated hole is conductor on every layer its barrel spans, at the cell the
-  `ViaSpec` names, and the problem record carries the barrel rather than a
+  `BoardVia` names, and the problem record carries the barrel rather than a
   number derived from it. A mechanical export writes the plating itself: a
   tube of the order of 25 um standing in the drill and spanning the stack. At
   a plane optimizer's pitch that wall is a quarter of a cell and the bore
@@ -380,9 +380,9 @@ faces, and rasterises them onto the routing grid:
 - Terminals are named cells: either from the current-field mapping or from
   component pins the body map names.
 
-Outputs are exactly the objects `electrical.dice_peec`, `electrical.sheet_peec` and
-`thermal.matrix_free_mpir_fem` consume today: `Stackup`, occupancy `x0` of
-shape `(n_layers, ny, nx)`, `ViaSet`, and a `LayeredThermalMesh` whose slab
+Outputs are what `electrical.sheet_peec` and `thermal.matrix_free_mpir_fem`
+consume: occupancy of shape `(n_layers, ny, nx)`, `BoardVias`, the
+current-field mapping, and a `LayeredThermalMesh` whose slab
 conductivities are the copper/laminate blend by fill fraction. The electrical
 solvers are unchanged.
 
@@ -472,7 +472,7 @@ requested.
 | `geometry/cad_import/voxelize.py` | 3D sampling of bodies onto a voxel grid, fill fraction, material precedence (`VoxelSolidModel`) |
 | `geometry/cad_import/contact.py` | board/voxel contact placement (origins, contact spec) feeding `thermal.matrix_free_mpir_fem.planar_contact_map` |
 | `geometry/cad_import/conductors.py` | thick conductor solids to `VoxelConductorProblem`, terminal regions, Joule loss to the thermal grid |
-| `geometry/cad_import/adapters.py` | build `Stackup`, occupancy, `ViaSet`, the board's `LayeredThermalMesh`, body meshes and heat sources, current-field mapping |
+| `geometry/cad_import/adapters.py` | build occupancy, `BoardVias`, the board's `LayeredThermalMesh`, body meshes and heat sources, current-field mapping |
 | `thermal/matrix_free_mpir_fem/voxel.py`, `mesh.py`, `boundaries.py` | `VoxelThermalMesh`, active-element mask, exposed-face convection |
 | `thermal/matrix_free_mpir_fem/contact.py` | `ContactMap`, `planar_contact_map` |
 | `multiphysics/staggered_coupling/board_enclosure.py` | interface iteration |

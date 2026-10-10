@@ -6,8 +6,9 @@ works on arrays and dataclasses imports without it.
 
 from .adapters import (
     BoardThermalModel,
+    BoardVia,
+    BoardVias,
     board_occupancy,
-    board_stackup,
     board_thermal_mesh,
     board_barrels,
     board_vias,
@@ -68,6 +69,8 @@ __all__ = [
     "BoardRaster",
     "BoardSpec",
     "BoardThermalModel",
+    "BoardVia",
+    "BoardVias",
     "BodyMap",
     "BodySpec",
     "ContactSpec",
@@ -80,7 +83,6 @@ __all__ = [
     "ViaSpec",
     "board_body_contact",
     "board_occupancy",
-    "board_stackup",
     "board_thermal_mesh",
     "Barrel",
     "barrel_of",
