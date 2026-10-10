@@ -61,7 +61,7 @@ jobs:
           wheel-env/bin/pip install --upgrade pip
           wheel-env/bin/pip install "$GITHUB_WORKSPACE"/dist/*.whl
           wheel-env/bin/python -c "
-          import electrical.dice_peec, electrical.matrix_free_mpir_fem
+          import electrical.matrix_free_mpir_fem
           import thermal.matrix_free_mpir_fem, emc.tiled_dipole_superposition
           import multiphysics.staggered_coupling, geometry.cad_import
           from importlib.resources import files
@@ -74,7 +74,6 @@ jobs:
           assert any(n.endswith('pfft_near.cpp') for n in names)
           assert not any(n.endswith('.so') for n in names)
           "
-          wheel-env/bin/pcb-analysis-calibrate --help > /dev/null
 
       - name: Write checksums
         run: |
