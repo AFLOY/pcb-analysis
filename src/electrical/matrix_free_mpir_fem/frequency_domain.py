@@ -348,6 +348,18 @@ class MatrixFreeScalarMaxwellOperator:
             restart=config.gmres_restart,
         )
 
+    def native_solve_mpir(
+        self,
+        rhs_high: np.ndarray,
+        config: MPIRConfig,
+        initial_guess: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, bool, int, int, float, int, int] | None:
+        """End-to-end MPIR solve in C++; ``None`` when the native path is off."""
+
+        if self._native is None:
+            return None
+        return self._native.solve_mpir(rhs_high, config, initial_guess)
+
     def apply_low(self, vector: Any) -> Any:
         if self._native is not None:
             return self._native.apply(vector)

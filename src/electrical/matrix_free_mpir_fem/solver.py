@@ -542,6 +542,23 @@ def solve_mpir(
                 f"initial_guess has size {solution.size}, expected {system.size}"
             )
 
+    native_solve = getattr(system, "native_solve_mpir", None)
+    if native_solve is not None:
+        native_result = native_solve(rhs_high, config, initial_guess)
+        if native_result is not None:
+            sol, conv, outer, inner, rel, n_high, n_low = native_result
+            return MPIRResult(
+                solution=np.asarray(sol, dtype=high_dtype),
+                converged=bool(conv),
+                outer_iterations=int(outer),
+                inner_iterations=int(inner),
+                relative_residual=float(rel),
+                high_operator_applications=int(n_high),
+                low_operator_applications=int(n_low),
+                low_runtime=system.runtime.name,
+                history=(),
+            )
+
     rhs_norm = float(np.linalg.norm(rhs_high))
     scale = rhs_norm if rhs_norm > 0.0 else 1.0
     target = config.absolute_tolerance + config.relative_tolerance * scale

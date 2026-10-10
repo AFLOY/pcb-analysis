@@ -64,6 +64,7 @@ class AggregationCoarseCorrection:
         runtime: Any,
         block: int | None = None,
         max_coarse_size: int = DEFAULT_MAX_COARSE_SIZE,
+        native_operator: Any = None,
     ) -> None:
         layers, rows, cols = (int(axis) for axis in node_shape)
         self.node_shape = (layers, rows, cols)
@@ -91,25 +92,32 @@ class AggregationCoarseCorrection:
         if diagonal.size != free.size:
             raise ValueError("diagonal_high must hold one value per node")
 
-        coarse_matrix = self._assemble_coarse(apply_high, free)
-        counts = self._restrict(free.astype(np.float64), np)
-        empty = counts.reshape(-1) <= 0.0
-        # Patches made only of fixed nodes have no unknowns; give them a unit
-        # diagonal so the matrix stays SPD.  Their restricted residual is zero.
-        coarse_matrix[empty, :] = 0.0
-        coarse_matrix[:, empty] = 0.0
-        coarse_matrix[empty, empty] = 1.0
-        try:
-            factor = np.linalg.cholesky(coarse_matrix)
-        except np.linalg.LinAlgError as exc:
-            raise ValueError(
-                "the coarse operator is not positive definite; the fine operator "
-                "must be SPD for the two-level preconditioner"
-            ) from exc
-        identity = np.eye(self.coarse_size)
-        inverse = np.linalg.solve(factor.T, np.linalg.solve(factor, identity))
-        self.coarse_matrix = coarse_matrix
-        self._coarse_inverse_high = 0.5 * (inverse + inverse.T)
+        native_assembler = getattr(native_operator, "assemble_coarse_inverse", None)
+        if native_assembler is not None:
+            self._coarse_inverse_high = np.asarray(
+                native_assembler(self.block), dtype=np.float64
+            ).reshape(self.coarse_size, self.coarse_size)
+            self.coarse_matrix = None
+        else:
+            coarse_matrix = self._assemble_coarse(apply_high, free)
+            counts = self._restrict(free.astype(np.float64), np)
+            empty = counts.reshape(-1) <= 0.0
+            # Patches made only of fixed nodes have no unknowns; give them a unit
+            # diagonal so the matrix stays SPD.  Their restricted residual is zero.
+            coarse_matrix[empty, :] = 0.0
+            coarse_matrix[:, empty] = 0.0
+            coarse_matrix[empty, empty] = 1.0
+            try:
+                factor = np.linalg.cholesky(coarse_matrix)
+            except np.linalg.LinAlgError as exc:
+                raise ValueError(
+                    "the coarse operator is not positive definite; the fine operator "
+                    "must be SPD for the two-level preconditioner"
+                ) from exc
+            identity = np.eye(self.coarse_size)
+            inverse = np.linalg.solve(factor.T, np.linalg.solve(factor, identity))
+            self.coarse_matrix = coarse_matrix
+            self._coarse_inverse_high = 0.5 * (inverse + inverse.T)
 
         xp = runtime.namespace
         self._diagonal_high = diagonal

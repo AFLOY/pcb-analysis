@@ -137,6 +137,11 @@ class NativeLayeredDCQ1(_Prepared):
             if self._coarse_inverse.size != coarse * coarse:
                 raise ValueError("coarse_inverse does not match the patch grid")
 
+        self._coefficients_f64 = np.ascontiguousarray(coefficients, dtype=np.float64).reshape(-1)
+        self._unit_f64 = np.ascontiguousarray(unit, dtype=np.float64).reshape(-1)
+        self._free_mask_f64 = self._free.astype(np.float64)
+        _, _, self._via_g_f64 = via_adjacency(via_a, via_b, via_g, self.size, np.float64)
+
     def apply(self, vector: Any) -> np.ndarray:
         vector = np.ascontiguousarray(vector, dtype=np.float32).reshape(-1)
         if vector.size != self.size:
@@ -169,6 +174,40 @@ class NativeLayeredDCQ1(_Prepared):
             int(applications),
         )
 
+    def solve_mpir(
+        self,
+        rhs_high: np.ndarray,
+        config: Any,
+        initial_guess: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, bool, int, int, float, int, int]:
+        rhs_high = np.ascontiguousarray(rhs_high, dtype=np.float64).reshape(-1)
+        if rhs_high.size != self.size:
+            raise ValueError(f"rhs has size {rhs_high.size}, expected {self.size}")
+        init_guess = (
+            np.ascontiguousarray(initial_guess, dtype=np.float64).reshape(-1)
+            if initial_guess is not None
+            else np.zeros(0, dtype=np.float64)
+        )
+        sol, conv, outer, inner, rel, n_high, n_low = _native.solve_mpir_layered_dc_q1(
+            rhs_high, init_guess, self._diagonal,
+            self._coefficients, self._unit, self._free, self._free_mask,
+            self._via_ptr, self._via_nbr, self._via_g,
+            self._coefficients_f64, self._unit_f64, self._free_mask_f64, self._via_g_f64,
+            self.layers, self.rows, self.cols, self.coarse_block, self._coarse_inverse,
+            float(config.relative_tolerance), float(config.absolute_tolerance),
+            float(config.inner_relative_tolerance), int(config.max_outer_iterations),
+            int(config.max_inner_iterations), self.threads,
+        )
+        return (
+            np.asarray(sol, dtype=np.float64),
+            bool(conv),
+            int(outer),
+            int(inner),
+            float(rel),
+            int(n_high),
+            int(n_low),
+        )
+
 
 class NativeLayeredDCQ1High(_Prepared):
     """Host float64 operator for the outer MPIR residual and coarse assembly.
@@ -199,3 +238,13 @@ class NativeLayeredDCQ1High(_Prepared):
             vector, self._coefficients, self._unit, self._free, self._free_mask,
             self._via_ptr, self._via_nbr, self._via_g, self.layers, self.rows, self.cols, self.threads,
         )
+
+    def assemble_coarse_inverse(self, block: int) -> np.ndarray:
+        return np.asarray(
+            _native.assemble_coarse_inverse_dc(
+                self._coefficients, self._unit, self._free, self._free_mask,
+                self._via_ptr, self._via_nbr, self._via_g,
+                self.layers, self.rows, self.cols, int(block), self.threads,
+            )
+        )
+

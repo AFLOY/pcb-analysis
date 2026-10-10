@@ -116,6 +116,12 @@ class NativeScalarMaxwellQ1:
         self._free_mask = self._free.astype(np.float32)
         self._diagonal = np.ascontiguousarray(diagonal, dtype=np.complex64).reshape(-1)
 
+        self._inverse_mu_f64 = np.ascontiguousarray(inverse_mu, dtype=np.complex128).reshape(-1)
+        self._reaction_f64 = np.ascontiguousarray(reaction, dtype=np.complex128).reshape(-1)
+        self._stiffness_f64 = np.ascontiguousarray(stiffness, dtype=np.complex128).reshape(-1)
+        self._mass_f64 = np.ascontiguousarray(mass, dtype=np.complex128).reshape(-1)
+        self._free_mask_f64 = self._free.astype(np.float64)
+
     def apply(self, vector: Any) -> np.ndarray:
         vector = np.ascontiguousarray(vector, dtype=np.complex64).reshape(-1)
         if vector.size != self.size:
@@ -168,3 +174,55 @@ class NativeScalarMaxwellQ1:
             float(relative_residual),
             int(applications),
         )
+
+    def solve_mpir(
+        self,
+        rhs_high: np.ndarray,
+        config: Any,
+        initial_guess: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, bool, int, int, float, int, int]:
+        rhs_high = np.ascontiguousarray(rhs_high, dtype=np.complex128).reshape(-1)
+        if rhs_high.size != self.size:
+            raise ValueError(f"rhs has size {rhs_high.size}, expected {self.size}")
+        init_guess = (
+            np.ascontiguousarray(initial_guess, dtype=np.complex128).reshape(-1)
+            if initial_guess is not None
+            else np.zeros(0, dtype=np.complex128)
+        )
+        sol, conv, outer, inner, rel, n_high, n_low = _native.solve_mpir_scalar_maxwell_q1(
+            rhs_high,
+            init_guess,
+            self._diagonal,
+            self._inverse_mu,
+            self._reaction,
+            self._stiffness,
+            self._mass,
+            self._free,
+            self._free_mask,
+            self._inverse_mu_f64,
+            self._reaction_f64,
+            self._stiffness_f64,
+            self._mass_f64,
+            self._free_mask_f64,
+            self.element_rows,
+            self.element_columns,
+            float(config.relative_tolerance),
+            float(config.absolute_tolerance),
+            float(config.inner_relative_tolerance),
+            int(config.max_outer_iterations),
+            int(config.max_inner_iterations),
+            int(config.gmres_restart),
+            self.threads,
+            self.orthogonalization == "cgs2",
+            self.dot_accumulation == "float32",
+        )
+        return (
+            np.asarray(sol, dtype=np.complex128),
+            bool(conv),
+            int(outer),
+            int(inner),
+            float(rel),
+            int(n_high),
+            int(n_low),
+        )
+

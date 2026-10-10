@@ -414,6 +414,7 @@ class MatrixFreePCBOperator:
                 apply_high=self.apply_high,
                 runtime=self.runtime,
                 block=coarse_block_nodes,
+                native_operator=self._native_high,
             )
         # Opt-in fused C++ host path: operator plus the whole inner PCG with
         # the same preconditioner.
@@ -535,6 +536,18 @@ class MatrixFreePCBOperator:
             inner_relative_tolerance=config.inner_relative_tolerance,
             max_inner_iterations=config.max_inner_iterations,
         )
+
+    def native_solve_mpir(
+        self,
+        rhs_high: np.ndarray,
+        config: MPIRConfig,
+        initial_guess: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, bool, int, int, float, int, int] | None:
+        """End-to-end mixed-precision solve in C++; ``None`` when native is off."""
+
+        if self._native is None:
+            return None
+        return self._native.solve_mpir(rhs_high, config, initial_guess)
 
     def apply_low(self, vector: Any) -> Any:
         if self._native is not None:
