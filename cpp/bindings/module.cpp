@@ -20,6 +20,7 @@
 #include "pcbcore/sheet/convolution_operator.hpp"
 #include "pcbcore/sheet/hoer_love.hpp"
 #include "pcbcore/sheet/near_field.hpp"
+#include "pcbcore/sheet/pfft_operator.hpp"
 
 namespace py = pybind11;
 
@@ -240,6 +241,48 @@ py::tuple uniform_near_field(const std::int64_t layers, const std::int64_t rows,
                           to_array(std::move(entries.value)));
 }
 
+pcbcore::sheet::CsrMatrix csr_from(const std::int64_t rows, const std::int64_t cols, const Input<std::int64_t>& indptr,
+                                   const Input<std::int64_t>& indices, const Input<double>& data) {
+    if (indptr.ndim() != 1 || indices.ndim() != 1 || data.ndim() != 1 || indices.size() != data.size() ||
+        indptr.size() != rows + 1) {
+        throw pcbcore::InvalidInput("inconsistent CSR arrays");
+    }
+    pcbcore::sheet::CsrMatrix m;
+    m.rows = rows;
+    m.cols = cols;
+    m.indptr.assign(indptr.data(), indptr.data() + indptr.size());
+    m.indices.assign(indices.data(), indices.data() + indices.size());
+    m.data.assign(data.data(), data.data() + data.size());
+    return m;
+}
+
+std::int64_t pfft_add_family(pcbcore::sheet::PfftOperator& op, const std::int64_t planes, const std::int64_t branches,
+                             const Input<std::int64_t>& p_indptr, const Input<std::int64_t>& p_indices,
+                             const Input<double>& p_data, const Input<double>& weights,
+                             const Input<std::int64_t>& kernel_of, const Input<std::int64_t>& c_indptr,
+                             const Input<std::int64_t>& c_indices, const Input<double>& c_data, const std::int64_t nodes) {
+    auto projection = csr_from(branches, nodes, p_indptr, p_indices, p_data);
+    auto correction = csr_from(planes * branches, planes * branches, c_indptr, c_indices, c_data);
+    std::vector<double> w(weights.data(), weights.data() + weights.size());
+    std::vector<std::int64_t> k(kernel_of.data(), kernel_of.data() + kernel_of.size());
+    return op.add_family(planes, std::move(projection), std::move(w), std::move(k), std::move(correction));
+}
+
+py::array_t<double> pfft_apply(const pcbcore::sheet::PfftOperator& op, const std::int64_t family,
+                               const Input<double>& currents, const int threads) {
+    const std::int64_t planes = op.planes(family);
+    const std::int64_t n = op.branches(family);
+    if (currents.size() != planes * n) {
+        throw pcbcore::InvalidInput("currents must be planes x branches of the family");
+    }
+    std::vector<double> flux(static_cast<std::size_t>(planes * n), 0.0);
+    {
+        py::gil_scoped_release release;
+        op.apply(family, currents.data(), flux.data(), threads);
+    }
+    return to_array(std::move(flux), {static_cast<py::ssize_t>(planes), static_cast<py::ssize_t>(n)});
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_pcbcore, m) {
@@ -278,6 +321,20 @@ PYBIND11_MODULE(_pcbcore, m) {
     sheet.def("build_vertical_kernel", &build_vertical_kernel, py::arg("rows"), py::arg("cols"), py::arg("pitch"),
               py::arg("span_a"), py::arg("span_b"), py::arg("center_separation"), py::arg("near_radius_cells"),
               py::arg("threads"));
+    py::class_<pcbcore::sheet::PfftOperator>(sheet, "PfftOperator")
+        .def(py::init<std::int64_t, std::int64_t>(), py::arg("nodes_y"), py::arg("nodes_x"))
+        .def(
+            "add_kernel",
+            [](pcbcore::sheet::PfftOperator& op, const Input<double>& table, const int threads) {
+                return op.add_kernel(table.data(), threads);
+            },
+            py::arg("table"), py::arg("threads"))
+        .def("add_family", &pfft_add_family, py::arg("planes"), py::arg("branches"), py::arg("projection_indptr"),
+             py::arg("projection_indices"), py::arg("projection_data"), py::arg("weights"), py::arg("kernel_of"),
+             py::arg("correction_indptr"), py::arg("correction_indices"), py::arg("correction_data"),
+             py::arg("nodes"))
+        .def("apply", &pfft_apply, py::arg("family"), py::arg("currents"), py::arg("threads"))
+        .def_property_readonly("bytes", &pcbcore::sheet::PfftOperator::bytes);
     sheet.def("uniform_near_field", &uniform_near_field, py::arg("layers"), py::arg("rows"), py::arg("cols"),
               py::arg("levels"), py::arg("radius"), py::arg("tables_x"), py::arg("tables_y"), py::arg("tables_z"),
               py::arg("branch_x"), py::arg("branch_y"), py::arg("vias"));

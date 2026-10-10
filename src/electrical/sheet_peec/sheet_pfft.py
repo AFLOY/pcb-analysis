@@ -35,6 +35,7 @@ from typing import Any, Sequence
 import numpy as np
 import scipy.sparse as sp
 
+from electrical import _backend
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
 from electrical.threads import thread_budget
 
@@ -244,6 +245,7 @@ class PfftSheetInductanceOperator:
                     if sep not in self._spectra_z:
                         self._spectra_z[sep] = np.fft.rfft2(self.grid.kernel_table(sep))
             self._correction_z, self._self_z = self._build_vertical_correction(centre_x, centre_y)
+        self._core = self._build_core()
 
     # ------------------------------------------------------------- construction
     def _near_pairs(self, coords: np.ndarray, half_extent: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -452,6 +454,67 @@ class PfftSheetInductanceOperator:
         self._near_exact_z = sp.bmat([[near_blocks[a * levels + b] for b in range(levels)] for a in range(levels)], format="csr")
         return correction, self_values
 
+    def _build_core(self) -> Any:
+        """The C++ application of this operator when the core is built, else ``None``."""
+
+        core = _backend.core()
+        if core is None:
+            return None
+        native = core.sheet.PfftOperator(self.grid.nodes_y, self.grid.nodes_x)
+        nodes = self.grid.nodes_x * self.grid.nodes_y
+        kernel_index: dict[tuple[str, float], int] = {}
+
+        def kernel(kind: str, sep: float) -> int:
+            if (kind, sep) not in kernel_index:
+                kernel_index[(kind, sep)] = native.add_kernel(
+                    np.ascontiguousarray(self.grid.kernel_table(sep)), thread_budget()
+                )
+            return kernel_index[(kind, sep)]
+
+        def csr(matrix: sp.csr_matrix) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+            matrix = matrix.tocsr()
+            return (
+                matrix.indptr.astype(np.int64),
+                matrix.indices.astype(np.int64),
+                np.ascontiguousarray(matrix.data, dtype=np.float64),
+            )
+
+        layers = len(self.stackup)
+        self._core_family: dict[str, int] = {}
+        for axis in ("x", "y"):
+            projection = self._projection[axis]
+            length = self._geometry[axis][2].reshape(-1)
+            kernel_of = np.array(
+                [[kernel("plane", self._separation[(t, s_)]) for s_ in range(layers)] for t in range(layers)],
+                dtype=np.int64,
+            )
+            self._core_family[axis] = native.add_family(
+                layers, projection.shape[0], *csr(projection),
+                np.ascontiguousarray(np.tile(length, (layers, 1))), kernel_of,
+                *csr(self._correction[axis]), nodes,
+            )
+        if self.vertical_levels:
+            assert self._projection_z is not None and self._correction_z is not None
+            levels = len(self.vertical_levels)
+            spans = np.asarray([span for span, _ in self._vertical_geometry])
+            count = self._projection_z.shape[0]
+            kernel_of = np.array(
+                [
+                    [
+                        kernel("vertical", round(abs(self._vertical_geometry[s_][1] - self._vertical_geometry[t][1]), 15))
+                        for s_ in range(levels)
+                    ]
+                    for t in range(levels)
+                ],
+                dtype=np.int64,
+            )
+            self._core_family["z"] = native.add_family(
+                levels, count, *csr(self._projection_z),
+                np.ascontiguousarray(spans[:, None] * np.ones((1, count))), kernel_of,
+                *csr(self._correction_z), nodes,
+            )
+        return native
+
     # -------------------------------------------------------------------- apply
     @property
     def kernel_bytes(self) -> int:
@@ -482,6 +545,11 @@ class PfftSheetInductanceOperator:
         expected = (len(self.stackup),) + cx.shape
         if currents.shape != expected:
             raise ValueError(f"currents_{axis} must have shape {expected}, got {currents.shape}")
+        if self._core is not None:
+            flux = self._core.apply(
+                self._core_family[axis], np.ascontiguousarray(currents).reshape(expected[0], -1), thread_budget()
+            )
+            return np.asarray(flux).reshape(expected)
         far = self._far(currents, axis, length, self._projection[axis], lambda t, s_: self._spectra[self._separation[(t, s_)]])
         near = self._correction[axis] @ currents.reshape(-1)
         return (far.reshape(-1) + near).reshape(expected)
@@ -516,6 +584,13 @@ class PfftSheetInductanceOperator:
         if not levels:
             return flux_x, flux_y, np.zeros_like(currents_z)
         assert self._projection_z is not None and self._correction_z is not None
+        if self._core is not None:
+            flux_z = self._core.apply(
+                self._core_family["z"],
+                np.ascontiguousarray(currents_z, dtype=np.float64).reshape(levels, -1),
+                thread_budget(),
+            )
+            return flux_x, flux_y, np.asarray(flux_z).reshape(levels, rows, cols)
         spans = np.asarray([span for span, _ in self._vertical_geometry])
         out = np.zeros((levels, rows * cols))
         grid_shape = (self.grid.nodes_y, self.grid.nodes_x)
