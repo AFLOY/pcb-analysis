@@ -101,10 +101,6 @@ def _timed(
     }
 
 
-def _array_bytes(*values: Any) -> int:
-    return sum(int(value.nbytes) for value in values)
-
-
 def _dc_inputs(elements: int) -> tuple[
     SheetMesh,
     tuple[Terminal, ...],
@@ -208,15 +204,7 @@ def dc_strip_case(
     )
     peec_resistance = peec_solution.voltage_span_v()
     fem_resistance = fem_operator.joule_loss(fem_result.solution)
-    fem_low_bytes = _array_bytes(
-        fem_operator._coefficients_low,
-        fem_operator._unit_low,
-        fem_operator._free_low,
-        fem_operator._via_a_low,
-        fem_operator._via_b_low,
-        fem_operator._via_g_low,
-        fem_operator._diagonal_low,
-    )
+    fem_low_bytes = fem_operator.low_precision_bytes
 
     row: dict[str, Any] = {
         "elements_along_length": elements,

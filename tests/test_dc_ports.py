@@ -275,8 +275,8 @@ def test_threaded_unit_solves_give_the_serial_basis(monkeypatch: pytest.MonkeyPa
     assert serial.workers == 1
     assert threaded.workers == 2  # capped at n - 1 unit solves
     if native:
-        assert serial.operator._native.threads == 4  # one solve at a time: the whole budget
-        assert threaded.operator._native.threads == 1  # the team the split asked for
+        assert serial.operator._team == 4  # one solve at a time: the whole budget
+        assert threaded.operator._team == 1  # the team the split asked for
     assert threaded.converged
     np.testing.assert_array_equal(threaded.conductance_s, serial.conductance_s)
     np.testing.assert_array_equal(threaded.unit_voltage_potential_v, serial.unit_voltage_potential_v)

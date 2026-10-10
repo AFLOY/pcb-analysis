@@ -21,8 +21,10 @@ from typing import Any, Literal, Sequence
 
 import numpy as np
 
+from .. import _backend
+from ..threads import thread_budget
 from .grid import check_pitch_axis
-from .native_dc import NativeLayeredDCQ1, NativeLayeredDCQ1High, native_requested
+from .native_dc import NATIVE_HIGH_KERNEL_NAME, NATIVE_KERNEL_NAME
 from .runtime import LowPrecisionRuntime, RuntimeBackend, make_float32_runtime
 from .solver import MPIRConfig, MPIRResult, solve_mpir
 from .two_level import AggregationCoarseCorrection
@@ -270,6 +272,18 @@ def _flat_index(node: Node, shape: tuple[int, int, int]) -> int:
         raise ValueError(f"node {node!r} lies outside mesh shape {shape}") from exc
 
 
+class _AssembledCoarse:
+    """The coarse space the C++ system assembled, offered to the preconditioner."""
+
+    def __init__(self, system: Any) -> None:
+        self._system = system
+
+    def assemble_coarse(self, block: int) -> tuple[np.ndarray, np.ndarray]:
+        if block != self._system.block:
+            raise ValueError("the system assembled its coarse space for another patch width")
+        return self._system.coarse_matrix, self._system.coarse_inverse
+
+
 class MatrixFreePCBOperator:
     """Split FP64/FP32 element-by-element conductivity operator.
 
@@ -278,10 +292,12 @@ class MatrixFreePCBOperator:
     a graded grid with elongated elements otherwise costs hundreds of inner
     PCG iterations per outer step.  ``"jacobi"`` keeps the plain scaling.
 
-    ``native=True`` runs the FP32 action, the whole inner PCG and the FP64
-    action in the optional C++ extension (CPU runtime only, an OpenMP team of
-    :func:`electrical.threads.thread_budget` threads); ``None`` uses it when
-    built, ``False`` keeps NumPy.  The two agree within the solver tolerance.
+    ``native=True`` hands the whole prepared operator to the C++ system
+    ``electrical._pcbcore.fem.LayeredDCSystem`` (CPU runtime only, an OpenMP
+    team of :func:`electrical.threads.thread_budget` threads): coefficients,
+    masks, diagonal, coarse space, both actions, the solve, the right-hand
+    side and the post-processing.  ``None`` uses it when built, ``False``
+    keeps NumPy.  The two agree within the solver tolerance.
 
     Fixed nodes are the inactive nodes, the ``reference_node`` and every
     ``dirichlet_nodes`` entry; at least one of the last two must be given.
@@ -316,6 +332,26 @@ class MatrixFreePCBOperator:
             backend or "cpu", device_id=device_id
         )
         self.vias = tuple(vias)
+        self.preconditioner = preconditioner
+        self.reference_node = None if reference_node is None else tuple(reference_node)
+        if reference_node is None and not dirichlet_nodes:
+            raise ValueError("pass a reference_node or dirichlet_nodes to fix the potential")
+
+        is_cuda = bool(getattr(self.runtime, "is_cuda", False))
+        if is_cuda and native:
+            raise ValueError("native=True requires the CPU runtime")
+        core = None if is_cuda or native is False else _backend.core()
+        if native and core is None:
+            raise ImportError(
+                "the pcbcore extension is not built; run cmake -S . -B build/native && cmake --build build/native"
+            )
+        # The C++ system owns the whole prepared operator; the arrays below
+        # are the NumPy (and CuPy) implementation of the same operator.
+        self._system: Any = None
+        if core is not None:
+            self._init_system(core, mesh, reference_node, dirichlet_nodes, preconditioner, coarse_block_nodes)
+            return
+
         # K_e = c_x U_x + c_y U_y; the coefficients carry sheet conductance and
         # the (graded) element dimensions.
         self._unit_high = np.stack(unit_sheet_matrices())  # (2, 4, 4)
@@ -340,8 +376,6 @@ class MatrixFreePCBOperator:
             active_nodes.flat[first] = True
             active_nodes.flat[second] = True
 
-        if reference_node is None and not dirichlet_nodes:
-            raise ValueError("pass a reference_node or dirichlet_nodes to fix the potential")
         fixed = ~active_nodes
         if reference_node is not None:
             reference_index = _flat_index(reference_node, mesh.node_shape)
@@ -356,7 +390,6 @@ class MatrixFreePCBOperator:
         fixed.flat[dirichlet_index] = True
         self.active_nodes = active_nodes
         self.free_nodes = ~fixed
-        self.reference_node = None if reference_node is None else tuple(reference_node)
         self._via_a_high = np.asarray(via_a, dtype=np.int64)
         self._via_b_high = np.asarray(via_b, dtype=np.int64)
         self._via_g_high = np.asarray(via_g, dtype=np.float64)
@@ -368,27 +401,8 @@ class MatrixFreePCBOperator:
         self._via_b_low = self.runtime.namespace.asarray(via_b, dtype=np.int64)
         self._via_g_low = self.runtime.namespace.asarray(via_g, dtype=self.runtime.dtype)
 
-        if getattr(self.runtime, "is_cuda", False) and native:
-            raise ValueError("native=True requires the CPU runtime")
-        use_native = not getattr(self.runtime, "is_cuda", False) and (
-            native or (native is None and native_requested())
-        )
-        # The FP64 action (outer residual and coarse assembly) goes native with
-        # the low path; it is built first because the coarse matrix below is
-        # assembled from FP64 applications.
-        self._native_high: NativeLayeredDCQ1High | None = None
         self.high_operator_backend = "array-element-loops-fp64"
-        if use_native:
-            self._native_high = NativeLayeredDCQ1High(
-                mesh.node_shape,
-                self._coefficients_high,
-                self._unit_high,
-                self.free_nodes,
-                self._via_a_high,
-                self._via_b_high,
-                self._via_g_high,
-            )
-            self.high_operator_backend = self._native_high.kernel_name
+        self.low_operator_backend = "array-element-loops"
 
         diagonal = self._build_diagonal(
             np,
@@ -403,7 +417,6 @@ class MatrixFreePCBOperator:
             raise ValueError("every free node must have positive conductivity coupling")
         self._diagonal_high = diagonal
         self._diagonal_low = self.runtime.from_host(diagonal)
-        self.preconditioner = preconditioner
         self.coarse_correction: AggregationCoarseCorrection | None = None
         if preconditioner == "two-level":
             self.coarse_correction = AggregationCoarseCorrection(
@@ -413,38 +426,109 @@ class MatrixFreePCBOperator:
                 apply_high=self.apply_high,
                 runtime=self.runtime,
                 block=coarse_block_nodes,
-                native_operator=self._native_high,
             )
-        # Opt-in fused C++ host path: operator plus the whole inner PCG with
-        # the same preconditioner.
-        self._native: NativeLayeredDCQ1 | None = None
-        self.low_operator_backend = "array-element-loops"
-        if use_native:
-            coarse = self.coarse_correction
-            self._native = NativeLayeredDCQ1(
-                mesh.node_shape,
-                self._coefficients_high,
-                self._unit_high,
-                self.free_nodes,
-                self._via_a_high,
-                self._via_b_high,
-                self._via_g_high,
-                diagonal,
-                coarse_block=None if coarse is None else coarse.block,
-                coarse_inverse=None if coarse is None else coarse._coarse_inverse_high,
+
+    def _init_system(
+        self,
+        core: Any,
+        mesh: LayeredPCBMesh,
+        reference_node: Node | None,
+        dirichlet_nodes: Sequence[Node],
+        preconditioner: Preconditioner,
+        coarse_block_nodes: int | None,
+    ) -> None:
+        shape = mesh.node_shape
+        # OpenMP team of every call: the process budget when the operator is
+        # built.  ``ports.dc_port_basis`` lowers it to its share of the budget
+        # when it runs several solves on this operator at once.
+        self._team = thread_budget()
+        system = core.fem.LayeredDCSystem(
+            np.ascontiguousarray(mesh.element_active, dtype=np.uint8),
+            np.asarray(mesh.layer_thickness_m, dtype=np.float64),
+            mesh.pitch_x_m,
+            mesh.pitch_y_m,
+            mesh.conductivity_s_per_m,
+            np.asarray([_flat_index(via.lower, shape) for via in self.vias], dtype=np.int64),
+            np.asarray([_flat_index(via.upper, shape) for via in self.vias], dtype=np.int64),
+            np.asarray([via.conductance_s for via in self.vias], dtype=np.float64),
+            -1 if reference_node is None else _flat_index(reference_node, shape),
+            np.asarray([_flat_index(node, shape) for node in dirichlet_nodes], dtype=np.int64),
+            preconditioner == "two-level",
+            0 if coarse_block_nodes is None else int(coarse_block_nodes),
+            self._team,
+        )
+        self._system = system
+        self.active_nodes = system.active_nodes
+        self.free_nodes = system.free_nodes
+        self._diagonal_high = system.diagonal
+        self._diagonal_low = self.runtime.from_host(self._diagonal_high)
+        self.high_operator_backend = NATIVE_HIGH_KERNEL_NAME
+        self.low_operator_backend = NATIVE_KERNEL_NAME
+        self.coarse_correction = None
+        if preconditioner == "two-level":
+            self.coarse_correction = AggregationCoarseCorrection(
+                node_shape=shape,
+                free_nodes=self.free_nodes,
+                diagonal_high=self._diagonal_high,
+                apply_high=self.apply_high,
+                runtime=self.runtime,
+                block=system.block,
+                native_operator=_AssembledCoarse(system),
             )
-            self.low_operator_backend = self._native.kernel_name
 
     def _set_native_team(self, threads: int) -> None:
-        """OpenMP team of the native kernels when this operator shares the budget.
+        """OpenMP team of the C++ system when this operator shares the budget.
 
-        Kernels start with the whole process budget; :func:`.ports.dc_port_basis`
+        The system starts with the whole process budget; :func:`.ports.dc_port_basis`
         lowers it when it runs several solves on this operator at once.
         """
 
-        for kernel in (self._native, self._native_high):
-            if kernel is not None:
-                kernel.threads = max(1, int(threads))
+        if self._system is not None:
+            self._team = max(1, int(threads))
+
+    def _flat(self, values: np.ndarray) -> np.ndarray:
+        flat = np.ascontiguousarray(values, dtype=np.float64).reshape(-1)
+        if flat.size != self.size:
+            raise ValueError(f"vector has size {flat.size}, expected {self.size}")
+        return flat
+
+    def _node_groups(
+        self, terminals: Sequence[CurrentTerminal] | Sequence[VoltageTerminal]
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Flat node indices of each terminal, CSR form (offsets, nodes)."""
+
+        offsets = np.zeros(len(terminals) + 1, dtype=np.int64)
+        np.cumsum([len(terminal.nodes) for terminal in terminals], out=offsets[1:])
+        shape = self.mesh.node_shape
+        nodes = np.asarray(
+            [_flat_index(node, shape) for terminal in terminals for node in terminal.nodes], dtype=np.int64
+        )
+        return offsets, nodes
+
+    def _current_groups(self, terminals: Sequence[CurrentTerminal]) -> tuple[np.ndarray, np.ndarray]:
+        offsets, nodes = self._node_groups(terminals)
+        inactive = ~self.active_nodes.reshape(-1)[nodes]
+        if inactive.any():
+            at = int(np.argmax(inactive))
+            terminal = terminals[int(np.searchsorted(offsets, at, side="right")) - 1]
+            node = np.unravel_index(int(nodes[at]), self.mesh.node_shape)
+            raise ValueError(
+                f"terminal {terminal.name!r} contains inactive node {tuple(int(i) for i in node)!r}"
+            )
+        return offsets, nodes
+
+    def _voltage_groups(self, voltage_terminals: Sequence[VoltageTerminal]) -> tuple[np.ndarray, np.ndarray]:
+        offsets, nodes = self._node_groups(voltage_terminals)
+        wrong = self.free_nodes.reshape(-1)[nodes] | ~self.active_nodes.reshape(-1)[nodes]
+        if wrong.any():
+            at = int(np.argmax(wrong))
+            terminal = voltage_terminals[int(np.searchsorted(offsets, at, side="right")) - 1]
+            node = np.unravel_index(int(nodes[at]), self.mesh.node_shape)
+            raise ValueError(
+                f"voltage terminal {terminal.name!r} node {tuple(int(i) for i in node)!r} is not a "
+                "Dirichlet node of this operator"
+            )
+        return offsets, nodes
 
     @staticmethod
     def _element_views(grid: Any) -> tuple[Any, Any, Any, Any]:
@@ -510,8 +594,8 @@ class MatrixFreePCBOperator:
         vector = np.asarray(vector, dtype=np.float64).reshape(-1)
         if vector.size != self.size:
             raise ValueError(f"vector has size {vector.size}, expected {self.size}")
-        if self._native_high is not None:
-            return self._native_high.apply(vector)
+        if self._system is not None:
+            return self._system.apply_high(vector, self._team)
         return self._apply_impl(
             vector,
             np,
@@ -523,19 +607,6 @@ class MatrixFreePCBOperator:
             self._via_g_high,
         )
 
-    def native_inner_pcg(
-        self, rhs_high: np.ndarray, config: MPIRConfig
-    ) -> tuple[np.ndarray, int, float, int] | None:
-        """Whole inner PCG in C++; ``None`` when the native path is off."""
-
-        if self._native is None:
-            return None
-        return self._native.inner_pcg(
-            rhs_high,
-            inner_relative_tolerance=config.inner_relative_tolerance,
-            max_inner_iterations=config.max_inner_iterations,
-        )
-
     def native_solve_mpir(
         self,
         rhs_high: np.ndarray,
@@ -544,13 +615,35 @@ class MatrixFreePCBOperator:
     ) -> tuple[np.ndarray, bool, int, int, float, int, int] | None:
         """End-to-end mixed-precision solve in C++; ``None`` when native is off."""
 
-        if self._native is None:
+        if self._system is None:
             return None
-        return self._native.solve_mpir(rhs_high, config, initial_guess)
+        result = self._system.solve(
+            np.ascontiguousarray(rhs_high, dtype=np.float64).reshape(-1),
+            None if initial_guess is None else self._flat(initial_guess),
+            float(config.relative_tolerance),
+            float(config.absolute_tolerance),
+            float(config.inner_relative_tolerance),
+            int(config.max_outer_iterations),
+            int(config.max_inner_iterations),
+            self._team,
+        )
+        return (
+            result["solution"],
+            bool(result["converged"]),
+            int(result["outer_iterations"]),
+            int(result["inner_iterations"]),
+            float(result["relative_residual"]),
+            int(result["high_operator_applications"]),
+            int(result["low_operator_applications"]),
+            list(result["history"]),
+        )
 
     def apply_low(self, vector: Any) -> Any:
-        if self._native is not None:
-            return self._native.apply(vector)
+        if self._system is not None:
+            vector = np.ascontiguousarray(vector, dtype=np.float32).reshape(-1)
+            if vector.size != self.size:
+                raise ValueError(f"vector has size {vector.size}, expected {self.size}")
+            return self._system.apply_low(vector, self._team)
         return self._apply_impl(
             vector,
             self.runtime.namespace,
@@ -561,6 +654,24 @@ class MatrixFreePCBOperator:
             self._via_b_low,
             self._via_g_low,
         )
+
+    @property
+    def low_precision_bytes(self) -> int:
+        """Bytes of the arrays the low-precision inner solve reads."""
+
+        if self._system is not None:
+            return int(self._system.low_bytes)
+        arrays = (
+            self._coefficients_low,
+            self._unit_low,
+            self._free_low,
+            self._via_a_low,
+            self._via_b_low,
+            self._via_g_low,
+            self._diagonal_low,
+        )
+        coarse = () if self.coarse_correction is None else (self.coarse_correction._coarse_inverse_low,)
+        return sum(int(array.nbytes) for array in (*arrays, *coarse))
 
     def diagonal_low(self) -> Any:
         return self._diagonal_low
@@ -579,6 +690,8 @@ class MatrixFreePCBOperator:
         vias for potentials ``v``; fixed nodes are not masked out.
         """
 
+        if self._system is not None:
+            return self._system.apply_full(self._flat(vector), self._team)
         vector = np.asarray(vector, dtype=np.float64).reshape(-1)
         return self._apply_impl(
             vector,
@@ -596,6 +709,10 @@ class MatrixFreePCBOperator:
     ) -> np.ndarray:
         """Potential vector holding each voltage terminal's value, zero elsewhere."""
 
+        if self._system is not None:
+            offsets, nodes = self._voltage_groups(voltage_terminals)
+            voltages = np.asarray([terminal.voltage_v for terminal in voltage_terminals], dtype=np.float64)
+            return self._system.dirichlet_potential(offsets, nodes, voltages)
         potential = np.zeros(self.size, dtype=np.float64)
         for terminal in voltage_terminals:
             for node in terminal.nodes:
@@ -613,6 +730,9 @@ class MatrixFreePCBOperator:
     ) -> np.ndarray:
         """Current each voltage terminal drives into the copper, in A."""
 
+        if self._system is not None:
+            offsets, nodes = self._node_groups(voltage_terminals)
+            return self._system.group_currents(self._flat(potential_v), offsets, nodes, self._team)
         injected = self.apply_full_high(np.nan_to_num(np.asarray(potential_v, dtype=np.float64), nan=0.0))
         return np.asarray(
             [
@@ -631,6 +751,18 @@ class MatrixFreePCBOperator:
         terminals: Sequence[CurrentTerminal],
         voltage_terminals: Sequence[VoltageTerminal] = (),
     ) -> np.ndarray:
+        if self._system is not None:
+            current_offsets, current_nodes = self._current_groups(terminals)
+            voltage_offsets, voltage_nodes = self._voltage_groups(voltage_terminals)
+            return self._system.build_rhs(
+                current_offsets,
+                current_nodes,
+                np.asarray([terminal.current_a for terminal in terminals], dtype=np.float64),
+                voltage_offsets,
+                voltage_nodes,
+                np.asarray([terminal.voltage_v for terminal in voltage_terminals], dtype=np.float64),
+                self._team,
+            )
         rhs = np.zeros(self.mesh.node_shape, dtype=np.float64)
         for terminal in terminals:
             share = float(terminal.current_a) / len(terminal.nodes)
@@ -656,6 +788,8 @@ class MatrixFreePCBOperator:
     def element_electric_field(self, potential_v: np.ndarray) -> np.ndarray:
         """Return the electric field at each Q1 element centre, in V/m."""
 
+        if self._system is not None:
+            return self._system.element_electric_field(self._flat(potential_v), self._team)
         potential = np.asarray(potential_v, dtype=np.float64).reshape(
             self.mesh.node_shape
         )
@@ -666,6 +800,8 @@ class MatrixFreePCBOperator:
         return np.where(self.mesh.element_active[..., None], field, 0.0)
 
     def via_currents(self, potential_v: np.ndarray) -> np.ndarray:
+        if self._system is not None:
+            return self._system.via_current(self._flat(potential_v))
         flat = np.asarray(potential_v, dtype=np.float64).reshape(-1)
         return self._via_g_high * (
             flat[self._via_a_high] - flat[self._via_b_high]
@@ -679,6 +815,8 @@ class MatrixFreePCBOperator:
         solve receives from this electrical solve, element by element.
         """
 
+        if self._system is not None:
+            return self._system.element_joule_loss(self._flat(potential_v), self._team)
         potential = np.asarray(potential_v, dtype=np.float64).reshape(
             self.mesh.node_shape
         )
@@ -691,11 +829,15 @@ class MatrixFreePCBOperator:
     def via_joule_loss(self, potential_v: np.ndarray) -> np.ndarray:
         """Return the Joule loss dissipated in each via, in W."""
 
+        if self._system is not None:
+            return self._system.via_joule_loss(self._flat(potential_v))
         flat = np.asarray(potential_v, dtype=np.float64).reshape(-1)
         drop = flat[self._via_a_high] - flat[self._via_b_high]
         return self._via_g_high * drop * drop
 
     def joule_loss(self, potential_v: np.ndarray) -> float:
+        if self._system is not None:
+            return float(self._system.post_process(self._flat(potential_v), self._team)["joule_loss"])
         return float(
             np.sum(self.element_joule_loss(potential_v))
             + np.sum(self.via_joule_loss(potential_v))
@@ -736,7 +878,7 @@ def solve_pcb_dc(
     the potential of the previous iteration of a coupled analysis; NaN entries
     (inactive nodes of a reported solution) are treated as zero.
     ``preconditioner`` selects the two-level (default) or Jacobi inner
-    preconditioner.  ``native`` selects the fused C++ host path of
+    preconditioner.  ``native`` selects the C++ system of
     :class:`MatrixFreePCBOperator`, whose threads come from the process-wide
     budget (:func:`electrical.threads.set_thread_budget`).
     """
@@ -769,13 +911,27 @@ def solve_pcb_dc(
         initial = fixed
     result = solve_mpir(operator, rhs, config=config, initial_guess=initial)
     potential = result.solution.reshape(problem.mesh.node_shape)
+    reported_potential = np.where(operator.active_nodes, potential, np.nan)
+    terminal_current = operator.terminal_currents(potential, problem.voltage_terminals)
+    if operator._system is not None:
+        post = operator._system.post_process(result.solution, operator._team)
+        return PCBConductionSolution(
+            potential_v=reported_potential,
+            current_density_a_per_m2=post["current_density"],
+            via_current_a=post["via_current"],
+            joule_loss_w=float(post["joule_loss"]),
+            element_joule_loss_w=post["element_joule_loss"],
+            via_joule_loss_w=post["via_joule_loss"],
+            max_current_density_a_per_m2=float(post["max_current_density"]),
+            solve=result,
+            voltage_terminal_current_a=terminal_current,
+        )
     field = operator.element_electric_field(potential)
     conductivity = np.asarray(problem.mesh.conductivity_s_per_m, dtype=np.float64)
     current_density = conductivity[..., None] * field
     magnitudes = np.linalg.norm(current_density, axis=-1)
     active_magnitudes = magnitudes[problem.mesh.element_active]
     maximum = float(np.max(active_magnitudes)) if active_magnitudes.size else 0.0
-    reported_potential = np.where(operator.active_nodes, potential, np.nan)
     return PCBConductionSolution(
         potential_v=reported_potential,
         current_density_a_per_m2=current_density,
@@ -785,7 +941,5 @@ def solve_pcb_dc(
         via_joule_loss_w=operator.via_joule_loss(potential),
         max_current_density_a_per_m2=maximum,
         solve=result,
-        voltage_terminal_current_a=operator.terminal_currents(
-            potential, problem.voltage_terminals
-        ),
+        voltage_terminal_current_a=terminal_current,
     )
