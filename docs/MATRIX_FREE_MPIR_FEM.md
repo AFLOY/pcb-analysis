@@ -892,6 +892,68 @@ into the FPU as the BFP8_B or BF16 Cholesky factor at HiFi4, never as the
 rounded inverse, and the stencil stays FP32 (SFPU) or uses at least two BF16
 passes per operand.
 
+### FP32 Q1 stencil on Tensix cores (measured, not adopted)
+
+The layered DC Q1 FP32 action (the `dc_native_benchmark.py` board without
+vias, two layers) was written as `ttnn.generic_op` kernels on
+`exp/tensix-precision-emulation` (tag `work/tensix-resident-stencil`):
+`experiments/tensix_stencil_benchmark.py`, `experiments/tensix_persistent_benchmark.py`,
+kernels in `experiments/tensix_stencil/`. The SFPU computes with FP32 DEST in
+the operation order of `MatrixFreePCBOperator._apply_impl`; its FP32 products
+and sums round like IEEE binary32, so **every variant and size equals the
+NumPy FP32 action value for value** (the C++ action, with its own order,
+differs from NumPy in 44% of the values). Blackhole device 0, 11×10 grid,
+ttnn 0.79.0; C++ reference on a Ryzen 7 9700X at 8 OpenMP threads.
+
+**One application per program launch** (`TENSIX_STENCIL_BLACKHOLE_RESULTS.json`):
+
+| DC | nodes | v1 µs | v2 µs | v3 µs | v3 traced µs | C++ 8 threads µs | C++ inner iteration µs |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 20,402 | 226 | 90 | 56 | 62 | 5.7 | 34 |
+| 200 | 80,802 | 270 | 101 | 62 | 69 | 17.4 | 73 |
+| 320 | 206,082 | 675 | 238 | 89 | 96 | 38.9 | 131 |
+
+- v1 builds nine shifted input tiles and eight shifted coefficient tiles per
+  output tile with RISC-V word moves: 188 µs per tile, the bulk of the time;
+  the SFPU stencil costs 8–12 µs per tile.
+- v2 keeps the operator data as 18 precomputed tiles per output tile in L1
+  (shifted coefficients and free masks) and shifts only the input.
+- v3 stores vectors in a cyclic tile layout, node `(r T_r + p, c T_c + q)` at
+  tile `(p, q)`, position `(r, c)`: a neighbour is the same position of a
+  neighbouring tile, so only tiles whose index wraps are shifted.
+- An empty program costs 23 µs per launch (9–13 µs traced).
+
+**K resident sweeps in one program** (`TENSIX_PERSISTENT_STENCIL_BLACKHOLE_RESULTS.json`).
+Each sweep is `p <- p + (-ω) A p` with ω a power of two; both vectors live in
+L1, each core's operator tiles stay in its circular buffer, neighbour tiles
+come from L1 over the NoC, and a semaphore barrier through a coordinator core
+separates sweeps. Time per sweep is the K = 50 minus K = 10 slope:
+
+| DC | nodes | tiles / busiest core | coefficients µs | weights µs | batched µs | exchange + barrier µs | C++ 8 threads µs | batched / C++ | C++ inner iteration µs |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 20,402 | 32 / 1 | 52.0 | 41.8 | 41.5 | 4.0 | 7.8 | 5.33 | 34 |
+| 200 | 80,802 | 98 / 1 | 52.4 | 42.0 | 41.7 | 4.7 | 27.6 | 1.51 | 73 |
+| 320 | 206,082 | 242 / 3 | 66.8 | 44.1 | 43.5 | 12.7 | 38.5 | 1.13 | 130 |
+| 480 | 462,722 | 512 / 5 | 109.7 | 68.3 | 66.8 | 26.1 | 93.8 | 0.71 | 314 |
+| 640 | 821,762 | 882 / 9 | 187.1 | 103.7 | 101.2 | 47.9 | 146.1 | 0.69 | 934 |
+
+- "weights" precomputes per node the 16 masked element weights
+  `(c0 U0[r, col] + c1 U1[r, col]) free_col` in FP32 (element-matrix entries,
+  not summed over elements); "batched" issues them over eight FP32 DEST tiles.
+- "exchange + barrier" is the batched sweep with the wrap shifts and the SFPU
+  work compiled out. It grows with the tiles per core because the L1 buffers
+  are interleaved over all cores: every neighbour read crosses the NoC
+  whatever the owner.
+- The C++ times at 8 threads moved between runs of the same build (DC 200:
+  17.4 µs and 27.6 µs); the table reports the run recorded in each JSON.
+
+**Decision:** nothing changes in `src/`. A resident Tensix sweep overtakes the
+C++ action from about 460k nodes (0.71× at 462,722, 0.69× at 821,762 nodes)
+while staying bitwise equal to the NumPy FP32 action; below 200k nodes the
+per-sweep floor (≈ 40 µs) dominates. The next measurements are owner-local
+(sharded) buffers with spatially blocked tile ownership, on-device dot
+reductions, and a full inner PCG iteration against the C++ iteration column.
+
 ## Graded tensor grids
 
 `grid.graded_edges(start, end, coarse_pitch_m=, fine_pitch_m=, refine_m=[(a,
