@@ -46,3 +46,5 @@ experiments/*
 !experiments/tensix_precision_emulation.py
 !experiments/tensix_formats.py
 !experiments/tensix_coarse_gemv_benchmark.py
+!experiments/tensix_stencil_benchmark.py
+!experiments/tensix_stencil/
