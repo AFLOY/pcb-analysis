@@ -43,3 +43,4 @@ experiments/*
 !experiments/sheet_preconditioner_memory.py
 !experiments/sheet_preconditioner_benchmark.py
 !experiments/port_basis_workers_benchmark.py
+!experiments/tensix_precision_emulation.py
