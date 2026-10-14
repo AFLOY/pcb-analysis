@@ -806,6 +806,92 @@ operator and require:
 - no assembled global matrix appears in device memory telemetry;
 - repeated runs are deterministic within the documented reduction tolerance.
 
+### Tensix number formats in the inner PCG (measured, not adopted)
+
+The Tensix matrix engine (FPU) reads its operands from 19-bit source
+registers: FP32 inputs arrive as TF32, and the cheap formats are BF16 and the
+block floats BFP8_B/BFP4_B (16 row values share one exponent). Accumulation can
+stay FP32 (`fp32_dest_acc_en`). Which part of the FP32 inner PCG tolerates
+those inputs was measured on `exp/tensix-precision-emulation` (tag
+`work/tensix-coarse-precision`, based on `feature/remove-dice-peec` at
+`b40337d`), on the DC board of `dc_native_benchmark.py` (100/200/320 elements,
+20,402–206,082 nodes, coarse size 1,352–1,800) and the thermal stack of
+`thermal_native_benchmark.py` (50/100/200, 13,005–202,005 nodes, coarse size
+845–1,805), default `MPIRConfig`, the portable NumPy FP32 solve as reference.
+
+**CPU emulation** (`experiments/tensix_precision_emulation.py`,
+`TENSIX_PRECISION_EMULATION_RESULTS.json`, Ryzen 7 9700X). Only the FPU inputs
+of one component are rounded (round-to-nearest-even); dots, axpys and Jacobi
+stay FP32. Outer / total inner iterations, ✗ = not converged:
+
+| variant | DC 100 | DC 200 | DC 320 | thermal 50 | thermal 100 | thermal 200 |
+|---|---:|---:|---:|---:|---:|---:|
+| `fp32-stock` | 4/60 | 4/95 | 4/132 | 7/585 | 7/805 | 7/1025 |
+| `coarse-tf32` | 4/60 | 4/104 | 8/1600 ✗ | 16/3200 ✗ | 7/1067 | 16/3200 ✗ |
+| `coarse-bf16` | 8/1600 ✗ | 8/1600 ✗ | 8/1600 ✗ | 16/3200 ✗ | 16/3200 ✗ | 16/3200 ✗ |
+| `coarse-bfp8b` | 8/1600 ✗ | 8/1600 ✗ | 8/1600 ✗ | 16/3200 ✗ | 16/3200 ✗ | 16/3200 ✗ |
+| `coarse-factor-bf16` | 4/60 | 4/95 | 4/136 | 7/606 | 7/805 | 6/900 |
+| `coarse-factor-bfp8b` | 4/64 | 4/101 | 4/144 | 7/608 | 7/810 | 7/1036 |
+| `coarse-factor-bfp4b` | 4/146 | 4/421 | 4/501 | 7/737 | 7/1400 | 7/1380 |
+| `stencil-tf32` | 5/70 | 5/104 | 5/145 | 8/475 | 8/718 | 8/958 |
+| `stencil-bf16` | 6/79 | 6/115 | 6/161 | 10/732 | 9/887 | 9/1228 |
+| `stencil-bf16x2` | 4/60 | 4/92 | 4/129 | 7/520 | 7/754 | 6/943 |
+| `stencil-bf16x3` | 4/60 | 4/95 | 4/138 | 6/568 | 6/842 | 6/1153 |
+
+- Rounding the explicit coarse inverse `(Z^T A Z)^-1` fails in every format
+  below FP32: its rows are nearly constant (the near-null mode dominates), so a
+  relative perturbation of the stored entries removes positive definiteness.
+- Storing its lower Cholesky factor `R` once and applying `R (r^T R)^T` keeps
+  the correction `R~ R~^T` positive semidefinite after rounding. BF16 and
+  BFP8_B then cost at most +9% inner iterations; BFP4_B converges with up to 4.4×.
+- One-pass TF32/BF16 inputs to the stencil add 1–3 outer steps. Two BF16
+  pieces (two FPU passes) keep the outer count; coefficient rounding was not
+  emulated, so this is a lower bound on the damage.
+- `stencil-bf16x3` represents the FP32 input exactly, yet moves thermal 200 from
+  7/1025 to 6/1153 through the summation order alone: the 10% inner-iteration
+  criterion of the script sits at the FP32 rounding-order noise.
+
+**Blackhole** (`experiments/tensix_coarse_gemv_benchmark.py`,
+`TENSIX_COARSE_GEMV_BLACKHOLE_RESULTS.json`, device 0, 11×10 compute grid,
+ttnn 0.79.0, driver 2.11.0). `R` is stored once with ttnn; the restricted
+residual is row 0 of a 32-row tile; the two GEMVs are `ttnn.matmul` with
+`transpose_b` for the second, FP32 destination accumulation. Everything else
+of the inner PCG stays FP32 on the host, so each inner iteration makes one
+PCIe round trip. Times are per call of the GEMV pair (BFP8_B, HiFi4) against
+the host's FP32 dense-inverse GEMV; solves are outer / inner at HiFi4 unless
+noted; errors are the pair against the FP64 product (device / emulated):
+
+| case | coarse n | host GEMV µs | resident µs | traced µs | L1 µs | round trip µs | stock | fp32 | bf16 | bfp8b | bfp8b LoFi | error bf16, bfp8b |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| DC 100 | 1352 | 9.4 | 86 | 94 | 84 | 268 | 4/60 | 4/60 | 4/60 | 4/64 | 4/72 | 3.5e-3/3.4e-3, 3.5e-3/3.4e-3 |
+| DC 200 | 1682 | 15.2 | 113 | 121 | 110 | 303 | 4/95 | 4/95 | 4/94 | 4/101 | 4/112 | 7.0e-3/6.9e-3, 5.6e-3/5.7e-3 |
+| DC 320 | 1800 | 17.1 | 125 | 133 | 122 | 339 | 4/132 | 4/134 | 4/134 | 4/144 | 4/168 | 2.7e-3/2.7e-3, 2.9e-3/2.9e-3 |
+| thermal 50 | 845 | 4.1 | 49 | 56 | 48 | 198 | 7/585 | 7/591 | 7/599 | 7/608 | 7/673 | 3.3e-3/3.0e-3, 4.7e-3/2.3e-3 |
+| thermal 100 | 1445 | 10.9 | 51 | 59 | 50 | 224 | 7/805 | 7/811 | 7/806 | 7/821 | 7/971 | 1.7e-3/1.7e-3, 8.9e-3/9.0e-3 |
+| thermal 200 | 1805 | 17.3 | 125 | 133 | 122 | 313 | 7/1025 | 6/892 | 7/1031 | 7/1031 | 6/920 | 2.3e-3/2.1e-3, 7.1e-3/7.1e-3 |
+
+- ttnn's host conversion of `R` is bit-identical to the emulation for FP32 and
+  BF16; BFP8_B differs in 2–10 of 0.7–3.3 million values. At HiFi4 the device
+  pair agrees with the emulated pair to 1.2e-4–3.3e-3, so the CPU emulation
+  predicts the device solves: every HiFi4 configuration converged on every
+  case within the noise above.
+- FP32 inputs on the FPU are not FP32 arithmetic: the pair's error is
+  0.9e-3–2.1e-3 at HiFi4 (emulated FP32 1e-7) and 2.5e-2–7.0e-2 at LoFi.
+  BFP8_B at LoFi raises the inner iterations 15–27% over stock on five of six
+  cases.
+- The pair costs 49–125 µs resident on the device, 4.7–12× the host FP32 GEMV,
+  and 198–339 µs with the round trip. Neither a trace (+7–8 µs) nor L1
+  placement (−1–3 µs) moves it, and the format does not either: the run time is
+  the default matmul program's, and it steps with the tile count (43 and 53
+  tiles are slower than 46).
+
+**Decision:** the two-level coarse correction keeps its FP32 dense inverse on
+the host. Offloading only the coarse GEMVs does not pay; a Tensix inner solve
+must keep the whole PCG resident. For that port the coarse correction goes
+into the FPU as the BFP8_B or BF16 Cholesky factor at HiFi4, never as the
+rounded inverse, and the stencil stays FP32 (SFPU) or uses at least two BF16
+passes per operand.
+
 ## Graded tensor grids
 
 `grid.graded_edges(start, end, coarse_pitch_m=, fine_pitch_m=, refine_m=[(a,

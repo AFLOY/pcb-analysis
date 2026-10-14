@@ -1,0 +1,4927 @@
+{
+  "schema": "tensix-coarse-gemv-benchmark/v1",
+  "measured_at": "2026-10-14T12:02:21+09:00",
+  "environment": {
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "python": "3.12.14",
+    "numpy": "1.26.4",
+    "torch": "2.14.1+cpu",
+    "ttnn": "0.79.0",
+    "tenstorrent_driver": "2.11.0",
+    "device": "Tenstorrent Arch.BLACKHOLE",
+    "device_id": 0,
+    "boards": [
+      "blackhole-302BA266A8380E98",
+      "blackhole-F888FE6CC85198A2"
+    ],
+    "compute_grid": [
+      11,
+      10
+    ],
+    "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+    "cpu_count": 16
+  },
+  "definitions": {
+    "factor": "lower Cholesky factor R of the FP64 coarse inverse; the device stores it once and applies R (r^T R)^T",
+    "conversion": "ttnn host conversion of R read back and compared with tensix_formats rounding (round-to-nearest-even, 16-value block exponents)",
+    "accuracy": "relative L2 errors of the two-GEMV result against the FP64 dense inverse product and against the emulation",
+    "device_resident_two_gemv": "wall time per call of the two ttnn.matmul with the input already on the device, synchronised every sample",
+    "round_trip_two_gemv": "wall time per call including ttnn.from_torch of the restricted residual and ttnn.to_torch of the result",
+    "latency": "bfp8b/HiFi4 pair per call: dram_resident as above, dram_traced replayed with ttnn.execute_trace, l1_resident with R and vectors in L1",
+    "cpu_fp32_dense_inverse_gemv": "NumPy float32 dense-inverse GEMV on the host, the stock two-level preconditioner's product",
+    "solves": "solve_mpir with the portable FP32 operator and Jacobi on the host, the coarse GEMVs on the device; emulated/* is the CPU emulation of the same format",
+    "viable": "the CPU emulation's criterion: converged, at most one extra outer step, at most 10% more inner iterations than stock, solution within 100 x relative_tolerance"
+  },
+  "cases": [
+    {
+      "physics": "dc",
+      "elements": [
+        100,
+        100
+      ],
+      "nodes": 20402,
+      "coarse_size": 1352,
+      "padded_coarse_size": 1376,
+      "config": {
+        "relative_tolerance": 1e-10,
+        "inner_relative_tolerance": 0.002,
+        "max_outer_iterations": 8,
+        "max_inner_iterations": 200
+      },
+      "stock": {
+        "solve_ms": 30.257731006713584,
+        "converged": true,
+        "relative_residual": 4.983755852797787e-12,
+        "outer_iterations": 4,
+        "inner_iterations": 60
+      },
+      "cpu_fp32_dense_inverse_gemv": {
+        "median_us": 9.362910059280694,
+        "minimum_us": 9.296730131609365,
+        "samples_us": [
+          9.579670004313812,
+          12.105034984415397,
+          9.362910059280694,
+          9.322929981863126,
+          9.296730131609365
+        ],
+        "calls_per_sample": 200
+      },
+      "conversion": {
+        "fp32": {
+          "values": 1827904,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 2.163673942620268e-08,
+          "emulated_relative_error_vs_fp64_factor": 2.163673942620268e-08
+        },
+        "bf16": {
+          "values": 1827904,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 0.0014196585078468937,
+          "emulated_relative_error_vs_fp64_factor": 0.0014196585078468937
+        },
+        "bfp8b": {
+          "values": 1827904,
+          "mismatched_values": 2,
+          "maximum_relative_difference": 0.00022007041843608022,
+          "relative_error_vs_fp64_factor": 0.009192293506167425,
+          "emulated_relative_error_vs_fp64_factor": 0.009192293506154357
+        },
+        "bfp8b-fp32act": {
+          "values": 1827904,
+          "mismatched_values": 2,
+          "maximum_relative_difference": 0.00022007041843608022,
+          "relative_error_vs_fp64_factor": 0.009192293506167425,
+          "emulated_relative_error_vs_fp64_factor": 0.009192293506154357
+        },
+        "bfp4b": {
+          "values": 1827904,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 0.1533638374826888,
+          "emulated_relative_error_vs_fp64_factor": 0.1533638374826888
+        }
+      },
+      "kernels": {
+        "fp32/LoFi": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.07586611459499853,
+              "emulated_vs_fp64": 1.4066967675088456e-06,
+              "device_vs_emulated": 0.0758672921623658
+            },
+            "random": {
+              "device_vs_fp64": 0.0520307284319572,
+              "emulated_vs_fp64": 4.09991347323871e-07,
+              "device_vs_emulated": 0.05203037188742721
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 91.96089988108724,
+            "minimum_us": 90.53828980540857,
+            "samples_us": [
+              90.53828980540857,
+              90.88355000130832,
+              106.74830002244562,
+              91.96089988108724,
+              100.08539975387976
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 194.28009982220829,
+            "minimum_us": 192.4851501826197,
+            "samples_us": [
+              200.1197004574351,
+              192.96404934721068,
+              194.28009982220829,
+              192.4851501826197,
+              199.49849956901744
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "fp32/HiFi2": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.014543421187889793,
+              "emulated_vs_fp64": 1.4066967675088456e-06,
+              "device_vs_emulated": 0.014544690031804596
+            },
+            "random": {
+              "device_vs_fp64": 0.013265737403474425,
+              "emulated_vs_fp64": 4.09991347323871e-07,
+              "device_vs_emulated": 0.01326536391657163
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 90.52946988958865,
+            "minimum_us": 90.49190004589036,
+            "samples_us": [
+              90.54659982211888,
+              90.52406996488571,
+              90.49190004589036,
+              90.52946988958865,
+              90.61863995157182
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 182.19600024167448,
+            "minimum_us": 181.66045047109947,
+            "samples_us": [
+              1217.9330005892552,
+              182.19600024167448,
+              181.66045047109947,
+              181.74465076299384,
+              191.97615038137883
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "fp32/HiFi4": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0026140328017300006,
+              "emulated_vs_fp64": 1.4066967675088456e-06,
+              "device_vs_emulated": 0.0026152800578641416
+            },
+            "random": {
+              "device_vs_fp64": 0.0009977356759903221,
+              "emulated_vs_fp64": 4.09991347323871e-07,
+              "device_vs_emulated": 0.000997375503807576
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 90.75370006030425,
+            "minimum_us": 90.74798988876864,
+            "samples_us": [
+              90.76141024706885,
+              90.74798988876864,
+              90.80038988031447,
+              90.74978996068239,
+              90.75370006030425
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 191.04639941360801,
+            "minimum_us": 184.03349968139082,
+            "samples_us": [
+              245.04339962732047,
+              184.03349968139082,
+              184.05804876238108,
+              191.04639941360801,
+              196.4381488505751
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.07534561919544747,
+              "emulated_vs_fp64": 0.0037906211617987776,
+              "device_vs_emulated": 0.07804548591445941
+            },
+            "random": {
+              "device_vs_fp64": 0.02932200151001848,
+              "emulated_vs_fp64": 0.0034050948481129965,
+              "device_vs_emulated": 0.032376514107936
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 85.77290020184591,
+            "minimum_us": 85.7141800224781,
+            "samples_us": [
+              85.77290020184591,
+              86.19971020380035,
+              85.72028978960589,
+              85.78503009630367,
+              85.7141800224781
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 271.0695509449579,
+            "minimum_us": 267.73519930429757,
+            "samples_us": [
+              271.0695509449579,
+              267.73519930429757,
+              270.0305500184186,
+              279.6879503875971,
+              378.43280006200075
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.016988228044141233,
+              "emulated_vs_fp64": 0.0037906211617987776,
+              "device_vs_emulated": 0.019770048665615762
+            },
+            "random": {
+              "device_vs_fp64": 0.0026402191741333116,
+              "emulated_vs_fp64": 0.0034050948481129965,
+              "device_vs_emulated": 0.0008458021323713654
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 85.98209009505808,
+            "minimum_us": 85.93289996497333,
+            "samples_us": [
+              85.93289996497333,
+              86.28897980088368,
+              85.98209009505808,
+              85.95924999099225,
+              86.02418005466461
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 234.16359908878803,
+            "minimum_us": 219.49015063000843,
+            "samples_us": [
+              727.3697992786765,
+              234.9415997741744,
+              234.16359908878803,
+              230.01919907983392,
+              219.49015063000843
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0032376096062697005,
+              "emulated_vs_fp64": 0.0037906211617987776,
+              "device_vs_emulated": 0.0010273580814728661
+            },
+            "random": {
+              "device_vs_fp64": 0.003515999632001884,
+              "emulated_vs_fp64": 0.0034050948481129965,
+              "device_vs_emulated": 0.0001620691759281019
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 86.07536990894005,
+            "minimum_us": 85.99842985859141,
+            "samples_us": [
+              86.04791015386581,
+              86.07847994426265,
+              86.07536990894005,
+              86.10632998170331,
+              85.99842985859141
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 235.71005003759637,
+            "minimum_us": 222.48584864428267,
+            "samples_us": [
+              751.4077005907893,
+              255.20024937577548,
+              235.71005003759637,
+              222.48584864428267,
+              223.00734999589622
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.07079431797985836,
+              "emulated_vs_fp64": 0.026509683172284536,
+              "device_vs_emulated": 0.09363752405582783
+            },
+            "random": {
+              "device_vs_fp64": 0.01779026402440106,
+              "emulated_vs_fp64": 0.003381657315880361,
+              "device_vs_emulated": 0.019888289524907166
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 85.72680002544075,
+            "minimum_us": 85.70496982429177,
+            "samples_us": [
+              122.89609992876649,
+              85.72179998736829,
+              85.77038999646902,
+              85.70496982429177,
+              85.72680002544075
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 263.8277001096867,
+            "minimum_us": 262.6118512125686,
+            "samples_us": [
+              269.65079887304455,
+              284.88740063039586,
+              263.8277001096867,
+              262.6118512125686,
+              262.78074947185814
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.019813011828298196,
+              "emulated_vs_fp64": 0.026509683172284536,
+              "device_vs_emulated": 0.0077838513776931195
+            },
+            "random": {
+              "device_vs_fp64": 0.0029214668928531046,
+              "emulated_vs_fp64": 0.003381657315880361,
+              "device_vs_emulated": 0.000771638932081417
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 85.97298001404852,
+            "minimum_us": 85.91115998569876,
+            "samples_us": [
+              85.97298001404852,
+              86.25180984381586,
+              85.94172017183155,
+              85.97748004831374,
+              85.91115998569876
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 265.74834919301793,
+            "minimum_us": 220.66685050958768,
+            "samples_us": [
+              303.2273496501148,
+              265.74834919301793,
+              295.0643000076525,
+              221.4153006207198,
+              220.66685050958768
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.026581879249683596,
+              "emulated_vs_fp64": 0.026509683172284536,
+              "device_vs_emulated": 0.00028683649442062294
+            },
+            "random": {
+              "device_vs_fp64": 0.00347837444840289,
+              "emulated_vs_fp64": 0.003381657315880361,
+              "device_vs_emulated": 0.00014844560993875993
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 85.9705699258484,
+            "minimum_us": 85.93520004069433,
+            "samples_us": [
+              85.99741995567456,
+              85.9705699258484,
+              85.94982995418832,
+              85.93520004069433,
+              85.98399988841265
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 267.7697499166243,
+            "minimum_us": 262.9204507684335,
+            "samples_us": [
+              643.2389011024497,
+              267.8499004105106,
+              264.4829990458675,
+              267.7697499166243,
+              262.9204507684335
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.06944207670892642,
+              "emulated_vs_fp64": 0.026509683172284536,
+              "device_vs_emulated": 0.09222389858741975
+            },
+            "random": {
+              "device_vs_fp64": 0.025894142655501565,
+              "emulated_vs_fp64": 0.003381657315880361,
+              "device_vs_emulated": 0.02806072967382822
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 90.42667981702834,
+            "minimum_us": 90.40753997396678,
+            "samples_us": [
+              90.42667981702834,
+              90.4328899923712,
+              90.99654998863116,
+              90.40753997396678,
+              90.41795012308285
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 198.37889994960278,
+            "minimum_us": 180.55389955407009,
+            "samples_us": [
+              331.5809488412924,
+              198.37889994960278,
+              199.791049817577,
+              197.04380101757124,
+              180.55389955407009
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.02147502025578592,
+              "emulated_vs_fp64": 0.026509683172284536,
+              "device_vs_emulated": 0.0071213052575886705
+            },
+            "random": {
+              "device_vs_fp64": 0.01386672173826425,
+              "emulated_vs_fp64": 0.003381657315880361,
+              "device_vs_emulated": 0.015932985470543806
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 90.57436021976173,
+            "minimum_us": 90.5368899111636,
+            "samples_us": [
+              90.55270988028497,
+              90.57464980287477,
+              90.57436021976173,
+              91.16257017012686,
+              90.5368899111636
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 219.0463012084365,
+            "minimum_us": 189.6622488857247,
+            "samples_us": [
+              266.51480002328753,
+              215.25760093936697,
+              219.0463012084365,
+              240.0438504992053,
+              189.6622488857247
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.027330960533668604,
+              "emulated_vs_fp64": 0.026509683172284536,
+              "device_vs_emulated": 0.0010183067292662562
+            },
+            "random": {
+              "device_vs_fp64": 0.0025892432810750462,
+              "emulated_vs_fp64": 0.003381657315880361,
+              "device_vs_emulated": 0.0015089647723787426
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 90.69438994629309,
+            "minimum_us": 90.55761998752132,
+            "samples_us": [
+              90.55761998752132,
+              90.64268000656739,
+              91.01690026000142,
+              90.69438994629309,
+              90.79087001737207
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 196.00285013439134,
+            "minimum_us": 195.3200000571087,
+            "samples_us": [
+              350.82264948869124,
+              315.9671992762014,
+              195.3200000571087,
+              195.48185082385316,
+              196.00285013439134
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 1.8848460246034753,
+              "emulated_vs_fp64": 1.8850995725643478,
+              "device_vs_emulated": 0.0043354898594937
+            },
+            "random": {
+              "device_vs_fp64": 0.07146940360140652,
+              "emulated_vs_fp64": 0.07525302455704565,
+              "device_vs_emulated": 0.0039398418729204975
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 85.60398011468351,
+            "minimum_us": 85.59736015740782,
+            "samples_us": [
+              85.60398011468351,
+              85.66668984713033,
+              85.59845999116078,
+              85.59736015740782,
+              85.65997995901853
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 283.4176004398614,
+            "minimum_us": 278.5247503197752,
+            "samples_us": [
+              285.6448001693934,
+              283.85790064930916,
+              283.4176004398614,
+              283.10945053817704,
+              278.5247503197752
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 1.8848460246034753,
+              "emulated_vs_fp64": 1.8850995725643478,
+              "device_vs_emulated": 0.0043354898594937
+            },
+            "random": {
+              "device_vs_fp64": 0.07146940360140652,
+              "emulated_vs_fp64": 0.07525302455704565,
+              "device_vs_emulated": 0.0039398418729204975
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 85.75215993914753,
+            "minimum_us": 85.72870981879532,
+            "samples_us": [
+              85.72870981879532,
+              85.79715009545907,
+              85.79563989769667,
+              85.75215993914753,
+              85.74433973990381
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 267.69260002765805,
+            "minimum_us": 267.2512491699308,
+            "samples_us": [
+              268.7260493985377,
+              268.60429934458807,
+              267.66904920805246,
+              267.2512491699308,
+              267.69260002765805
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 1.885958389033539,
+              "emulated_vs_fp64": 1.8850995725643478,
+              "device_vs_emulated": 0.0006705979762963928
+            },
+            "random": {
+              "device_vs_fp64": 0.07525759572699,
+              "emulated_vs_fp64": 0.07525302455704565,
+              "device_vs_emulated": 6.875607499043329e-06
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 85.89934004703537,
+            "minimum_us": 85.85255010984838,
+            "samples_us": [
+              85.85255010984838,
+              86.19439991889521,
+              86.04812988778576,
+              85.89934004703537,
+              85.86487994762138
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 231.75154929049313,
+            "minimum_us": 219.90995010128245,
+            "samples_us": [
+              290.97945080138743,
+              233.439750445541,
+              231.75154929049313,
+              219.90995010128245,
+              223.37959962897003
+            ],
+            "calls_per_sample": 20
+          }
+        }
+      },
+      "latency": {
+        "dram_resident": {
+          "median_us": 86.09070006059483,
+          "minimum_us": 85.91466990765184,
+          "samples_us": [
+            85.9507400309667,
+            86.09070006059483,
+            86.70196984894574,
+            86.224960105028,
+            85.91466990765184
+          ],
+          "calls_per_sample": 100
+        },
+        "dram_traced": {
+          "median_us": 93.5082498472184,
+          "minimum_us": 93.47840008558705,
+          "samples_us": [
+            93.6315898434259,
+            93.67216000100598,
+            93.49333005957305,
+            93.47840008558705,
+            93.5082498472184
+          ],
+          "calls_per_sample": 100
+        },
+        "l1_resident": {
+          "median_us": 84.07866989728063,
+          "minimum_us": 84.06493987422436,
+          "samples_us": [
+            84.06493987422436,
+            84.06904991716146,
+            84.10681009991094,
+            84.48353997664526,
+            84.07866989728063
+          ],
+          "calls_per_sample": 100
+        }
+      },
+      "solves": {
+        "emulated/fp32": {
+          "solve_ms": 32.50361600657925,
+          "converged": true,
+          "relative_residual": 4.9923027759915796e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 60,
+          "relative_solution_error_vs_stock": 2.8036957273359733e-14,
+          "relative_max_error_vs_stock": 2.4796755748962952e-14
+        },
+        "device/fp32/HiFi4": {
+          "solve_ms": 114.18151200632565,
+          "converged": true,
+          "relative_residual": 5.225335178061802e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 60,
+          "relative_solution_error_vs_stock": 3.7387713782942644e-14,
+          "relative_max_error_vs_stock": 3.371753982938255e-14,
+          "viable": true
+        },
+        "emulated/bf16": {
+          "solve_ms": 33.8388109812513,
+          "converged": true,
+          "relative_residual": 5.219650051715415e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 60,
+          "relative_solution_error_vs_stock": 4.759631055108113e-14,
+          "relative_max_error_vs_stock": 3.6590334702738015e-14
+        },
+        "device/bf16/HiFi4": {
+          "solve_ms": 61.09803501749411,
+          "converged": true,
+          "relative_residual": 5.3065732821580615e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 60,
+          "relative_solution_error_vs_stock": 2.6755929161465633e-14,
+          "relative_max_error_vs_stock": 3.900953038556367e-14,
+          "viable": true
+        },
+        "emulated/bfp8b": {
+          "solve_ms": 34.88517799996771,
+          "converged": true,
+          "relative_residual": 2.7595175204770234e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 64,
+          "relative_solution_error_vs_stock": 1.286268767073608e-13,
+          "relative_max_error_vs_stock": 1.2801577154952417e-13
+        },
+        "device/bfp8b/HiFi4": {
+          "solve_ms": 56.22482000035234,
+          "converged": true,
+          "relative_residual": 2.7693513505542244e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 64,
+          "relative_solution_error_vs_stock": 5.889540703140779e-14,
+          "relative_max_error_vs_stock": 8.255505267642543e-14,
+          "viable": true
+        },
+        "device/bfp8b/LoFi": {
+          "solve_ms": 124.8049539863132,
+          "converged": true,
+          "relative_residual": 5.710934077677715e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 72,
+          "relative_solution_error_vs_stock": 4.2096948600984617e-13,
+          "relative_max_error_vs_stock": 3.870713092521046e-13,
+          "viable": false
+        },
+        "device/bfp8b-fp32act/HiFi4": {
+          "solve_ms": 50.61906800256111,
+          "converged": true,
+          "relative_residual": 2.7441579756596595e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 64,
+          "relative_solution_error_vs_stock": 6.039070239194993e-14,
+          "relative_max_error_vs_stock": 8.951024026454918e-14,
+          "viable": true
+        }
+      }
+    },
+    {
+      "physics": "dc",
+      "elements": [
+        200,
+        200
+      ],
+      "nodes": 80802,
+      "coarse_size": 1682,
+      "padded_coarse_size": 1696,
+      "config": {
+        "relative_tolerance": 1e-10,
+        "inner_relative_tolerance": 0.002,
+        "max_outer_iterations": 8,
+        "max_inner_iterations": 200
+      },
+      "stock": {
+        "solve_ms": 145.71563800564036,
+        "converged": true,
+        "relative_residual": 5.597804911485795e-12,
+        "outer_iterations": 4,
+        "inner_iterations": 95
+      },
+      "cpu_fp32_dense_inverse_gemv": {
+        "median_us": 15.165024960879236,
+        "minimum_us": 14.543790020979941,
+        "samples_us": [
+          26.39313999679871,
+          15.165024960879236,
+          14.594639942515641,
+          14.543790020979941,
+          18.55794500443153
+        ],
+        "calls_per_sample": 200
+      },
+      "conversion": {
+        "fp32": {
+          "values": 2829124,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 2.1362224172696427e-08,
+          "emulated_relative_error_vs_fp64_factor": 2.1362224172696427e-08
+        },
+        "bf16": {
+          "values": 2829124,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 0.001341765184325057,
+          "emulated_relative_error_vs_fp64_factor": 0.001341765184325057
+        },
+        "bfp8b": {
+          "values": 2829124,
+          "mismatched_values": 3,
+          "maximum_relative_difference": 0.00011837121564894915,
+          "relative_error_vs_fp64_factor": 0.010147872588138294,
+          "emulated_relative_error_vs_fp64_factor": 0.010147872588136155
+        },
+        "bfp8b-fp32act": {
+          "values": 2829124,
+          "mismatched_values": 3,
+          "maximum_relative_difference": 0.00011837121564894915,
+          "relative_error_vs_fp64_factor": 0.010147872588138294,
+          "emulated_relative_error_vs_fp64_factor": 0.010147872588136155
+        },
+        "bfp4b": {
+          "values": 2829124,
+          "mismatched_values": 1,
+          "maximum_relative_difference": 0.125,
+          "relative_error_vs_fp64_factor": 0.19562966598193313,
+          "emulated_relative_error_vs_fp64_factor": 0.19562966597322054
+        }
+      },
+      "kernels": {
+        "fp32/LoFi": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.029256859765725368,
+              "emulated_vs_fp64": 2.6918608508919423e-06,
+              "device_vs_emulated": 0.029255092489052784
+            },
+            "random": {
+              "device_vs_fp64": 0.05761570797821352,
+              "emulated_vs_fp64": 2.9051698175911674e-07,
+              "device_vs_emulated": 0.05761577293356717
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 118.7695300905034,
+            "minimum_us": 118.72614995809272,
+            "samples_us": [
+              118.72614995809272,
+              118.74388001160696,
+              118.8115100376308,
+              118.77363984240219,
+              118.7695300905034
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 226.02560056839138,
+            "minimum_us": 222.93820074992254,
+            "samples_us": [
+              235.4475494939834,
+              224.14299892261624,
+              226.02560056839138,
+              222.93820074992254,
+              227.60560095775872
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "fp32/HiFi2": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.013420595146507633,
+              "emulated_vs_fp64": 2.6918608508919423e-06,
+              "device_vs_emulated": 0.013423061259435648
+            },
+            "random": {
+              "device_vs_fp64": 0.02307735236120245,
+              "emulated_vs_fp64": 2.9051698175911674e-07,
+              "device_vs_emulated": 0.023077421434330822
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 118.73445997480303,
+            "minimum_us": 118.68726985994726,
+            "samples_us": [
+              118.73445997480303,
+              119.04726998182014,
+              118.6997999320738,
+              118.68726985994726,
+              118.73596988152713
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 230.55174970068038,
+            "minimum_us": 222.91370114544407,
+            "samples_us": [
+              235.84534937981516,
+              230.55174970068038,
+              231.3858494744636,
+              222.91370114544407,
+              226.349251170177
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "fp32/HiFi4": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0019800883627594554,
+              "emulated_vs_fp64": 2.6918608508919423e-06,
+              "device_vs_emulated": 0.0019822418830454367
+            },
+            "random": {
+              "device_vs_fp64": 0.002120329593847694,
+              "emulated_vs_fp64": 2.9051698175911674e-07,
+              "device_vs_emulated": 0.002120399996100128
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 119.07451000297442,
+            "minimum_us": 118.96240001078695,
+            "samples_us": [
+              118.96240001078695,
+              119.01318997843191,
+              119.07851992873475,
+              119.62686985498294,
+              119.07451000297442
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 234.00579957524315,
+            "minimum_us": 219.4640997913666,
+            "samples_us": [
+              237.8752498771064,
+              242.27609974332154,
+              219.4640997913666,
+              220.06670042173937,
+              234.00579957524315
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0739087078434228,
+              "emulated_vs_fp64": 0.01966978504799281,
+              "device_vs_emulated": 0.09444058165942591
+            },
+            "random": {
+              "device_vs_fp64": 0.022996861404020304,
+              "emulated_vs_fp64": 0.006865442345494938,
+              "device_vs_emulated": 0.02930547454967267
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 112.68233007285744,
+            "minimum_us": 112.64525004662573,
+            "samples_us": [
+              112.6965499133803,
+              113.01435006316751,
+              112.68233007285744,
+              112.64525004662573,
+              112.66008979873732
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 320.7562505849637,
+            "minimum_us": 319.7869489667937,
+            "samples_us": [
+              322.22209993051365,
+              323.9679499529302,
+              320.47675049398094,
+              320.7562505849637,
+              319.7869489667937
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.015851180310232353,
+              "emulated_vs_fp64": 0.01966978504799281,
+              "device_vs_emulated": 0.0043917644130370736
+            },
+            "random": {
+              "device_vs_fp64": 0.001694331289164093,
+              "emulated_vs_fp64": 0.006865442345494938,
+              "device_vs_emulated": 0.005449887759397107
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 112.86046996247023,
+            "minimum_us": 112.83119994914159,
+            "samples_us": [
+              112.86046996247023,
+              112.94763011392206,
+              112.93902003671974,
+              112.83119994914159,
+              112.83961997833103
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 274.35829979367554,
+            "minimum_us": 270.18485125154257,
+            "samples_us": [
+              281.8109991494566,
+              274.35829979367554,
+              281.5230007399805,
+              270.18485125154257,
+              271.9661992159672
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.019708237134055392,
+              "emulated_vs_fp64": 0.01966978504799281,
+              "device_vs_emulated": 0.00035117525874057455
+            },
+            "random": {
+              "device_vs_fp64": 0.0069547191591933085,
+              "emulated_vs_fp64": 0.006865442345494938,
+              "device_vs_emulated": 0.00020135447509378693
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 113.09800989693031,
+            "minimum_us": 113.07406995911151,
+            "samples_us": [
+              113.16874995827675,
+              113.07406995911151,
+              113.09360997984186,
+              113.09800989693031,
+              113.47944004228339
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 320.5368499038741,
+            "minimum_us": 317.98250129213557,
+            "samples_us": [
+              326.35050010867417,
+              320.5368499038741,
+              321.5888995327987,
+              318.1863998179324,
+              317.98250129213557
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.08758364141878443,
+              "emulated_vs_fp64": 0.013136625071755526,
+              "device_vs_emulated": 0.0993864905769303
+            },
+            "random": {
+              "device_vs_fp64": 0.029693583831203366,
+              "emulated_vs_fp64": 0.005666487890623511,
+              "device_vs_emulated": 0.0345261658094308
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 112.80406004516408,
+            "minimum_us": 112.75304976152256,
+            "samples_us": [
+              112.80406004516408,
+              112.7964400802739,
+              112.82849998679012,
+              112.81326995231211,
+              112.75304976152256
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 318.3712498866953,
+            "minimum_us": 268.365848751273,
+            "samples_us": [
+              357.01894958037883,
+              344.99450121074915,
+              283.58540002955124,
+              268.365848751273,
+              318.3712498866953
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.019588239417489942,
+              "emulated_vs_fp64": 0.013136625071755526,
+              "device_vs_emulated": 0.007274504158765913
+            },
+            "random": {
+              "device_vs_fp64": 0.002270592143233753,
+              "emulated_vs_fp64": 0.005666487890623511,
+              "device_vs_emulated": 0.0055995438368347545
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 112.84854001132771,
+            "minimum_us": 112.8113700542599,
+            "samples_us": [
+              112.8113700542599,
+              113.08238987112418,
+              112.84854001132771,
+              112.85685992334038,
+              112.83520987490192
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 270.3636506339535,
+            "minimum_us": 268.63734965445474,
+            "samples_us": [
+              357.59354941546917,
+              315.60795032419264,
+              270.3636506339535,
+              269.925850443542,
+              268.63734965445474
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.013264765088678845,
+              "emulated_vs_fp64": 0.013136625071755526,
+              "device_vs_emulated": 0.0003911830131599851
+            },
+            "random": {
+              "device_vs_fp64": 0.005623241315653645,
+              "emulated_vs_fp64": 0.005666487890623511,
+              "device_vs_emulated": 0.0001964680799915593
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 112.90213995380327,
+            "minimum_us": 112.80805978458375,
+            "samples_us": [
+              112.8829101799056,
+              113.248800043948,
+              113.08618995826691,
+              112.90213995380327,
+              112.80805978458375
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 303.4933499293402,
+            "minimum_us": 274.4990502833389,
+            "samples_us": [
+              341.566999850329,
+              324.131699744612,
+              278.37194938911125,
+              303.4933499293402,
+              274.4990502833389
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.07084843530240922,
+              "emulated_vs_fp64": 0.013136625071755526,
+              "device_vs_emulated": 0.08229704594049622
+            },
+            "random": {
+              "device_vs_fp64": 0.04233776957999571,
+              "emulated_vs_fp64": 0.005666487890623511,
+              "device_vs_emulated": 0.04720230603644875
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 118.533989880234,
+            "minimum_us": 118.46565001178533,
+            "samples_us": [
+              118.59049001941457,
+              118.72325005242601,
+              118.46565001178533,
+              118.47307003336027,
+              118.533989880234
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 225.78869975404814,
+            "minimum_us": 221.31364967208356,
+            "samples_us": [
+              235.57384993182495,
+              234.302350145299,
+              221.3862506323494,
+              221.31364967208356,
+              225.78869975404814
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.017162398745611505,
+              "emulated_vs_fp64": 0.013136625071755526,
+              "device_vs_emulated": 0.005245490409134527
+            },
+            "random": {
+              "device_vs_fp64": 0.013873500228484983,
+              "emulated_vs_fp64": 0.005666487890623511,
+              "device_vs_emulated": 0.018812078298269683
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 118.52967989398167,
+            "minimum_us": 118.52085997816175,
+            "samples_us": [
+              118.5270698624663,
+              118.553820066154,
+              118.52085997816175,
+              118.57706005685031,
+              118.52967989398167
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 227.06454910803586,
+            "minimum_us": 226.62075061816722,
+            "samples_us": [
+              226.62075061816722,
+              228.88154926477,
+              227.06454910803586,
+              226.66430013487116,
+              227.3686506669037
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.011277706452397718,
+              "emulated_vs_fp64": 0.013136625071755526,
+              "device_vs_emulated": 0.0023323999295393077
+            },
+            "random": {
+              "device_vs_fp64": 0.0022866026898558894,
+              "emulated_vs_fp64": 0.005666487890623511,
+              "device_vs_emulated": 0.005663371880712226
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 118.61654988024384,
+            "minimum_us": 118.61112987389788,
+            "samples_us": [
+              118.61112987389788,
+              118.61854000017047,
+              118.62304992973804,
+              118.61113016493618,
+              118.61654988024384
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 238.46834956202656,
+            "minimum_us": 232.19135036924854,
+            "samples_us": [
+              238.46834956202656,
+              239.2418507952243,
+              239.73619972821325,
+              237.90629929862916,
+              232.19135036924854
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 2.438852283913311,
+              "emulated_vs_fp64": 2.44618343351648,
+              "device_vs_emulated": 0.005574461105521617
+            },
+            "random": {
+              "device_vs_fp64": 0.07465431894073321,
+              "emulated_vs_fp64": 0.07915807418848013,
+              "device_vs_emulated": 0.004991657634183086
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 112.73912998149171,
+            "minimum_us": 112.72661009570584,
+            "samples_us": [
+              112.78511985437945,
+              113.19388984702528,
+              112.73912998149171,
+              112.72661009570584,
+              112.73821990471333
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 277.29489956982434,
+            "minimum_us": 271.67270018253475,
+            "samples_us": [
+              321.58385001821443,
+              370.3067995957099,
+              277.29489956982434,
+              271.8018993618898,
+              271.67270018253475
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 2.438852283913311,
+              "emulated_vs_fp64": 2.44618343351648,
+              "device_vs_emulated": 0.005574461105521617
+            },
+            "random": {
+              "device_vs_fp64": 0.07465431894073321,
+              "emulated_vs_fp64": 0.07915807418848013,
+              "device_vs_emulated": 0.004991657634183086
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 112.90023976471275,
+            "minimum_us": 112.8492399584502,
+            "samples_us": [
+              112.86185996141285,
+              112.96726996079087,
+              112.96505981590599,
+              112.90023976471275,
+              112.8492399584502
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 295.3964489279315,
+            "minimum_us": 266.2668499397114,
+            "samples_us": [
+              327.543199819047,
+              318.6988498782739,
+              295.3964489279315,
+              270.25945018976927,
+              266.2668499397114
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 2.446311976884913,
+              "emulated_vs_fp64": 2.44618343351648,
+              "device_vs_emulated": 0.003651239797688633
+            },
+            "random": {
+              "device_vs_fp64": 0.07932056543725287,
+              "emulated_vs_fp64": 0.07915807418848013,
+              "device_vs_emulated": 0.00042295936944911034
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 113.01735998131335,
+            "minimum_us": 112.88730980595574,
+            "samples_us": [
+              112.88730980595574,
+              113.01735998131335,
+              113.10413014143705,
+              113.39928023517132,
+              112.94863012153655
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 317.0857991790399,
+            "minimum_us": 284.4576010829769,
+            "samples_us": [
+              322.70099909510463,
+              387.9689989844337,
+              317.0857991790399,
+              316.14905019523576,
+              284.4576010829769
+            ],
+            "calls_per_sample": 20
+          }
+        }
+      },
+      "latency": {
+        "dram_resident": {
+          "median_us": 112.90394002571702,
+          "minimum_us": 112.83561994787306,
+          "samples_us": [
+            112.83561994787306,
+            112.9694702103734,
+            112.87729983450845,
+            112.90394002571702,
+            112.90905007626861
+          ],
+          "calls_per_sample": 100
+        },
+        "dram_traced": {
+          "median_us": 120.91101001715288,
+          "minimum_us": 120.6964100128971,
+          "samples_us": [
+            120.6964100128971,
+            120.91101001715288,
+            120.9785501123406,
+            120.91151991626248,
+            120.87253999197856
+          ],
+          "calls_per_sample": 100
+        },
+        "l1_resident": {
+          "median_us": 109.99991005519405,
+          "minimum_us": 109.99318998074159,
+          "samples_us": [
+            109.99338992405683,
+            109.99991005519405,
+            109.99318998074159,
+            110.12355011189356,
+            110.15038995537907
+          ],
+          "calls_per_sample": 100
+        }
+      },
+      "solves": {
+        "emulated/fp32": {
+          "solve_ms": 146.5950249985326,
+          "converged": true,
+          "relative_residual": 5.845687980265849e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 95,
+          "relative_solution_error_vs_stock": 1.4657138548419368e-13,
+          "relative_max_error_vs_stock": 8.402166926733642e-14
+        },
+        "device/fp32/HiFi4": {
+          "solve_ms": 207.39553202292882,
+          "converged": true,
+          "relative_residual": 5.86172638899363e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 95,
+          "relative_solution_error_vs_stock": 6.390856562315054e-14,
+          "relative_max_error_vs_stock": 4.522282805832973e-14,
+          "viable": true
+        },
+        "emulated/bf16": {
+          "solve_ms": 148.0582260119263,
+          "converged": true,
+          "relative_residual": 5.721108019124582e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 95,
+          "relative_solution_error_vs_stock": 2.477387223686958e-14,
+          "relative_max_error_vs_stock": 5.710210532731601e-14
+        },
+        "device/bf16/HiFi4": {
+          "solve_ms": 257.3330390150659,
+          "converged": true,
+          "relative_residual": 7.703482000662792e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 94,
+          "relative_solution_error_vs_stock": 1.7624105150955104e-13,
+          "relative_max_error_vs_stock": 1.8313460922832063e-13,
+          "viable": true
+        },
+        "emulated/bfp8b": {
+          "solve_ms": 156.16777300601825,
+          "converged": true,
+          "relative_residual": 5.940499231719241e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 101,
+          "relative_solution_error_vs_stock": 9.037755698989066e-14,
+          "relative_max_error_vs_stock": 1.2297346254418412e-13
+        },
+        "device/bfp8b/HiFi4": {
+          "solve_ms": 240.60751698561944,
+          "converged": true,
+          "relative_residual": 6.421117275350576e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 101,
+          "relative_solution_error_vs_stock": 1.4529248185213538e-13,
+          "relative_max_error_vs_stock": 1.173142360340662e-13,
+          "viable": true
+        },
+        "device/bfp8b/LoFi": {
+          "solve_ms": 260.03193599171937,
+          "converged": true,
+          "relative_residual": 9.545359835944074e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 112,
+          "relative_solution_error_vs_stock": 1.7294392362456425e-12,
+          "relative_max_error_vs_stock": 1.3390443699255604e-12,
+          "viable": false
+        },
+        "device/bfp8b-fp32act/HiFi4": {
+          "solve_ms": 267.5761659920681,
+          "converged": true,
+          "relative_residual": 8.197604211488664e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 99,
+          "relative_solution_error_vs_stock": 2.81883582447973e-13,
+          "relative_max_error_vs_stock": 3.9706356811530096e-13,
+          "viable": true
+        }
+      }
+    },
+    {
+      "physics": "dc",
+      "elements": [
+        320,
+        320
+      ],
+      "nodes": 206082,
+      "coarse_size": 1800,
+      "padded_coarse_size": 1824,
+      "config": {
+        "relative_tolerance": 1e-10,
+        "inner_relative_tolerance": 0.002,
+        "max_outer_iterations": 8,
+        "max_inner_iterations": 200
+      },
+      "stock": {
+        "solve_ms": 473.18692301632836,
+        "converged": true,
+        "relative_residual": 8.953580581062724e-12,
+        "outer_iterations": 4,
+        "inner_iterations": 132
+      },
+      "cpu_fp32_dense_inverse_gemv": {
+        "median_us": 17.075970099540427,
+        "minimum_us": 16.745439934311435,
+        "samples_us": [
+          17.075970099540427,
+          16.745439934311435,
+          16.837865114212036,
+          17.2626250423491,
+          18.30266002798453
+        ],
+        "calls_per_sample": 200
+      },
+      "conversion": {
+        "fp32": {
+          "values": 3240000,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 7.804138689097072e-09,
+          "emulated_relative_error_vs_fp64_factor": 7.804138689097072e-09
+        },
+        "bf16": {
+          "values": 3240000,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 0.0005241659817854298,
+          "emulated_relative_error_vs_fp64_factor": 0.0005241659817854298
+        },
+        "bfp8b": {
+          "values": 3240000,
+          "mismatched_values": 4,
+          "maximum_relative_difference": 7.62939453125e-06,
+          "relative_error_vs_fp64_factor": 0.003548338029834681,
+          "emulated_relative_error_vs_fp64_factor": 0.003548338029830039
+        },
+        "bfp8b-fp32act": {
+          "values": 3240000,
+          "mismatched_values": 4,
+          "maximum_relative_difference": 7.62939453125e-06,
+          "relative_error_vs_fp64_factor": 0.003548338029834681,
+          "emulated_relative_error_vs_fp64_factor": 0.003548338029830039
+        },
+        "bfp4b": {
+          "values": 3240000,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 0.07623352974201042,
+          "emulated_relative_error_vs_fp64_factor": 0.07623352974201042
+        }
+      },
+      "kernels": {
+        "fp32/LoFi": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.2110395416605688,
+              "emulated_vs_fp64": 1.7424444820809717e-06,
+              "device_vs_emulated": 0.2110381833305223
+            },
+            "random": {
+              "device_vs_fp64": 0.024882158237204813,
+              "emulated_vs_fp64": 1.3832037238984896e-07,
+              "device_vs_emulated": 0.024882131960453226
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 131.2853000126779,
+            "minimum_us": 131.23351003741845,
+            "samples_us": [
+              131.23351003741845,
+              131.31085026543587,
+              131.2853000126779,
+              131.92122016334906,
+              131.2347999191843
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 242.11525014834478,
+            "minimum_us": 240.66754995146766,
+            "samples_us": [
+              245.86844956502318,
+              242.8767504170537,
+              242.11525014834478,
+              241.92345008486882,
+              240.66754995146766
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "fp32/HiFi2": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.006834970266360953,
+              "emulated_vs_fp64": 1.7424444820809717e-06,
+              "device_vs_emulated": 0.006834802421476842
+            },
+            "random": {
+              "device_vs_fp64": 0.010315039226415105,
+              "emulated_vs_fp64": 1.3832037238984896e-07,
+              "device_vs_emulated": 0.01031501770579805
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 131.35412998963147,
+            "minimum_us": 131.34222012013197,
+            "samples_us": [
+              131.34932989487424,
+              131.3673600088805,
+              131.35412998963147,
+              131.34222012013197,
+              131.36616005795076
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 247.5842004059814,
+            "minimum_us": 242.92735033668578,
+            "samples_us": [
+              247.71144962869585,
+              242.92735033668578,
+              246.0598494508304,
+              253.0942001612857,
+              247.5842004059814
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "fp32/HiFi4": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0012444433641589899,
+              "emulated_vs_fp64": 1.7424444820809717e-06,
+              "device_vs_emulated": 0.0012449271641470562
+            },
+            "random": {
+              "device_vs_fp64": 0.0009451443033189278,
+              "emulated_vs_fp64": 1.3832037238984896e-07,
+              "device_vs_emulated": 0.0009451194098985977
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 131.67886005248874,
+            "minimum_us": 131.57987006707117,
+            "samples_us": [
+              131.68427016353235,
+              131.67886005248874,
+              131.73265004297718,
+              131.57987006707117,
+              131.59309019101784
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 248.7198988092132,
+            "minimum_us": 246.97305052541196,
+            "samples_us": [
+              254.4813512940891,
+              248.7198988092132,
+              246.97305052541196,
+              251.72059977194291,
+              248.49295004969463
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.2544361924208287,
+              "emulated_vs_fp64": 0.013292651077573056,
+              "device_vs_emulated": 0.24432953466807172
+            },
+            "random": {
+              "device_vs_fp64": 0.016780715090533013,
+              "emulated_vs_fp64": 0.002673387617633567,
+              "device_vs_emulated": 0.017489912420264493
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.74132003262639,
+            "minimum_us": 124.69493987737224,
+            "samples_us": [
+              124.74132003262639,
+              124.86015009926632,
+              124.78721007937564,
+              124.69493987737224,
+              124.69854002119973
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 342.1150497160852,
+            "minimum_us": 335.76739951968193,
+            "samples_us": [
+              345.9858999121934,
+              347.7307502180338,
+              342.1150497160852,
+              339.32670048670843,
+              335.76739951968193
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.03449550274228439,
+              "emulated_vs_fp64": 0.013292651077573056,
+              "device_vs_emulated": 0.02162870418781973
+            },
+            "random": {
+              "device_vs_fp64": 0.009388892768394424,
+              "emulated_vs_fp64": 0.002673387617633567,
+              "device_vs_emulated": 0.009315714007358821
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.90422988776118,
+            "minimum_us": 124.82999998610465,
+            "samples_us": [
+              124.86524996347727,
+              124.90964989410712,
+              124.82999998610465,
+              125.43233984615654,
+              124.90422988776118
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 345.74489982333034,
+            "minimum_us": 336.0058995895088,
+            "samples_us": [
+              381.17505027912557,
+              345.97789926920086,
+              345.74489982333034,
+              342.6695999223739,
+              336.0058995895088
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.013542041963301206,
+              "emulated_vs_fp64": 0.013292651077573056,
+              "device_vs_emulated": 0.00052880323739393
+            },
+            "random": {
+              "device_vs_fp64": 0.002672979647592853,
+              "emulated_vs_fp64": 0.002673387617633567,
+              "device_vs_emulated": 0.0001159166704527218
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.97707008151336,
+            "minimum_us": 124.91034984122963,
+            "samples_us": [
+              125.02286001108587,
+              124.97707008151336,
+              124.91705012507737,
+              125.11984998127444,
+              124.91034984122963
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 293.1165508925915,
+            "minimum_us": 290.7901493017562,
+            "samples_us": [
+              297.47590015176684,
+              293.1165508925915,
+              293.5839496785775,
+              290.7901493017562,
+              291.6301993536763
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.26896785630855485,
+              "emulated_vs_fp64": 0.009968909670165227,
+              "device_vs_emulated": 0.26399089668870496
+            },
+            "random": {
+              "device_vs_fp64": 0.01511356475626224,
+              "emulated_vs_fp64": 0.002911774459721444,
+              "device_vs_emulated": 0.01565436327327919
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.71497000660747,
+            "minimum_us": 124.6234998689033,
+            "samples_us": [
+              124.85243001719937,
+              125.25390018709004,
+              124.71497000660747,
+              124.6234998689033,
+              124.65115985833108
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 301.2165005202405,
+            "minimum_us": 287.7443504985422,
+            "samples_us": [
+              330.4237005067989,
+              301.65135103743523,
+              287.7443504985422,
+              288.3078996092081,
+              301.2165005202405
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.030656184299823065,
+              "emulated_vs_fp64": 0.009968909670165227,
+              "device_vs_emulated": 0.022981089594000713
+            },
+            "random": {
+              "device_vs_fp64": 0.007087653821578081,
+              "emulated_vs_fp64": 0.002911774459721444,
+              "device_vs_emulated": 0.005057468972962938
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.88951004343106,
+            "minimum_us": 124.82838996220381,
+            "samples_us": [
+              124.90773980971426,
+              125.03839010605589,
+              124.88951004343106,
+              124.82838996220381,
+              124.86905994592236
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 299.78130041854456,
+            "minimum_us": 291.9267994002439,
+            "samples_us": [
+              327.18910078983754,
+              296.3898004963994,
+              300.17699900781736,
+              291.9267994002439,
+              299.78130041854456
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.010677096362061487,
+              "emulated_vs_fp64": 0.009968909670165227,
+              "device_vs_emulated": 0.001164950654426639
+            },
+            "random": {
+              "device_vs_fp64": 0.00287758400518731,
+              "emulated_vs_fp64": 0.002911774459721444,
+              "device_vs_emulated": 0.00011993620229967568
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 125.37313974462451,
+            "minimum_us": 125.03909005317837,
+            "samples_us": [
+              125.03909005317837,
+              125.35198999103159,
+              125.37313974462451,
+              125.52161002531646,
+              125.49456005217507
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 338.98855035658926,
+            "minimum_us": 327.3017500760034,
+            "samples_us": [
+              351.77395038772374,
+              338.95400119945407,
+              343.43855077167973,
+              338.98855035658926,
+              327.3017500760034
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.25257717945879266,
+              "emulated_vs_fp64": 0.009968909670165227,
+              "device_vs_emulated": 0.24745488062790288
+            },
+            "random": {
+              "device_vs_fp64": 0.015499421128120883,
+              "emulated_vs_fp64": 0.002911774459721444,
+              "device_vs_emulated": 0.016068284929486597
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 130.8323402190581,
+            "minimum_us": 130.7778400951065,
+            "samples_us": [
+              130.8323402190581,
+              131.29572005709633,
+              130.84196019917727,
+              130.7778400951065,
+              130.82482997560874
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 242.83815000671893,
+            "minimum_us": 241.15644919220358,
+            "samples_us": [
+              286.07965068658814,
+              242.83815000671893,
+              243.45435085706413,
+              242.47395049314946,
+              241.15644919220358
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.025907559615424642,
+              "emulated_vs_fp64": 0.009968909670165227,
+              "device_vs_emulated": 0.017904653951681775
+            },
+            "random": {
+              "device_vs_fp64": 0.010025758013280347,
+              "emulated_vs_fp64": 0.002911774459721444,
+              "device_vs_emulated": 0.00991377436018668
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 131.09043997246772,
+            "minimum_us": 131.01860007736832,
+            "samples_us": [
+              131.03020988637581,
+              131.01860007736832,
+              131.20174000505358,
+              131.13130000419915,
+              131.09043997246772
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 251.5873493393883,
+            "minimum_us": 248.45185107551515,
+            "samples_us": [
+              260.43219986604527,
+              251.5873493393883,
+              248.45185107551515,
+              252.71500053349885,
+              248.7975507392548
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.009075787615615952,
+              "emulated_vs_fp64": 0.009968909670165227,
+              "device_vs_emulated": 0.0013557013784656678
+            },
+            "random": {
+              "device_vs_fp64": 0.0025419020429599025,
+              "emulated_vs_fp64": 0.002911774459721444,
+              "device_vs_emulated": 0.0018927163408864328
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 131.0434500919655,
+            "minimum_us": 131.01649994496256,
+            "samples_us": [
+              131.02270982926711,
+              131.1194899608381,
+              131.0434500919655,
+              131.01649994496256,
+              131.12329004798084
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 251.91000022459772,
+            "minimum_us": 250.76530000660568,
+            "samples_us": [
+              288.7643000576645,
+              256.89999893074855,
+              250.76530000660568,
+              251.22615043073895,
+              251.91000022459772
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 1.8593002946454313,
+              "emulated_vs_fp64": 1.862073658706263,
+              "device_vs_emulated": 0.004418178319816537
+            },
+            "random": {
+              "device_vs_fp64": 0.013047264190209603,
+              "emulated_vs_fp64": 0.009849946224645217,
+              "device_vs_emulated": 0.006350855361348379
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.64323022868486,
+            "minimum_us": 124.62540005799382,
+            "samples_us": [
+              124.70496003516018,
+              124.69253008021042,
+              124.64312982046977,
+              124.64323022868486,
+              124.62540005799382
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 305.3183507290669,
+            "minimum_us": 290.733999281656,
+            "samples_us": [
+              292.50439984025434,
+              305.3183507290669,
+              290.733999281656,
+              340.2865491807461,
+              328.55064928298816
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 1.8593002946454313,
+              "emulated_vs_fp64": 1.862073658706263,
+              "device_vs_emulated": 0.004418178319816537
+            },
+            "random": {
+              "device_vs_fp64": 0.013047264190209603,
+              "emulated_vs_fp64": 0.009849946224645217,
+              "device_vs_emulated": 0.006350855361348379
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.88709995523095,
+            "minimum_us": 124.86344989156349,
+            "samples_us": [
+              124.86344989156349,
+              124.89923014072701,
+              124.88709995523095,
+              124.87888016039507,
+              124.9393998296
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 339.33220111066476,
+            "minimum_us": 289.5587997045368,
+            "samples_us": [
+              543.0657998658717,
+              343.38694968027994,
+              339.33220111066476,
+              337.16909965733066,
+              289.5587997045368
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 1.860335779020302,
+              "emulated_vs_fp64": 1.862073658706263,
+              "device_vs_emulated": 0.0015931346464979153
+            },
+            "random": {
+              "device_vs_fp64": 0.009827983327418036,
+              "emulated_vs_fp64": 0.009849946224645217,
+              "device_vs_emulated": 0.00013489372475211113
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.98948985012248,
+            "minimum_us": 124.97335992520675,
+            "samples_us": [
+              124.98948985012248,
+              125.29958999948576,
+              124.9861900578253,
+              125.03557984018697,
+              124.97335992520675
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 296.3792998343706,
+            "minimum_us": 296.098249964416,
+            "samples_us": [
+              299.69164897920564,
+              296.098249964416,
+              301.76404980011284,
+              296.3792998343706,
+              296.34719976456836
+            ],
+            "calls_per_sample": 20
+          }
+        }
+      },
+      "latency": {
+        "dram_resident": {
+          "median_us": 125.1806499203667,
+          "minimum_us": 124.99191012466326,
+          "samples_us": [
+            124.99191012466326,
+            125.13205991126597,
+            125.1806499203667,
+            125.23997022071855,
+            125.2262498019263
+          ],
+          "calls_per_sample": 100
+        },
+        "dram_traced": {
+          "median_us": 132.70680996356532,
+          "minimum_us": 132.6979001169093,
+          "samples_us": [
+            132.70680996356532,
+            132.69910006783903,
+            132.76543002575636,
+            132.6979001169093,
+            132.7102299546823
+          ],
+          "calls_per_sample": 100
+        },
+        "l1_resident": {
+          "median_us": 122.21520009916276,
+          "minimum_us": 122.16460978379475,
+          "samples_us": [
+            122.16460978379475,
+            122.21520009916276,
+            122.2571899415925,
+            122.2012800280936,
+            122.7001298684627
+          ],
+          "calls_per_sample": 100
+        }
+      },
+      "solves": {
+        "emulated/fp32": {
+          "solve_ms": 451.86000599642284,
+          "converged": true,
+          "relative_residual": 5.861443241997953e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 134,
+          "relative_solution_error_vs_stock": 2.8619946981597517e-13,
+          "relative_max_error_vs_stock": 2.0654374976345244e-13
+        },
+        "device/fp32/HiFi4": {
+          "solve_ms": 528.105631005019,
+          "converged": true,
+          "relative_residual": 9.137318528930589e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 134,
+          "relative_solution_error_vs_stock": 3.230541084182514e-13,
+          "relative_max_error_vs_stock": 1.8693009910762073e-13,
+          "viable": true
+        },
+        "emulated/bf16": {
+          "solve_ms": 469.3239849875681,
+          "converged": true,
+          "relative_residual": 9.108539282816515e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 136,
+          "relative_solution_error_vs_stock": 2.9484600842987423e-13,
+          "relative_max_error_vs_stock": 3.4699149820967604e-13
+        },
+        "device/bf16/HiFi4": {
+          "solve_ms": 478.58694300521165,
+          "converged": true,
+          "relative_residual": 1.2233658272939166e-11,
+          "outer_iterations": 4,
+          "inner_iterations": 134,
+          "relative_solution_error_vs_stock": 9.341172749506377e-14,
+          "relative_max_error_vs_stock": 2.2605733077308095e-13,
+          "viable": true
+        },
+        "emulated/bfp8b": {
+          "solve_ms": 498.46121898735873,
+          "converged": true,
+          "relative_residual": 1.0213560693876005e-11,
+          "outer_iterations": 4,
+          "inner_iterations": 144,
+          "relative_solution_error_vs_stock": 2.428329431280783e-13,
+          "relative_max_error_vs_stock": 3.165703257638962e-13
+        },
+        "device/bfp8b/HiFi4": {
+          "solve_ms": 531.2880609999411,
+          "converged": true,
+          "relative_residual": 1.0314975127613377e-11,
+          "outer_iterations": 4,
+          "inner_iterations": 144,
+          "relative_solution_error_vs_stock": 7.71288634772973e-14,
+          "relative_max_error_vs_stock": 2.44470145674474e-13,
+          "viable": true
+        },
+        "device/bfp8b/LoFi": {
+          "solve_ms": 617.092127999058,
+          "converged": true,
+          "relative_residual": 8.97459078520843e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 168,
+          "relative_solution_error_vs_stock": 3.573564397114575e-13,
+          "relative_max_error_vs_stock": 3.3103038964026196e-13,
+          "viable": false
+        },
+        "device/bfp8b-fp32act/HiFi4": {
+          "solve_ms": 541.0666910174768,
+          "converged": true,
+          "relative_residual": 9.7292022999207e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 144,
+          "relative_solution_error_vs_stock": 6.956834374378079e-14,
+          "relative_max_error_vs_stock": 2.5347641383276406e-13,
+          "viable": true
+        }
+      }
+    },
+    {
+      "physics": "thermal",
+      "elements": [
+        50,
+        50
+      ],
+      "nodes": 13005,
+      "coarse_size": 845,
+      "padded_coarse_size": 864,
+      "config": {
+        "relative_tolerance": 1e-10,
+        "inner_relative_tolerance": 0.002,
+        "max_outer_iterations": 16,
+        "max_inner_iterations": 200
+      },
+      "stock": {
+        "solve_ms": 571.0827230068389,
+        "converged": true,
+        "relative_residual": 2.02625541580855e-11,
+        "outer_iterations": 7,
+        "inner_iterations": 585
+      },
+      "cpu_fp32_dense_inverse_gemv": {
+        "median_us": 4.12681998568587,
+        "minimum_us": 4.107079876121134,
+        "samples_us": [
+          4.153875051997602,
+          4.12681998568587,
+          4.131430032430217,
+          4.107079876121134,
+          4.126069979975
+        ],
+        "calls_per_sample": 200
+      },
+      "conversion": {
+        "fp32": {
+          "values": 714025,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 2.5032159740404985e-08,
+          "emulated_relative_error_vs_fp64_factor": 2.5032159740404985e-08
+        },
+        "bf16": {
+          "values": 714025,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 0.0016562839820497745,
+          "emulated_relative_error_vs_fp64_factor": 0.0016562839820497745
+        },
+        "bfp8b": {
+          "values": 714025,
+          "mismatched_values": 2,
+          "maximum_relative_difference": 0.0003094059356953949,
+          "relative_error_vs_fp64_factor": 0.008351695447057748,
+          "emulated_relative_error_vs_fp64_factor": 0.008351695446780138
+        },
+        "bfp8b-fp32act": {
+          "values": 714025,
+          "mismatched_values": 2,
+          "maximum_relative_difference": 0.0003094059356953949,
+          "relative_error_vs_fp64_factor": 0.008351695447057748,
+          "emulated_relative_error_vs_fp64_factor": 0.008351695446780138
+        },
+        "bfp4b": {
+          "values": 714025,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 0.1282892556108547,
+          "emulated_relative_error_vs_fp64_factor": 0.1282892556108547
+        }
+      },
+      "kernels": {
+        "fp32/LoFi": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.05814511179170866,
+              "emulated_vs_fp64": 1.5789619992279934e-07,
+              "device_vs_emulated": 0.058145012644749215
+            },
+            "random": {
+              "device_vs_fp64": 0.06960372459234253,
+              "emulated_vs_fp64": 8.698280560127763e-08,
+              "device_vs_emulated": 0.06960374777722257
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 52.088349766563624,
+            "minimum_us": 52.07843001699075,
+            "samples_us": [
+              52.09335999097675,
+              52.09486000239849,
+              52.088349766563624,
+              52.081330213695765,
+              52.07843001699075
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 151.26600046642125,
+            "minimum_us": 150.4439496784471,
+            "samples_us": [
+              151.26600046642125,
+              151.87165117822587,
+              150.61624872032553,
+              150.4439496784471,
+              151.5369993285276
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "fp32/HiFi2": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.01714008915194627,
+              "emulated_vs_fp64": 1.5789619992279934e-07,
+              "device_vs_emulated": 0.017139984585817482
+            },
+            "random": {
+              "device_vs_fp64": 0.01911514355295369,
+              "emulated_vs_fp64": 8.698280560127763e-08,
+              "device_vs_emulated": 0.019115167751107016
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 52.069019875489175,
+            "minimum_us": 52.049270016141236,
+            "samples_us": [
+              52.065310010220855,
+              52.069019875489175,
+              52.049270016141236,
+              52.08924994803965,
+              52.07482987316325
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 149.55774968257174,
+            "minimum_us": 148.67559948470443,
+            "samples_us": [
+              150.08880000095814,
+              149.55774968257174,
+              149.75814992794767,
+              149.13595077814534,
+              148.67559948470443
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "fp32/HiFi4": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.002291149395274022,
+              "emulated_vs_fp64": 1.5789619992279934e-07,
+              "device_vs_emulated": 0.002291043656219923
+            },
+            "random": {
+              "device_vs_fp64": 0.001715158848904713,
+              "emulated_vs_fp64": 8.698280560127763e-08,
+              "device_vs_emulated": 0.001715182724299511
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 52.106479997746646,
+            "minimum_us": 52.07632988458499,
+            "samples_us": [
+              52.159790066070855,
+              52.07632988458499,
+              52.07862996030599,
+              52.106479997746646,
+              52.125520014669746
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 150.89630032889545,
+            "minimum_us": 150.63834871398285,
+            "samples_us": [
+              152.04699884634465,
+              150.89630032889545,
+              151.6005999292247,
+              150.66734922584146,
+              150.63834871398285
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.04347012438637394,
+              "emulated_vs_fp64": 0.0011230588798077793,
+              "device_vs_emulated": 0.044252380493035696
+            },
+            "random": {
+              "device_vs_fp64": 0.0474838990991157,
+              "emulated_vs_fp64": 0.003015510024326401,
+              "device_vs_emulated": 0.050207292089120406
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 48.784649989102036,
+            "minimum_us": 48.78153995377943,
+            "samples_us": [
+              48.792670131661,
+              48.783750098664314,
+              48.78153995377943,
+              48.784649989102036,
+              48.79185988102108
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 203.14995053922758,
+            "minimum_us": 202.37150019966066,
+            "samples_us": [
+              210.40080027887598,
+              203.32080021034926,
+              203.14995053922758,
+              202.37150019966066,
+              202.57889991626143
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.00468004069607474,
+              "emulated_vs_fp64": 0.0011230588798077793,
+              "device_vs_emulated": 0.00544527151617676
+            },
+            "random": {
+              "device_vs_fp64": 0.0031834215973181794,
+              "emulated_vs_fp64": 0.003015510024326401,
+              "device_vs_emulated": 0.005939682508509545
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 48.87821996817365,
+            "minimum_us": 48.85778995230794,
+            "samples_us": [
+              48.88864001259208,
+              48.90206997515634,
+              48.87592018349096,
+              48.87821996817365,
+              48.85778995230794
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 203.5287005128339,
+            "minimum_us": 202.4421002715826,
+            "samples_us": [
+              202.4421002715826,
+              203.5287005128339,
+              202.9926996328868,
+              208.33235030295327,
+              204.97194927884266
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0012330392516996947,
+              "emulated_vs_fp64": 0.0011230588798077793,
+              "device_vs_emulated": 0.00019621505815100272
+            },
+            "random": {
+              "device_vs_fp64": 0.0033352916479574843,
+              "emulated_vs_fp64": 0.003015510024326401,
+              "device_vs_emulated": 0.0003843527270064067
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 49.02610991848633,
+            "minimum_us": 48.9963500876911,
+            "samples_us": [
+              49.030520021915436,
+              49.096239963546395,
+              48.9963500876911,
+              49.008469795808196,
+              49.02610991848633
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 200.460349151399,
+            "minimum_us": 200.07260027341545,
+            "samples_us": [
+              200.460349151399,
+              201.77484984742478,
+              200.07260027341545,
+              200.4006993956864,
+              201.17569947615266
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.027890443483759367,
+              "emulated_vs_fp64": 0.00195844308640702,
+              "device_vs_emulated": 0.028380618043941427
+            },
+            "random": {
+              "device_vs_fp64": 0.026706764849235273,
+              "emulated_vs_fp64": 0.002256154910759705,
+              "device_vs_emulated": 0.027534580141555215
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 48.917690000962466,
+            "minimum_us": 48.88233990641311,
+            "samples_us": [
+              48.92611992545426,
+              48.95478021353483,
+              48.88233990641311,
+              48.893759958446026,
+              48.917690000962466
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 233.6290999664925,
+            "minimum_us": 232.0926490938291,
+            "samples_us": [
+              239.44574932102114,
+              232.11674997583032,
+              234.32894959114492,
+              233.6290999664925,
+              232.0926490938291
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.003688088450770019,
+              "emulated_vs_fp64": 0.00195844308640702,
+              "device_vs_emulated": 0.0037571610867807373
+            },
+            "random": {
+              "device_vs_fp64": 0.003473911629323972,
+              "emulated_vs_fp64": 0.002256154910759705,
+              "device_vs_emulated": 0.0038455251886061192
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 48.962490109261125,
+            "minimum_us": 48.93834004178643,
+            "samples_us": [
+              49.02761022094637,
+              48.95287012914196,
+              48.99013991234824,
+              48.962490109261125,
+              48.93834004178643
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 233.12565026571974,
+            "minimum_us": 230.94499920262024,
+            "samples_us": [
+              233.12565026571974,
+              236.3988503930159,
+              231.46849998738617,
+              239.09300070954487,
+              230.94499920262024
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.001993206781237064,
+              "emulated_vs_fp64": 0.00195844308640702,
+              "device_vs_emulated": 0.0001837454886174357
+            },
+            "random": {
+              "device_vs_fp64": 0.004740767552771909,
+              "emulated_vs_fp64": 0.002256154910759705,
+              "device_vs_emulated": 0.003302450816658889
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 48.95137011772022,
+            "minimum_us": 48.92161989118904,
+            "samples_us": [
+              49.008070200216025,
+              48.99165011011064,
+              48.92911994829774,
+              48.92161989118904,
+              48.95137011772022
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 198.08630022453144,
+            "minimum_us": 197.38250121008605,
+            "samples_us": [
+              199.85215039923787,
+              198.08630022453144,
+              199.055700795725,
+              197.42005097214133,
+              197.38250121008605
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.039786443591964565,
+              "emulated_vs_fp64": 0.00195844308640702,
+              "device_vs_emulated": 0.04029583466951893
+            },
+            "random": {
+              "device_vs_fp64": 0.04201650459749535,
+              "emulated_vs_fp64": 0.002256154910759705,
+              "device_vs_emulated": 0.042893412608406255
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 51.977530238218606,
+            "minimum_us": 51.92352982703596,
+            "samples_us": [
+              51.977530238218606,
+              52.13403986999765,
+              51.92352982703596,
+              51.994569948874414,
+              51.94408004172146
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 148.53834873065352,
+            "minimum_us": 147.59649930056185,
+            "samples_us": [
+              151.9047495094128,
+              148.53834873065352,
+              147.59649930056185,
+              148.5583488829434,
+              148.3418993302621
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.016578081526908265,
+              "emulated_vs_fp64": 0.00195844308640702,
+              "device_vs_emulated": 0.017049519324121225
+            },
+            "random": {
+              "device_vs_fp64": 0.0175839487470645,
+              "emulated_vs_fp64": 0.002256154910759705,
+              "device_vs_emulated": 0.018459533447904266
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 52.0874498761259,
+            "minimum_us": 52.06839996390045,
+            "samples_us": [
+              52.06839996390045,
+              52.12752992520109,
+              52.07362002693117,
+              52.114299905952066,
+              52.0874498761259
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 149.67299939598888,
+            "minimum_us": 149.14144994691014,
+            "samples_us": [
+              151.87469980446622,
+              151.16685099201277,
+              149.42099951440468,
+              149.14144994691014,
+              149.67299939598888
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.002419615805236021,
+              "emulated_vs_fp64": 0.00195844308640702,
+              "device_vs_emulated": 0.0021089337735356174
+            },
+            "random": {
+              "device_vs_fp64": 0.002657760751003389,
+              "emulated_vs_fp64": 0.002256154910759705,
+              "device_vs_emulated": 0.0008405460943524867
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 52.081639878451824,
+            "minimum_us": 52.06981993978843,
+            "samples_us": [
+              52.06981993978843,
+              52.10547999013215,
+              52.141050109639764,
+              52.07894020713866,
+              52.081639878451824
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 149.05934949638322,
+            "minimum_us": 148.6686000134796,
+            "samples_us": [
+              152.69220020854846,
+              149.73709912737831,
+              148.79429945722222,
+              149.05934949638322,
+              148.6686000134796
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.04958800945696448,
+              "emulated_vs_fp64": 0.05015320523569567,
+              "device_vs_emulated": 0.0006469877850674248
+            },
+            "random": {
+              "device_vs_fp64": 0.06186099166889934,
+              "emulated_vs_fp64": 0.06711388667395193,
+              "device_vs_emulated": 0.005945036524552758
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 48.8195099751465,
+            "minimum_us": 48.795060138218105,
+            "samples_us": [
+              48.82442008238286,
+              48.80788997979835,
+              48.8195099751465,
+              48.853380139917135,
+              48.795060138218105
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 202.19664875185117,
+            "minimum_us": 200.70129976375028,
+            "samples_us": [
+              200.70129976375028,
+              202.08494970574975,
+              202.19664875185117,
+              205.71635104715824,
+              206.12415100913495
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.04958800945696448,
+              "emulated_vs_fp64": 0.05015320523569567,
+              "device_vs_emulated": 0.0006469877850674248
+            },
+            "random": {
+              "device_vs_fp64": 0.06186099166889934,
+              "emulated_vs_fp64": 0.06711388667395193,
+              "device_vs_emulated": 0.005945036524552758
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 48.82943001575768,
+            "minimum_us": 48.81298984400928,
+            "samples_us": [
+              48.877129738684744,
+              48.81298984400928,
+              48.82943001575768,
+              48.8344399491325,
+              48.81360975559801
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 201.4342011534609,
+            "minimum_us": 201.1601987760514,
+            "samples_us": [
+              203.3839002251625,
+              206.09310013242066,
+              201.3535500736907,
+              201.4342011534609,
+              201.1601987760514
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.05017695571216468,
+              "emulated_vs_fp64": 0.05015320523569567,
+              "device_vs_emulated": 3.11278288001857e-05
+            },
+            "random": {
+              "device_vs_fp64": 0.0671857944722171,
+              "emulated_vs_fp64": 0.06711388667395193,
+              "device_vs_emulated": 0.00011021389725155873
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 48.858990194275975,
+            "minimum_us": 48.82743000052869,
+            "samples_us": [
+              48.851070168893784,
+              48.87903021881357,
+              48.82743000052869,
+              48.858990194275975,
+              48.860000097192824
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 203.23964999988675,
+            "minimum_us": 201.78639970254153,
+            "samples_us": [
+              203.23964999988675,
+              206.43474999815226,
+              205.2804993581958,
+              201.78639970254153,
+              202.30789959896356
+            ],
+            "calls_per_sample": 20
+          }
+        }
+      },
+      "latency": {
+        "dram_resident": {
+          "median_us": 48.884639982134104,
+          "minimum_us": 48.87332004727796,
+          "samples_us": [
+            48.87332004727796,
+            48.88082999968901,
+            48.884639982134104,
+            49.02710992610082,
+            48.978219856508076
+          ],
+          "calls_per_sample": 100
+        },
+        "dram_traced": {
+          "median_us": 55.735700007062405,
+          "minimum_us": 55.61768019106239,
+          "samples_us": [
+            55.61768019106239,
+            55.7250902056694,
+            55.743419798091054,
+            55.735700007062405,
+            55.78670010436326
+          ],
+          "calls_per_sample": 100
+        },
+        "l1_resident": {
+          "median_us": 47.586260188836604,
+          "minimum_us": 47.562319959979504,
+          "samples_us": [
+            47.65730001963675,
+            47.586260188836604,
+            47.65689984196797,
+            47.562319959979504,
+            47.57633985718712
+          ],
+          "calls_per_sample": 100
+        }
+      },
+      "solves": {
+        "emulated/fp32": {
+          "solve_ms": 578.3163190062623,
+          "converged": true,
+          "relative_residual": 1.8977691082470806e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 585,
+          "relative_solution_error_vs_stock": 1.854586535973206e-12,
+          "relative_max_error_vs_stock": 1.7223124669602342e-12
+        },
+        "device/fp32/HiFi4": {
+          "solve_ms": 639.2713199893478,
+          "converged": true,
+          "relative_residual": 2.0558494608610218e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 591,
+          "relative_solution_error_vs_stock": 2.5422440179750763e-12,
+          "relative_max_error_vs_stock": 2.4328813579538085e-12,
+          "viable": true
+        },
+        "emulated/bf16": {
+          "solve_ms": 605.0639749737456,
+          "converged": true,
+          "relative_residual": 2.0783078336551384e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 606,
+          "relative_solution_error_vs_stock": 4.1563039848457543e-13,
+          "relative_max_error_vs_stock": 7.871941223392187e-13
+        },
+        "device/bf16/HiFi4": {
+          "solve_ms": 669.4480279984418,
+          "converged": true,
+          "relative_residual": 2.0679329431834502e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 599,
+          "relative_solution_error_vs_stock": 1.1260569024087255e-12,
+          "relative_max_error_vs_stock": 1.3600070681963897e-12,
+          "viable": true
+        },
+        "emulated/bfp8b": {
+          "solve_ms": 616.7306870047469,
+          "converged": true,
+          "relative_residual": 2.0730625049453763e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 608,
+          "relative_solution_error_vs_stock": 3.1092893549786543e-12,
+          "relative_max_error_vs_stock": 2.9345163637932244e-12
+        },
+        "device/bfp8b/HiFi4": {
+          "solve_ms": 678.7839739990886,
+          "converged": true,
+          "relative_residual": 2.0535531629514728e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 608,
+          "relative_solution_error_vs_stock": 7.755005216632894e-13,
+          "relative_max_error_vs_stock": 1.0000016368820984e-12,
+          "viable": true
+        },
+        "device/bfp8b/LoFi": {
+          "solve_ms": 718.40043598786,
+          "converged": true,
+          "relative_residual": 2.111723996919356e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 673,
+          "relative_solution_error_vs_stock": 2.9427498380877737e-12,
+          "relative_max_error_vs_stock": 2.851838586527703e-12,
+          "viable": false
+        },
+        "device/bfp8b-fp32act/HiFi4": {
+          "solve_ms": 650.1437679980882,
+          "converged": true,
+          "relative_residual": 1.939536987714339e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 603,
+          "relative_solution_error_vs_stock": 1.1490793082932934e-12,
+          "relative_max_error_vs_stock": 1.262803180723163e-12,
+          "viable": true
+        }
+      }
+    },
+    {
+      "physics": "thermal",
+      "elements": [
+        100,
+        100
+      ],
+      "nodes": 51005,
+      "coarse_size": 1445,
+      "padded_coarse_size": 1472,
+      "config": {
+        "relative_tolerance": 1e-10,
+        "inner_relative_tolerance": 0.002,
+        "max_outer_iterations": 16,
+        "max_inner_iterations": 200
+      },
+      "stock": {
+        "solve_ms": 2025.3852250170894,
+        "converged": true,
+        "relative_residual": 1.3542619389050196e-11,
+        "outer_iterations": 7,
+        "inner_iterations": 805
+      },
+      "cpu_fp32_dense_inverse_gemv": {
+        "median_us": 10.863369971048087,
+        "minimum_us": 10.845934884855524,
+        "samples_us": [
+          10.952890006592497,
+          11.163839953951538,
+          10.855405125766993,
+          10.845934884855524,
+          10.863369971048087
+        ],
+        "calls_per_sample": 200
+      },
+      "conversion": {
+        "fp32": {
+          "values": 2088025,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 2.7025660866039256e-08,
+          "emulated_relative_error_vs_fp64_factor": 2.7025660866039256e-08
+        },
+        "bf16": {
+          "values": 2088025,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 0.0018539074784454847,
+          "emulated_relative_error_vs_fp64_factor": 0.0018539074784454847
+        },
+        "bfp8b": {
+          "values": 2088025,
+          "mismatched_values": 2,
+          "maximum_relative_difference": 0.00016622339899186045,
+          "relative_error_vs_fp64_factor": 0.00940759811859928,
+          "emulated_relative_error_vs_fp64_factor": 0.009407598118581996
+        },
+        "bfp8b-fp32act": {
+          "values": 2088025,
+          "mismatched_values": 2,
+          "maximum_relative_difference": 0.00016622339899186045,
+          "relative_error_vs_fp64_factor": 0.00940759811859928,
+          "emulated_relative_error_vs_fp64_factor": 0.009407598118581996
+        },
+        "bfp4b": {
+          "values": 2088025,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 0.12450089005647262,
+          "emulated_relative_error_vs_fp64_factor": 0.12450089005647262
+        }
+      },
+      "kernels": {
+        "fp32/LoFi": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.05478508788256664,
+              "emulated_vs_fp64": 2.145318204147066e-07,
+              "device_vs_emulated": 0.054784960537737695
+            },
+            "random": {
+              "device_vs_fp64": 0.04705966648084296,
+              "emulated_vs_fp64": 2.0904663970332483e-07,
+              "device_vs_emulated": 0.04705982039344721
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 56.34155997540802,
+            "minimum_us": 56.28915998386219,
+            "samples_us": [
+              56.34155997540802,
+              56.36802001390606,
+              56.28915998386219,
+              56.33225024212152,
+              56.42603005981073
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 152.1997997770086,
+            "minimum_us": 151.02710021892563,
+            "samples_us": [
+              1048.3064499567263,
+              152.1997997770086,
+              153.9706499897875,
+              151.02710021892563,
+              151.59515023697168
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "fp32/HiFi2": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.014741121560756049,
+              "emulated_vs_fp64": 2.145318204147066e-07,
+              "device_vs_emulated": 0.014740987306870146
+            },
+            "random": {
+              "device_vs_fp64": 0.015317045715798968,
+              "emulated_vs_fp64": 2.0904663970332483e-07,
+              "device_vs_emulated": 0.0153172069600347
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 56.45597993861884,
+            "minimum_us": 56.40137998852879,
+            "samples_us": [
+              56.45597993861884,
+              56.773189862724394,
+              56.41700990963727,
+              56.90584017429501,
+              56.40137998852879
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 164.35950092272833,
+            "minimum_us": 163.34754909621552,
+            "samples_us": [
+              1350.0670000212267,
+              164.63049978483468,
+              164.35950092272833,
+              163.6872490053065,
+              163.34754909621552
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "fp32/HiFi4": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0016362923507845903,
+              "emulated_vs_fp64": 2.145318204147066e-07,
+              "device_vs_emulated": 0.0016361569502326687
+            },
+            "random": {
+              "device_vs_fp64": 0.001705057777181174,
+              "emulated_vs_fp64": 2.0904663970332483e-07,
+              "device_vs_emulated": 0.0017052145638510804
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 56.60747003275901,
+            "minimum_us": 56.57861998770386,
+            "samples_us": [
+              73.51351989200339,
+              56.95572996046394,
+              56.590229796711355,
+              56.60747003275901,
+              56.57861998770386
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 158.9531500940211,
+            "minimum_us": 151.3100985903293,
+            "samples_us": [
+              1142.0382506912574,
+              158.9531500940211,
+              153.49375025834888,
+              165.39189964532852,
+              151.3100985903293
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.03708830796138215,
+              "emulated_vs_fp64": 0.0010274208361504905,
+              "device_vs_emulated": 0.03771821341558921
+            },
+            "random": {
+              "device_vs_fp64": 0.051242665124260775,
+              "emulated_vs_fp64": 0.0017395159102756672,
+              "device_vs_emulated": 0.05256623258144154
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 51.246540097054094,
+            "minimum_us": 51.219800079707056,
+            "samples_us": [
+              51.30815989105031,
+              51.69549986021593,
+              51.246540097054094,
+              51.232810073997825,
+              51.219800079707056
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 245.11950032319874,
+            "minimum_us": 244.09660109085962,
+            "samples_us": [
+              248.68684995453805,
+              245.11950032319874,
+              244.65359892928973,
+              257.3859499534592,
+              244.09660109085962
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0039030762106651885,
+              "emulated_vs_fp64": 0.0010274208361504905,
+              "device_vs_emulated": 0.004494322540567078
+            },
+            "random": {
+              "device_vs_fp64": 0.0095756067274442,
+              "emulated_vs_fp64": 0.0017395159102756672,
+              "device_vs_emulated": 0.010933089173116316
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 51.22989998199046,
+            "minimum_us": 51.21478025102988,
+            "samples_us": [
+              51.22989998199046,
+              75.69176988909021,
+              51.229720120318234,
+              51.30666017066687,
+              51.21478025102988
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 239.59899990586564,
+            "minimum_us": 194.7429496794939,
+            "samples_us": [
+              1185.2511510369368,
+              241.3273003185168,
+              239.59899990586564,
+              219.6725006797351,
+              194.7429496794939
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0011687536241751957,
+              "emulated_vs_fp64": 0.0010274208361504905,
+              "device_vs_emulated": 0.00022568020115569702
+            },
+            "random": {
+              "device_vs_fp64": 0.0016965438345098026,
+              "emulated_vs_fp64": 0.0017395159102756672,
+              "device_vs_emulated": 0.0002817610569799084
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 51.458549860399216,
+            "minimum_us": 51.44221999216825,
+            "samples_us": [
+              51.45262985024601,
+              51.458549860399216,
+              51.44221999216825,
+              51.557830011006445,
+              51.463360141497105
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 248.5596007318236,
+            "minimum_us": 248.19389946060252,
+            "samples_us": [
+              253.53304954478517,
+              249.52844978542998,
+              248.4569005900994,
+              248.5596007318236,
+              248.19389946060252
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.02453391454412592,
+              "emulated_vs_fp64": 0.0018494060914907991,
+              "device_vs_emulated": 0.024370202735061408
+            },
+            "random": {
+              "device_vs_fp64": 0.029065195307089852,
+              "emulated_vs_fp64": 0.008980873394529229,
+              "device_vs_emulated": 0.03685216792376964
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 51.1690997518599,
+            "minimum_us": 51.14515020977706,
+            "samples_us": [
+              58.06044006021693,
+              51.14515020977706,
+              51.71552998945117,
+              51.1690997518599,
+              51.145250035915524
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 203.62984942039475,
+            "minimum_us": 196.25084969447926,
+            "samples_us": [
+              1931.2970995088108,
+              580.675050150603,
+              203.62984942039475,
+              196.25084969447926,
+              201.76285033812746
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.004416874656604581,
+              "emulated_vs_fp64": 0.0018494060914907991,
+              "device_vs_emulated": 0.00391838231773569
+            },
+            "random": {
+              "device_vs_fp64": 0.0036253520095777384,
+              "emulated_vs_fp64": 0.008980873394529229,
+              "device_vs_emulated": 0.006432802266650688
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 51.30495992489159,
+            "minimum_us": 51.28382006660104,
+            "samples_us": [
+              51.29093013238162,
+              51.30495992489159,
+              51.28382006660104,
+              51.314979791641235,
+              51.43210000824183
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 282.54645003471524,
+            "minimum_us": 281.3521496136673,
+            "samples_us": [
+              289.91844883421436,
+              281.3521496136673,
+              282.27945003891364,
+              282.54645003471524,
+              283.2001497154124
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0018474349236992861,
+              "emulated_vs_fp64": 0.0018494060914907991,
+              "device_vs_emulated": 0.00019952056472946622
+            },
+            "random": {
+              "device_vs_fp64": 0.008890735665432402,
+              "emulated_vs_fp64": 0.008980873394529229,
+              "device_vs_emulated": 0.0002469951943335093
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 51.445330027490854,
+            "minimum_us": 51.4036399545148,
+            "samples_us": [
+              51.445330027490854,
+              51.47067015059292,
+              51.985350146424025,
+              51.4036399545148,
+              51.407650171313435
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 223.71820086846128,
+            "minimum_us": 204.3863496510312,
+            "samples_us": [
+              1483.355749223847,
+              244.75030077155682,
+              223.71820086846128,
+              208.72660097666085,
+              204.3863496510312
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.03458377922584726,
+              "emulated_vs_fp64": 0.0018494060914907991,
+              "device_vs_emulated": 0.03444149139562
+            },
+            "random": {
+              "device_vs_fp64": 0.042061257659053455,
+              "emulated_vs_fp64": 0.008980873394529229,
+              "device_vs_emulated": 0.049923104235148986
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 56.25969992252067,
+            "minimum_us": 56.187369918916374,
+            "samples_us": [
+              56.647750025149435,
+              56.23184988508001,
+              56.51078012306243,
+              56.187369918916374,
+              56.25969992252067
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 170.6715498585254,
+            "minimum_us": 169.44014932960272,
+            "samples_us": [
+              170.6715498585254,
+              170.930998865515,
+              171.1148492177017,
+              170.2001507510431,
+              169.44014932960272
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.014498042164939651,
+              "emulated_vs_fp64": 0.0018494060914907991,
+              "device_vs_emulated": 0.014287451938634383
+            },
+            "random": {
+              "device_vs_fp64": 0.012121962574389026,
+              "emulated_vs_fp64": 0.008980873394529229,
+              "device_vs_emulated": 0.02009536096348591
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 56.19427014607936,
+            "minimum_us": 56.17775022983551,
+            "samples_us": [
+              56.18575989501551,
+              56.19427014607936,
+              56.278639822266996,
+              56.28626007819548,
+              56.17775022983551
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 165.64544930588454,
+            "minimum_us": 165.32635054318234,
+            "samples_us": [
+              165.64544930588454,
+              165.57180060772225,
+              166.21649992885068,
+              165.32635054318234,
+              166.0742491367273
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.002214362133042764,
+              "emulated_vs_fp64": 0.0018494060914907991,
+              "device_vs_emulated": 0.0011284057673998339
+            },
+            "random": {
+              "device_vs_fp64": 0.006386789968048098,
+              "emulated_vs_fp64": 0.008980873394529229,
+              "device_vs_emulated": 0.0027995595382872755
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 56.39595998218283,
+            "minimum_us": 56.33145017782226,
+            "samples_us": [
+              56.52121006278321,
+              56.39595998218283,
+              56.69433012371883,
+              56.34527013171464,
+              56.33145017782226
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 167.45989996707067,
+            "minimum_us": 166.2536000367254,
+            "samples_us": [
+              168.52395056048408,
+              166.68140015099198,
+              168.85110089788213,
+              167.45989996707067,
+              166.2536000367254
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.04370075879716412,
+              "emulated_vs_fp64": 0.04330266605734501,
+              "device_vs_emulated": 0.0005455327178032598
+            },
+            "random": {
+              "device_vs_fp64": 0.05461813751289502,
+              "emulated_vs_fp64": 0.05896496469402532,
+              "device_vs_emulated": 0.005271253533254757
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 51.16799002280459,
+            "minimum_us": 51.14776024129242,
+            "samples_us": [
+              51.22169997775927,
+              51.17660999530926,
+              51.155379915144295,
+              51.14776024129242,
+              51.16799002280459
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 234.8033493035473,
+            "minimum_us": 233.6671997909434,
+            "samples_us": [
+              1143.4865009505302,
+              236.25559988431633,
+              234.664099116344,
+              234.8033493035473,
+              233.6671997909434
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.04370075879716412,
+              "emulated_vs_fp64": 0.04330266605734501,
+              "device_vs_emulated": 0.0005455327178032598
+            },
+            "random": {
+              "device_vs_fp64": 0.05461813751289502,
+              "emulated_vs_fp64": 0.05896496469402532,
+              "device_vs_emulated": 0.005271253533254757
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 51.31387006258592,
+            "minimum_us": 51.273189892526716,
+            "samples_us": [
+              57.27373994886875,
+              51.70171003555879,
+              51.273189892526716,
+              51.31387006258592,
+              51.277210004627705
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 195.3580998815596,
+            "minimum_us": 193.62984894542024,
+            "samples_us": [
+              1014.7719993256032,
+              196.07195135904476,
+              195.3580998815596,
+              194.86870005493984,
+              193.62984894542024
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.043294595899158225,
+              "emulated_vs_fp64": 0.04330266605734501,
+              "device_vs_emulated": 1.699312084762393e-05
+            },
+            "random": {
+              "device_vs_fp64": 0.05895485851988742,
+              "emulated_vs_fp64": 0.05896496469402532,
+              "device_vs_emulated": 5.676197587632172e-05
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 51.37008993187919,
+            "minimum_us": 51.335909811314195,
+            "samples_us": [
+              51.48030002601445,
+              51.51485005626455,
+              51.335909811314195,
+              51.37008993187919,
+              51.338819903321564
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 258.47950018942356,
+            "minimum_us": 257.13445065775886,
+            "samples_us": [
+              262.5742999953218,
+              258.47950018942356,
+              257.13445065775886,
+              267.0518500963226,
+              257.8247498604469
+            ],
+            "calls_per_sample": 20
+          }
+        }
+      },
+      "latency": {
+        "dram_resident": {
+          "median_us": 51.41226021805778,
+          "minimum_us": 51.364269747864455,
+          "samples_us": [
+            51.41226021805778,
+            51.39403016073629,
+            51.5053397975862,
+            51.512950158212334,
+            51.364269747864455
+          ],
+          "calls_per_sample": 100
+        },
+        "dram_traced": {
+          "median_us": 58.824299776460975,
+          "minimum_us": 58.797840029001236,
+          "samples_us": [
+            58.80886979866773,
+            58.797840029001236,
+            58.824299776460975,
+            58.83862992050126,
+            58.95003007026389
+          ],
+          "calls_per_sample": 100
+        },
+        "l1_resident": {
+          "median_us": 49.85229024896398,
+          "minimum_us": 49.82943995855749,
+          "samples_us": [
+            49.84245984815061,
+            49.82943995855749,
+            49.88934990251437,
+            49.862599989864975,
+            49.85229024896398
+          ],
+          "calls_per_sample": 100
+        }
+      },
+      "solves": {
+        "emulated/fp32": {
+          "solve_ms": 2073.2225670071784,
+          "converged": true,
+          "relative_residual": 1.3521837222758226e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 805,
+          "relative_solution_error_vs_stock": 1.8093828942082464e-13,
+          "relative_max_error_vs_stock": 4.4636579283599934e-13
+        },
+        "device/fp32/HiFi4": {
+          "solve_ms": 2066.9498020142782,
+          "converged": true,
+          "relative_residual": 1.3582790261114054e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 811,
+          "relative_solution_error_vs_stock": 7.303775869014558e-13,
+          "relative_max_error_vs_stock": 1.014348009786071e-12,
+          "viable": true
+        },
+        "emulated/bf16": {
+          "solve_ms": 2063.2240660197567,
+          "converged": true,
+          "relative_residual": 1.3620604230166373e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 805,
+          "relative_solution_error_vs_stock": 1.9945058712292992e-13,
+          "relative_max_error_vs_stock": 3.427045494474299e-13
+        },
+        "device/bf16/HiFi4": {
+          "solve_ms": 1969.5071269816253,
+          "converged": true,
+          "relative_residual": 1.3667059413604438e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 806,
+          "relative_solution_error_vs_stock": 1.500362531111275e-12,
+          "relative_max_error_vs_stock": 1.2549474315078083e-12,
+          "viable": true
+        },
+        "emulated/bfp8b": {
+          "solve_ms": 2100.5942540068645,
+          "converged": true,
+          "relative_residual": 1.3528613870851214e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 810,
+          "relative_solution_error_vs_stock": 2.8326156734763446e-13,
+          "relative_max_error_vs_stock": 7.106660531154004e-13
+        },
+        "device/bfp8b/HiFi4": {
+          "solve_ms": 1950.9711629943922,
+          "converged": true,
+          "relative_residual": 1.3562228827280995e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 821,
+          "relative_solution_error_vs_stock": 1.6927795727310825e-12,
+          "relative_max_error_vs_stock": 1.5828090315554892e-12,
+          "viable": true
+        },
+        "device/bfp8b/LoFi": {
+          "solve_ms": 2360.436076996848,
+          "converged": true,
+          "relative_residual": 1.3659958549562164e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 971,
+          "relative_solution_error_vs_stock": 1.4173300686547658e-12,
+          "relative_max_error_vs_stock": 1.363516424294682e-12,
+          "viable": false
+        },
+        "device/bfp8b-fp32act/HiFi4": {
+          "solve_ms": 1954.8808399995323,
+          "converged": true,
+          "relative_residual": 1.3476208301258825e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 816,
+          "relative_solution_error_vs_stock": 1.090977294810795e-12,
+          "relative_max_error_vs_stock": 1.142907103780671e-12,
+          "viable": true
+        }
+      }
+    },
+    {
+      "physics": "thermal",
+      "elements": [
+        200,
+        200
+      ],
+      "nodes": 202005,
+      "coarse_size": 1805,
+      "padded_coarse_size": 1824,
+      "config": {
+        "relative_tolerance": 1e-10,
+        "inner_relative_tolerance": 0.002,
+        "max_outer_iterations": 16,
+        "max_inner_iterations": 200
+      },
+      "stock": {
+        "solve_ms": 9121.143317985116,
+        "converged": true,
+        "relative_residual": 9.656215191130666e-12,
+        "outer_iterations": 7,
+        "inner_iterations": 1025
+      },
+      "cpu_fp32_dense_inverse_gemv": {
+        "median_us": 17.28847506456077,
+        "minimum_us": 16.97091502137482,
+        "samples_us": [
+          17.267685034312308,
+          16.97091502137482,
+          20.432720048120245,
+          17.28847506456077,
+          17.430199950467795
+        ],
+        "calls_per_sample": 200
+      },
+      "conversion": {
+        "fp32": {
+          "values": 3258025,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 2.1943587829154406e-08,
+          "emulated_relative_error_vs_fp64_factor": 2.1943587829154406e-08
+        },
+        "bf16": {
+          "values": 3258025,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 0.0013803279328554352,
+          "emulated_relative_error_vs_fp64_factor": 0.0013803279328554352
+        },
+        "bfp8b": {
+          "values": 3258025,
+          "mismatched_values": 10,
+          "maximum_relative_difference": 0.0003511235991027206,
+          "relative_error_vs_fp64_factor": 0.00792159967265355,
+          "emulated_relative_error_vs_fp64_factor": 0.007921599672536214
+        },
+        "bfp8b-fp32act": {
+          "values": 3258025,
+          "mismatched_values": 10,
+          "maximum_relative_difference": 0.0003511235991027206,
+          "relative_error_vs_fp64_factor": 0.00792159967265355,
+          "emulated_relative_error_vs_fp64_factor": 0.007921599672536214
+        },
+        "bfp4b": {
+          "values": 3258025,
+          "mismatched_values": 0,
+          "maximum_relative_difference": 0.0,
+          "relative_error_vs_fp64_factor": 0.1145149220603043,
+          "emulated_relative_error_vs_fp64_factor": 0.1145149220603043
+        }
+      },
+      "kernels": {
+        "fp32/LoFi": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.04557149453899141,
+              "emulated_vs_fp64": 1.8082952834397473e-07,
+              "device_vs_emulated": 0.0455713982735926
+            },
+            "random": {
+              "device_vs_fp64": 0.05374626295342146,
+              "emulated_vs_fp64": 2.432862278873603e-07,
+              "device_vs_emulated": 0.0537461583187059
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 131.18691014824435,
+            "minimum_us": 131.14423985825852,
+            "samples_us": [
+              131.18691014824435,
+              131.33439992088825,
+              131.16686983266845,
+              131.21617026627064,
+              131.14423985825852
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 254.9648503190838,
+            "minimum_us": 245.7647497067228,
+            "samples_us": [
+              268.7120490008965,
+              254.9648503190838,
+              251.72415043925864,
+              258.6117494502105,
+              245.7647497067228
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "fp32/HiFi2": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.01350260408333357,
+              "emulated_vs_fp64": 1.8082952834397473e-07,
+              "device_vs_emulated": 0.013502506200257388
+            },
+            "random": {
+              "device_vs_fp64": 0.018158671814135642,
+              "emulated_vs_fp64": 2.432862278873603e-07,
+              "device_vs_emulated": 0.018158566024549527
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 131.34322012774646,
+            "minimum_us": 131.28851016517729,
+            "samples_us": [
+              131.34322012774646,
+              131.85168005293235,
+              131.36936002410948,
+              131.3310000114143,
+              131.28851016517729
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 243.45130077563226,
+            "minimum_us": 240.04634906305,
+            "samples_us": [
+              262.54274998791516,
+              243.45130077563226,
+              254.43680060561746,
+              241.963000735268,
+              240.04634906305
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "fp32/HiFi4": {
+          "matrix_dtype": "DataType.FLOAT32",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0019242709175489488,
+              "emulated_vs_fp64": 1.8082952834397473e-07,
+              "device_vs_emulated": 0.0019241729858821578
+            },
+            "random": {
+              "device_vs_fp64": 0.0014601580598016825,
+              "emulated_vs_fp64": 2.432862278873603e-07,
+              "device_vs_emulated": 0.0014600549435306864
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 131.62796007236466,
+            "minimum_us": 131.60050002625212,
+            "samples_us": [
+              131.62666000425816,
+              131.71591999707744,
+              131.62796007236466,
+              131.64709991542622,
+              131.60050002625212
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 251.01380015257746,
+            "minimum_us": 249.0540500730276,
+            "samples_us": [
+              259.52600117307156,
+              254.54799906583503,
+              250.66404923563823,
+              249.0540500730276,
+              251.01380015257746
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.03562681768635392,
+              "emulated_vs_fp64": 0.0009639357274581809,
+              "device_vs_emulated": 0.0351944018408007
+            },
+            "random": {
+              "device_vs_fp64": 0.029371036346800494,
+              "emulated_vs_fp64": 0.0020653951569782783,
+              "device_vs_emulated": 0.031161759219852987
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.75073977839203,
+            "minimum_us": 124.67560009099543,
+            "samples_us": [
+              124.89822023781016,
+              125.20802003564312,
+              124.69954002881424,
+              124.75073977839203,
+              124.67560009099543
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 339.0701996977441,
+            "minimum_us": 331.8128496175632,
+            "samples_us": [
+              347.9646999039687,
+              331.8128496175632,
+              340.6186995562166,
+              339.0701996977441,
+              338.1424510735087
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.00624920200398475,
+              "emulated_vs_fp64": 0.0009639357274581809,
+              "device_vs_emulated": 0.005734765349429157
+            },
+            "random": {
+              "device_vs_fp64": 0.004778163682435971,
+              "emulated_vs_fp64": 0.0020653951569782783,
+              "device_vs_emulated": 0.006590955837264223
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.88840002333745,
+            "minimum_us": 124.81426005251707,
+            "samples_us": [
+              124.89802000345662,
+              124.81426005251707,
+              124.84992999816312,
+              125.06032973760739,
+              124.88840002333745
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 295.7175500341691,
+            "minimum_us": 291.64675070205703,
+            "samples_us": [
+              302.58465121733025,
+              297.2483998746611,
+              295.7175500341691,
+              291.64675070205703,
+              292.3897001892328
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bf16/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT16",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0010064098816753545,
+              "emulated_vs_fp64": 0.0009639357274581809,
+              "device_vs_emulated": 0.0001649092352342986
+            },
+            "random": {
+              "device_vs_fp64": 0.0022589597272253807,
+              "emulated_vs_fp64": 0.0020653951569782783,
+              "device_vs_emulated": 0.00029527074319438097
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.93118993006647,
+            "minimum_us": 124.85684012062849,
+            "samples_us": [
+              124.93118993006647,
+              125.10691973147915,
+              125.02546014729886,
+              124.88148990087213,
+              124.85684012062849
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 293.91560092335567,
+            "minimum_us": 291.68934997869655,
+            "samples_us": [
+              307.54460021853447,
+              318.60314920777455,
+              293.91560092335567,
+              291.68934997869655,
+              291.8420999776572
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.025881772765771492,
+              "emulated_vs_fp64": 0.0021206104077398005,
+              "device_vs_emulated": 0.025526309075725125
+            },
+            "random": {
+              "device_vs_fp64": 0.006626686839848658,
+              "emulated_vs_fp64": 0.007051381670868319,
+              "device_vs_emulated": 0.00964521739450058
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.75214025471361,
+            "minimum_us": 124.69043023884295,
+            "samples_us": [
+              124.89821994677186,
+              125.11052016634494,
+              124.75214025471361,
+              124.69183013308793,
+              124.69043023884295
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 350.01509968424216,
+            "minimum_us": 333.33125029457733,
+            "samples_us": [
+              350.0331498798914,
+              350.01509968424216,
+              352.14820090914145,
+              337.26175024639815,
+              333.33125029457733
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0065774386111863824,
+              "emulated_vs_fp64": 0.0021206104077398005,
+              "device_vs_emulated": 0.0059130839936559765
+            },
+            "random": {
+              "device_vs_fp64": 0.004394070289740471,
+              "emulated_vs_fp64": 0.007051381670868319,
+              "device_vs_emulated": 0.01045014541562425
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 125.12093991972506,
+            "minimum_us": 124.93048008764164,
+            "samples_us": [
+              124.93418995290995,
+              125.12093991972506,
+              125.12114975834264,
+              125.33235014416277,
+              124.93048008764164
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 294.11344876280054,
+            "minimum_us": 288.29090006183833,
+            "samples_us": [
+              346.368650207296,
+              294.8518507764675,
+              288.29090006183833,
+              294.11344876280054,
+              288.3615001337603
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.002117694808147014,
+              "emulated_vs_fp64": 0.0021206104077398005,
+              "device_vs_emulated": 0.00014001337981989117
+            },
+            "random": {
+              "device_vs_fp64": 0.007127047199525662,
+              "emulated_vs_fp64": 0.007051381670868319,
+              "device_vs_emulated": 0.00016177602312892743
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.96515002567322,
+            "minimum_us": 124.88270003814252,
+            "samples_us": [
+              124.97506977524608,
+              124.96515002567322,
+              124.90954017266631,
+              124.88270003814252,
+              125.00462005846202
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 312.80914990929887,
+            "minimum_us": 291.8050508014858,
+            "samples_us": [
+              337.3685001861304,
+              291.8050508014858,
+              293.86700043687597,
+              312.80914990929887,
+              322.7731504011899
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.02683391815293829,
+              "emulated_vs_fp64": 0.0021206104077398005,
+              "device_vs_emulated": 0.02647978127552582
+            },
+            "random": {
+              "device_vs_fp64": 0.014611300134218188,
+              "emulated_vs_fp64": 0.007051381670868319,
+              "device_vs_emulated": 0.020616605177612133
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 130.81651006359607,
+            "minimum_us": 130.76781993731856,
+            "samples_us": [
+              131.2064501689747,
+              130.81651006359607,
+              130.7728301617317,
+              130.81721001071855,
+              130.76781993731856
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 248.0105496942997,
+            "minimum_us": 244.79340063408014,
+            "samples_us": [
+              260.9692994155921,
+              248.075150011573,
+              248.0105496942997,
+              247.76155041763562,
+              244.79340063408014
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.013021419046739108,
+              "emulated_vs_fp64": 0.0021206104077398005,
+              "device_vs_emulated": 0.012530447580669256
+            },
+            "random": {
+              "device_vs_fp64": 0.007907648585013522,
+              "emulated_vs_fp64": 0.007051381670868319,
+              "device_vs_emulated": 0.014203780229862024
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 130.94795984216034,
+            "minimum_us": 130.90428023133427,
+            "samples_us": [
+              130.9717001277022,
+              130.9955498436466,
+              130.90428023133427,
+              130.94795984216034,
+              130.9299300191924
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 252.07774888258427,
+            "minimum_us": 247.23160022404045,
+            "samples_us": [
+              257.239599886816,
+              253.41734872199598,
+              252.07774888258427,
+              250.51480042748153,
+              247.23160022404045
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp8b-fp32act/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT8_B",
+          "activation_dtype": "DataType.FLOAT32",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.0021800091440313278,
+              "emulated_vs_fp64": 0.0021206104077398005,
+              "device_vs_emulated": 0.0003210298273445241
+            },
+            "random": {
+              "device_vs_fp64": 0.004112017089916675,
+              "emulated_vs_fp64": 0.007051381670868319,
+              "device_vs_emulated": 0.00320826278083468
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 130.92462002532557,
+            "minimum_us": 130.90957974782214,
+            "samples_us": [
+              130.90957974782214,
+              130.93243003822863,
+              130.92462002532557,
+              130.98893978167325,
+              130.91350003378466
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 254.4513496104628,
+            "minimum_us": 239.27334987092763,
+            "samples_us": [
+              297.14725096710026,
+              254.4513496104628,
+              259.1837997897528,
+              250.01890026032925,
+              239.27334987092763
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/LoFi": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "LoFi",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.03635847552852037,
+              "emulated_vs_fp64": 0.03235128043674578,
+              "device_vs_emulated": 0.007937166649968257
+            },
+            "random": {
+              "device_vs_fp64": 0.04160586830606565,
+              "emulated_vs_fp64": 0.03849982995668267,
+              "device_vs_emulated": 0.005697480998711554
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.76196017814799,
+            "minimum_us": 124.66838001273572,
+            "samples_us": [
+              124.66838001273572,
+              124.83981990953907,
+              125.0396898831241,
+              124.71658003050833,
+              124.76196017814799
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 342.12004975415766,
+            "minimum_us": 339.4790503080003,
+            "samples_us": [
+              379.06299985479563,
+              341.76734916400164,
+              342.12004975415766,
+              342.72420016350225,
+              339.4790503080003
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/HiFi2": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi2",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.03635847552852037,
+              "emulated_vs_fp64": 0.03235128043674578,
+              "device_vs_emulated": 0.007937166649968257
+            },
+            "random": {
+              "device_vs_fp64": 0.04160586830606565,
+              "emulated_vs_fp64": 0.03849982995668267,
+              "device_vs_emulated": 0.005697480998711554
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.75825002184138,
+            "minimum_us": 124.69624023651706,
+            "samples_us": [
+              125.02346013206989,
+              124.70545014366506,
+              124.8201698763296,
+              124.69624023651706,
+              124.75825002184138
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 304.986750415992,
+            "minimum_us": 302.3822500836104,
+            "samples_us": [
+              355.1704008714296,
+              308.83849976817146,
+              304.986750415992,
+              302.3822500836104,
+              303.3184999367222
+            ],
+            "calls_per_sample": 20
+          }
+        },
+        "bfp4b/HiFi4": {
+          "matrix_dtype": "DataType.BFLOAT4_B",
+          "activation_dtype": "DataType.BFLOAT16",
+          "fidelity": "HiFi4",
+          "accuracy": {
+            "restricted_rhs": {
+              "device_vs_fp64": 0.032351317819549044,
+              "emulated_vs_fp64": 0.03235128043674578,
+              "device_vs_emulated": 7.516189326358206e-06
+            },
+            "random": {
+              "device_vs_fp64": 0.038319341857291966,
+              "emulated_vs_fp64": 0.03849982995668267,
+              "device_vs_emulated": 0.000403832889360529
+            }
+          },
+          "device_resident_two_gemv": {
+            "median_us": 124.79532015277073,
+            "minimum_us": 124.77698997827248,
+            "samples_us": [
+              124.79532015277073,
+              124.87097003031523,
+              124.78449993068351,
+              124.84612991102041,
+              124.77698997827248
+            ],
+            "calls_per_sample": 100
+          },
+          "round_trip_two_gemv": {
+            "median_us": 312.2441004961729,
+            "minimum_us": 307.62224923819304,
+            "samples_us": [
+              314.9046009639278,
+              307.62224923819304,
+              312.2441004961729,
+              312.62630072887987,
+              308.93375078449026
+            ],
+            "calls_per_sample": 20
+          }
+        }
+      },
+      "latency": {
+        "dram_resident": {
+          "median_us": 124.8997199581936,
+          "minimum_us": 124.78461023420094,
+          "samples_us": [
+            124.8997199581936,
+            125.17315015429632,
+            124.78461023420094,
+            124.78491000365467,
+            125.00843004090711
+          ],
+          "calls_per_sample": 100
+        },
+        "dram_traced": {
+          "median_us": 132.7496999874711,
+          "minimum_us": 132.69510003738105,
+          "samples_us": [
+            132.69510003738105,
+            132.77293997816741,
+            132.7087200479582,
+            132.7496999874711,
+            132.8349602408707
+          ],
+          "calls_per_sample": 100
+        },
+        "l1_resident": {
+          "median_us": 122.45076010003686,
+          "minimum_us": 122.23573983646929,
+          "samples_us": [
+            122.23573983646929,
+            122.30808002641425,
+            122.45076010003686,
+            122.52409011125563,
+            122.56327026989312
+          ],
+          "calls_per_sample": 100
+        }
+      },
+      "solves": {
+        "emulated/fp32": {
+          "solve_ms": 8147.8285669873,
+          "converged": true,
+          "relative_residual": 9.363013461609127e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 898,
+          "relative_solution_error_vs_stock": 1.3397606976465045e-10,
+          "relative_max_error_vs_stock": 9.044418925063041e-11
+        },
+        "device/fp32/HiFi4": {
+          "solve_ms": 6720.834559004288,
+          "converged": true,
+          "relative_residual": 9.399163883193062e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 892,
+          "relative_solution_error_vs_stock": 1.3310397069014035e-10,
+          "relative_max_error_vs_stock": 9.019749796496164e-11,
+          "viable": true
+        },
+        "emulated/bf16": {
+          "solve_ms": 8147.461977001512,
+          "converged": true,
+          "relative_residual": 9.386597191623788e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 900,
+          "relative_solution_error_vs_stock": 1.3643417318102572e-10,
+          "relative_max_error_vs_stock": 9.2025488721912e-11
+        },
+        "device/bf16/HiFi4": {
+          "solve_ms": 7976.091087009991,
+          "converged": true,
+          "relative_residual": 9.626690499713097e-12,
+          "outer_iterations": 7,
+          "inner_iterations": 1031,
+          "relative_solution_error_vs_stock": 1.478557721033914e-13,
+          "relative_max_error_vs_stock": 2.569254634630459e-13,
+          "viable": true
+        },
+        "emulated/bfp8b": {
+          "solve_ms": 9286.845625989372,
+          "converged": true,
+          "relative_residual": 9.65822184218784e-12,
+          "outer_iterations": 7,
+          "inner_iterations": 1036,
+          "relative_solution_error_vs_stock": 1.6868223511219195e-13,
+          "relative_max_error_vs_stock": 2.626375626970552e-13
+        },
+        "device/bfp8b/HiFi4": {
+          "solve_ms": 7808.117135980865,
+          "converged": true,
+          "relative_residual": 9.660405969132018e-12,
+          "outer_iterations": 7,
+          "inner_iterations": 1031,
+          "relative_solution_error_vs_stock": 1.2369629055247622e-13,
+          "relative_max_error_vs_stock": 2.865569782394694e-13,
+          "viable": true
+        },
+        "device/bfp8b/LoFi": {
+          "solve_ms": 6977.93762999936,
+          "converged": true,
+          "relative_residual": 9.407853550147499e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 920,
+          "relative_solution_error_vs_stock": 1.1931607864653983e-10,
+          "relative_max_error_vs_stock": 8.055464144348222e-11,
+          "viable": true
+        },
+        "device/bfp8b-fp32act/HiFi4": {
+          "solve_ms": 7803.405668993946,
+          "converged": true,
+          "relative_residual": 9.646568856720062e-12,
+          "outer_iterations": 7,
+          "inner_iterations": 1042,
+          "relative_solution_error_vs_stock": 3.589810945753705e-13,
+          "relative_max_error_vs_stock": 4.231713515861932e-13,
+          "viable": true
+        }
+      }
+    }
+  ],
+  "decision": {
+    "adopted": false,
+    "scope": "measurement only; nothing in src/ changes",
+    "host_conversion_matches_emulation": {
+      "fp32": true,
+      "bf16": true,
+      "bfp8b": false,
+      "bfp8b-fp32act": false,
+      "bfp4b": false
+    },
+    "solve_viable_by_config": {
+      "device/bf16/HiFi4": true,
+      "device/bfp8b-fp32act/HiFi4": true,
+      "device/bfp8b/HiFi4": true,
+      "device/bfp8b/LoFi": false,
+      "device/fp32/HiFi4": true
+    },
+    "worst_round_trip_over_cpu_gemv": {
+      "fp32/LoFi": 36.65437334099784,
+      "fp32/HiFi2": 36.24043457221833,
+      "fp32/HiFi4": 36.56478859080081,
+      "bf16/LoFi": 49.22675358844479,
+      "bf16/HiFi2": 49.318531270757084,
+      "bf16/HiFi4": 48.57501656159175,
+      "bfp8b/LoFi": 56.6123796959522,
+      "bfp8b/HiFi2": 56.49038510871093,
+      "bfp8b/HiFi4": 47.99974336452911,
+      "bfp8b-fp32act/LoFi": 35.99341605542959,
+      "bfp8b-fp32act/HiFi2": 36.26836157504784,
+      "bfp8b-fp32act/HiFi4": 36.119663569868514,
+      "bfp4b/LoFi": 48.995752044717904,
+      "bfp4b/HiFi2": 48.81099777847056,
+      "bfp4b/HiFi4": 49.24848932224716
+    },
+    "worst_resident_over_cpu_gemv": {
+      "fp32/LoFi": 12.621909835475083,
+      "fp32/HiFi2": 12.61722586788224,
+      "fp32/HiFi4": 12.62630310468622,
+      "bf16/LoFi": 11.821366126536802,
+      "bf16/HiFi2": 11.84403975402629,
+      "bf16/HiFi4": 11.879876051908349,
+      "bfp8b/LoFi": 11.853604026983609,
+      "bfp8b/HiFi2": 11.864459869606755,
+      "bfp8b/HiFi4": 11.861765302947806,
+      "bfp8b-fp32act/LoFi": 12.595056343263307,
+      "bfp8b-fp32act/HiFi2": 12.621691776426992,
+      "bfp8b-fp32act/HiFi4": 12.620283913303757,
+      "bfp4b/LoFi": 11.829813305276215,
+      "bfp4b/HiFi2": 11.832217103029832,
+      "bfp4b/HiFi4": 11.839380046560402
+    },
+    "coarse_only_offload_pays": false,
+    "worst_traced_over_cpu_gemv": 13.505726007042982
+  }
+}

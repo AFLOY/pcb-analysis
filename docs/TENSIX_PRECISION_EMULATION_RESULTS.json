@@ -1,0 +1,5334 @@
+{
+  "schema": "tensix-precision-emulation/v1",
+  "measured_at": "2026-10-14T11:35:24+09:00",
+  "environment": {
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+    "cpu_count": 16,
+    "OPENBLAS_NUM_THREADS": null,
+    "device": "cpu (Tensix formats emulated; no Tenstorrent device used)"
+  },
+  "definitions": {
+    "reference": "fp32-stock: unmodified portable NumPy FP32 inner PCG with the two-level preconditioner",
+    "coarse_format": "format of (Z^T A Z)^-1 on the FPU; the restricted residual uses fp32/tf32/bf16 to match, bf16 for block floats; FP32 accumulation",
+    "coarse_factor": "factored variants store the lower Cholesky factor R of (Z^T A Z)^-1 once and apply R (r^T R)^T; coarse_inverse_bytes counts the dense n x n factor; coarse_matrix_relative_error_vs_fp32 compares R~ R~^T",
+    "stencil_format": "format of the operator input vector fed to the portable FP32 action; bf16xK sums K FP32 actions of BF16 pieces in FP32; coefficient rounding not emulated",
+    "rounding": "round-to-nearest-even; block floats share the largest exponent of 16 consecutive row values",
+    "solve_ms": "CPU emulation wall time, not a Tensix estimate",
+    "viable": "every case converges to the outer tolerance with at most one extra outer step, at most 10% more inner iterations, and a solution within 100 x relative_tolerance of fp32-stock"
+  },
+  "cases": [
+    {
+      "physics": "dc",
+      "elements": [
+        100,
+        100
+      ],
+      "nodes": 20402,
+      "coarse_size": 1352,
+      "coarse_block": 4,
+      "config": {
+        "relative_tolerance": 1e-10,
+        "inner_relative_tolerance": 0.002,
+        "max_outer_iterations": 8,
+        "max_inner_iterations": 200
+      },
+      "runs": {
+        "fp32-stock": {
+          "solve_ms": 33.19416198064573,
+          "converged": true,
+          "relative_residual": 4.983755852797787e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 60,
+          "low_operator_applications": 60,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              17,
+              0.0014391922537545796
+            ],
+            [
+              2,
+              0.0014424811140222895,
+              14,
+              0.0016284182921543317
+            ],
+            [
+              3,
+              2.3489620738152114e-06,
+              14,
+              0.0019412691290754016
+            ],
+            [
+              4,
+              4.559901007727544e-09,
+              15,
+              0.0010927040302533843
+            ]
+          ],
+          "coarse_format": null,
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": null,
+          "coarse_matrix_asymmetry": null,
+          "relative_solution_error_vs_stock": 0.0,
+          "relative_max_error_vs_stock": 0.0
+        },
+        "coarse-fp32": {
+          "solve_ms": 25.431405985727906,
+          "converged": true,
+          "relative_residual": 4.986056491482117e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 60,
+          "low_operator_applications": 60,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              17,
+              0.001439185784889589
+            ],
+            [
+              2,
+              0.0014420863295882547,
+              14,
+              0.0016291087080080385
+            ],
+            [
+              3,
+              2.3493027873407183e-06,
+              14,
+              0.0019408769540163473
+            ],
+            [
+              4,
+              4.559756387848716e-09,
+              15,
+              0.0010933154223392904
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 7311616,
+          "relative_solution_error_vs_stock": 1.3078224216794484e-13,
+          "relative_max_error_vs_stock": 6.2899087753467e-14
+        },
+        "coarse-tf32": {
+          "solve_ms": 24.83892600866966,
+          "converged": true,
+          "relative_residual": 7.15414522447164e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 60,
+          "low_operator_applications": 60,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              17,
+              0.0019052540721233092
+            ],
+            [
+              2,
+              0.001909814671168115,
+              14,
+              0.0018827065559742714
+            ],
+            [
+              3,
+              3.5956418907046404e-06,
+              15,
+              0.001106327339201157
+            ],
+            [
+              4,
+              3.977980218093943e-09,
+              14,
+              0.0017985076699319296
+            ]
+          ],
+          "coarse_format": "tf32",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0001581524431188451,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 7311616,
+          "relative_solution_error_vs_stock": 1.385250819832586e-13,
+          "relative_max_error_vs_stock": 2.9231947834143315e-13
+        },
+        "coarse-bf16": {
+          "solve_ms": 603.8389589812141,
+          "converged": false,
+          "relative_residual": 0.22807191376626682,
+          "outer_iterations": 8,
+          "inner_iterations": 1600,
+          "low_operator_applications": 1600,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.5893351449446135
+            ],
+            [
+              2,
+              0.5893331440748875,
+              200,
+              0.5227504896614851
+            ],
+            [
+              3,
+              0.30807404073292616,
+              200,
+              0.9125927364477913
+            ],
+            [
+              4,
+              0.2811462188285199,
+              200,
+              0.9605235793138852
+            ],
+            [
+              5,
+              0.2700475657060165,
+              200,
+              0.9576532864548303
+            ],
+            [
+              6,
+              0.2586118957600103,
+              200,
+              0.9644347019541774
+            ],
+            [
+              7,
+              0.24941432058660892,
+              200,
+              0.9139936805638138
+            ],
+            [
+              8,
+              0.22796311018205132,
+              200,
+              1.0004768467613816
+            ]
+          ],
+          "coarse_format": "bf16",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0012653182353927989,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 3655808,
+          "relative_solution_error_vs_stock": 0.024293508630522195,
+          "relative_max_error_vs_stock": 0.01846124334305078
+        },
+        "coarse-bfp8b": {
+          "solve_ms": 673.9676980068907,
+          "converged": false,
+          "relative_residual": 2.6305384216074446,
+          "outer_iterations": 8,
+          "inner_iterations": 1600,
+          "low_operator_applications": 1600,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              2.993994897560991
+            ],
+            [
+              2,
+              2.9939900476781776,
+              200,
+              0.920447411652327
+            ],
+            [
+              3,
+              2.7558103914508756,
+              200,
+              1.0157248263856788
+            ],
+            [
+              4,
+              2.79914459828668,
+              200,
+              0.9780334290078663
+            ],
+            [
+              5,
+              2.7376569274797786,
+              200,
+              0.9876014414544981
+            ],
+            [
+              6,
+              2.7037138528773936,
+              200,
+              0.9826077145568484
+            ],
+            [
+              7,
+              2.656689992561145,
+              200,
+              0.991271789997178
+            ],
+            [
+              8,
+              2.6335020390908483,
+              200,
+              0.9988745526024116
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0028130119062737507,
+          "coarse_matrix_asymmetry": 0.002131393541545594,
+          "coarse_inverse_bytes": 1942148,
+          "relative_solution_error_vs_stock": 0.25681277788494067,
+          "relative_max_error_vs_stock": 0.28668331746825737
+        },
+        "coarse-bfp4b": {
+          "solve_ms": 655.4671620251611,
+          "converged": false,
+          "relative_residual": 2.3345763560466746,
+          "outer_iterations": 8,
+          "inner_iterations": 1600,
+          "low_operator_applications": 1600,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              2.2384763917717247
+            ],
+            [
+              2,
+              2.238477377667428,
+              200,
+              0.9998370159780491
+            ],
+            [
+              3,
+              2.238112505419311,
+              200,
+              1.0171850967936165
+            ],
+            [
+              4,
+              2.276574442930039,
+              200,
+              1.025477813452526
+            ],
+            [
+              5,
+              2.33457648130153,
+              200,
+              1.0
+            ],
+            [
+              6,
+              2.33457633873007,
+              200,
+              1.0
+            ],
+            [
+              7,
+              2.3345764441305605,
+              200,
+              1.0
+            ],
+            [
+              8,
+              2.3345763326682203,
+              200,
+              1.0
+            ]
+          ],
+          "coarse_format": "bfp4b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.07825300272200755,
+          "coarse_matrix_asymmetry": 0.0496494185181171,
+          "coarse_inverse_bytes": 1028196,
+          "relative_solution_error_vs_stock": 1.0130323875382812,
+          "relative_max_error_vs_stock": 0.9686722011390966
+        },
+        "coarse-factor-bf16": {
+          "solve_ms": 27.669214003253728,
+          "converged": true,
+          "relative_residual": 5.219650051715415e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 60,
+          "low_operator_applications": 60,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              17,
+              0.0015102464326790489
+            ],
+            [
+              2,
+              0.001514996204721196,
+              14,
+              0.0016390957435452424
+            ],
+            [
+              3,
+              2.4832267762311213e-06,
+              14,
+              0.0019600694430854868
+            ],
+            [
+              4,
+              4.86726808342218e-09,
+              15,
+              0.0010720780596605284
+            ]
+          ],
+          "coarse_format": "bf16",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0014808648640624005,
+          "coarse_matrix_asymmetry": 6.382248998985511e-18,
+          "coarse_inverse_bytes": 3655808,
+          "relative_solution_error_vs_stock": 4.759631055108113e-14,
+          "relative_max_error_vs_stock": 3.6590334702738015e-14
+        },
+        "coarse-factor-bfp8b": {
+          "solve_ms": 30.560990009689704,
+          "converged": true,
+          "relative_residual": 2.7595175204770234e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 64,
+          "low_operator_applications": 64,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              18,
+              0.0012992234315341805
+            ],
+            [
+              2,
+              0.0013026044198106185,
+              15,
+              0.001404264097071599
+            ],
+            [
+              3,
+              1.8292164765814954e-06,
+              15,
+              0.0015428773580958412
+            ],
+            [
+              4,
+              2.8222287111444957e-09,
+              16,
+              0.0009768151604152098
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0034873372383599707,
+          "coarse_matrix_asymmetry": 1.215618187475778e-19,
+          "coarse_inverse_bytes": 1942148,
+          "relative_solution_error_vs_stock": 1.286268767073608e-13,
+          "relative_max_error_vs_stock": 1.2801577154952417e-13
+        },
+        "coarse-factor-bfp4b": {
+          "solve_ms": 62.53771000774577,
+          "converged": true,
+          "relative_residual": 1.088544211085972e-11,
+          "outer_iterations": 4,
+          "inner_iterations": 146,
+          "low_operator_applications": 146,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              42,
+              0.0017746531616192162
+            ],
+            [
+              2,
+              0.0017818345509644678,
+              34,
+              0.0019777747314559052
+            ],
+            [
+              3,
+              3.5248913599057794e-06,
+              37,
+              0.0016675362153091952
+            ],
+            [
+              4,
+              5.87782877718674e-09,
+              33,
+              0.001851965369894705
+            ]
+          ],
+          "coarse_format": "bfp4b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.09426655475766144,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 1028196,
+          "relative_solution_error_vs_stock": 1.9813995745579105e-12,
+          "relative_max_error_vs_stock": 2.1035914460370237e-12
+        },
+        "stencil-tf32": {
+          "solve_ms": 31.4223830064293,
+          "converged": true,
+          "relative_residual": 2.747526455140203e-12,
+          "outer_iterations": 5,
+          "inner_iterations": 70,
+          "low_operator_applications": 70,
+          "high_operator_applications": 6,
+          "history": [
+            [
+              1,
+              1.0,
+              17,
+              0.001450149847575229
+            ],
+            [
+              2,
+              0.10336335694799048,
+              10,
+              0.0018702448713683972
+            ],
+            [
+              3,
+              0.000196209872137272,
+              14,
+              0.0018038493006850389
+            ],
+            [
+              4,
+              5.913560454103919e-07,
+              14,
+              0.001436822984724354
+            ],
+            [
+              5,
+              1.1886692030137564e-09,
+              15,
+              0.0014520534255549372
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "tf32",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 7311616,
+          "relative_solution_error_vs_stock": 6.029014657614476e-14,
+          "relative_max_error_vs_stock": 1.0069902029761783e-13
+        },
+        "stencil-bf16": {
+          "solve_ms": 35.46303999610245,
+          "converged": true,
+          "relative_residual": 1.971288140463479e-12,
+          "outer_iterations": 6,
+          "inner_iterations": 79,
+          "low_operator_applications": 79,
+          "high_operator_applications": 7,
+          "history": [
+            [
+              1,
+              1.0,
+              18,
+              0.0010975695861181168
+            ],
+            [
+              2,
+              0.7608240184485557,
+              11,
+              0.0012613765649174852
+            ],
+            [
+              3,
+              0.0020531981728473146,
+              12,
+              0.001966987734491596
+            ],
+            [
+              4,
+              1.2923688832706291e-05,
+              13,
+              0.0013671044646747046
+            ],
+            [
+              5,
+              7.253073409085417e-08,
+              12,
+              0.0014909545139508273
+            ],
+            [
+              6,
+              2.781241104044976e-10,
+              13,
+              0.0018267016527031485
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 7311616,
+          "relative_solution_error_vs_stock": 7.45665048111863e-14,
+          "relative_max_error_vs_stock": 9.172783630713937e-14
+        },
+        "stencil-bf16x2": {
+          "solve_ms": 41.72426200238988,
+          "converged": true,
+          "relative_residual": 4.348488423124625e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 60,
+          "low_operator_applications": 60,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              17,
+              0.0014391419956496531
+            ],
+            [
+              2,
+              0.0019524672765026516,
+              14,
+              0.0013132036287989792
+            ],
+            [
+              3,
+              2.565577085346877e-06,
+              15,
+              0.0011448005680821992
+            ],
+            [
+              4,
+              2.939141680805529e-09,
+              14,
+              0.0014791904385341498
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16x2",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 7311616,
+          "relative_solution_error_vs_stock": 5.2104781220392885e-14,
+          "relative_max_error_vs_stock": 1.198509861199876e-13
+        },
+        "stencil-bf16x3": {
+          "solve_ms": 56.16085702786222,
+          "converged": true,
+          "relative_residual": 4.990960892095142e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 60,
+          "low_operator_applications": 60,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              17,
+              0.0014390668572947629
+            ],
+            [
+              2,
+              0.0014429507649211376,
+              14,
+              0.0016294696470902051
+            ],
+            [
+              3,
+              2.351294089058869e-06,
+              14,
+              0.0019417146791675958
+            ],
+            [
+              4,
+              4.565562142470379e-09,
+              15,
+              0.0010929778769630636
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16x3",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 7311616,
+          "relative_solution_error_vs_stock": 5.5604880396734775e-14,
+          "relative_max_error_vs_stock": 2.842554927320143e-14
+        },
+        "stencil-bf16x3+coarse-factor-bfp8b": {
+          "solve_ms": 62.41809201310389,
+          "converged": true,
+          "relative_residual": 2.827494383436259e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 64,
+          "low_operator_applications": 64,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              18,
+              0.0012991973072717187
+            ],
+            [
+              2,
+              0.0013033587366640801,
+              15,
+              0.0014002559750002942
+            ],
+            [
+              3,
+              1.8250482032399722e-06,
+              15,
+              0.001540316152403829
+            ],
+            [
+              4,
+              2.8111284979982663e-09,
+              16,
+              0.0010054114904475304
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": "bf16x3",
+          "coarse_matrix_relative_error_vs_fp32": 0.0034873372383599707,
+          "coarse_matrix_asymmetry": 1.215618187475778e-19,
+          "coarse_inverse_bytes": 1942148,
+          "relative_solution_error_vs_stock": 1.5856500110905012e-13,
+          "relative_max_error_vs_stock": 1.3839815302165093e-13
+        }
+      }
+    },
+    {
+      "physics": "dc",
+      "elements": [
+        200,
+        200
+      ],
+      "nodes": 80802,
+      "coarse_size": 1682,
+      "coarse_block": 7,
+      "config": {
+        "relative_tolerance": 1e-10,
+        "inner_relative_tolerance": 0.002,
+        "max_outer_iterations": 8,
+        "max_inner_iterations": 200
+      },
+      "runs": {
+        "fp32-stock": {
+          "solve_ms": 155.4165700217709,
+          "converged": true,
+          "relative_residual": 5.597804911485795e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 95,
+          "low_operator_applications": 95,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              26,
+              0.0018033598051721482
+            ],
+            [
+              2,
+              0.0018391481775157158,
+              23,
+              0.0015310837800809063
+            ],
+            [
+              3,
+              2.8159338168200667e-06,
+              22,
+              0.0015735619896567517
+            ],
+            [
+              4,
+              4.43122341153822e-09,
+              24,
+              0.0012619978878734186
+            ]
+          ],
+          "coarse_format": null,
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": null,
+          "coarse_matrix_asymmetry": null,
+          "relative_solution_error_vs_stock": 0.0,
+          "relative_max_error_vs_stock": 0.0
+        },
+        "coarse-fp32": {
+          "solve_ms": 127.79468597727828,
+          "converged": true,
+          "relative_residual": 5.6141930676534835e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 95,
+          "low_operator_applications": 95,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              26,
+              0.0018034285138078668
+            ],
+            [
+              2,
+              0.00184021894354588,
+              23,
+              0.0015297485989276742
+            ],
+            [
+              3,
+              2.8151199508709977e-06,
+              22,
+              0.0015728092294569982
+            ],
+            [
+              4,
+              4.427673146144261e-09,
+              24,
+              0.0012669137283911453
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 11316496,
+          "relative_solution_error_vs_stock": 3.1734595945111443e-14,
+          "relative_max_error_vs_stock": 2.011319692109479e-14
+        },
+        "coarse-tf32": {
+          "solve_ms": 131.98551998357289,
+          "converged": true,
+          "relative_residual": 9.198352106628492e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 104,
+          "low_operator_applications": 104,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              29,
+              0.0019121024389333352
+            ],
+            [
+              2,
+              0.0019474116423500716,
+              25,
+              0.0018898175217539408
+            ],
+            [
+              3,
+              3.6803875542718725e-06,
+              24,
+              0.001582218875212342
+            ],
+            [
+              4,
+              5.8233870943435326e-09,
+              26,
+              0.0015790200870710268
+            ]
+          ],
+          "coarse_format": "tf32",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0001575651998576869,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 11316496,
+          "relative_solution_error_vs_stock": 1.1479393492984895e-13,
+          "relative_max_error_vs_stock": 1.3317026706691912e-13
+        },
+        "coarse-bf16": {
+          "solve_ms": 1919.6896389767062,
+          "converged": false,
+          "relative_residual": 0.8607587817020111,
+          "outer_iterations": 8,
+          "inner_iterations": 1600,
+          "low_operator_applications": 1600,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              2.8774076702514364
+            ],
+            [
+              2,
+              2.877408760236319,
+              200,
+              0.3570561770372394
+            ],
+            [
+              3,
+              1.0273991994349572,
+              200,
+              1.141896175121138
+            ],
+            [
+              4,
+              1.1731830462041937,
+              200,
+              0.730997038851899
+            ],
+            [
+              5,
+              0.8575933895054174,
+              200,
+              0.9052073720631
+            ],
+            [
+              6,
+              0.7762998609034898,
+              200,
+              1.067925784075026
+            ],
+            [
+              7,
+              0.829030732317976,
+              200,
+              1.0244257777956107
+            ],
+            [
+              8,
+              0.8492808647098439,
+              200,
+              1.0135144569106973
+            ]
+          ],
+          "coarse_format": "bf16",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0012558329619298965,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 5658248,
+          "relative_solution_error_vs_stock": 0.0593454627179233,
+          "relative_max_error_vs_stock": 0.0718918292455904
+        },
+        "coarse-bfp8b": {
+          "solve_ms": 1901.9314979959745,
+          "converged": false,
+          "relative_residual": 1.4141399021491832,
+          "outer_iterations": 8,
+          "inner_iterations": 1600,
+          "low_operator_applications": 1600,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              5.298396216673302
+            ],
+            [
+              2,
+              5.298395009785947,
+              200,
+              0.8328071096208064
+            ],
+            [
+              3,
+              4.41254119560322,
+              200,
+              0.802544691082219
+            ],
+            [
+              4,
+              3.541261090552746,
+              200,
+              0.814135867548525
+            ],
+            [
+              5,
+              2.8830676822221712,
+              200,
+              0.7264836501960475
+            ],
+            [
+              6,
+              2.094501347014369,
+              200,
+              0.8532077517978646
+            ],
+            [
+              7,
+              1.7870447537981367,
+              200,
+              1.017209255922549
+            ],
+            [
+              8,
+              1.8177982481987693,
+              200,
+              0.7779408180168796
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0025467857956918915,
+          "coarse_matrix_asymmetry": 0.000234119083280266,
+          "coarse_inverse_bytes": 3005944,
+          "relative_solution_error_vs_stock": 0.5258397092549262,
+          "relative_max_error_vs_stock": 0.3497438977865281
+        },
+        "coarse-bfp4b": {
+          "solve_ms": 1873.4273219888564,
+          "converged": false,
+          "relative_residual": 1.8398989068444127,
+          "outer_iterations": 8,
+          "inner_iterations": 1600,
+          "low_operator_applications": 1600,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              1.8398961578624486
+            ],
+            [
+              2,
+              1.83989600888399,
+              200,
+              1.000001495782803
+            ],
+            [
+              3,
+              1.8398990923944296,
+              200,
+              0.9999999349660709
+            ],
+            [
+              4,
+              1.839898855123481,
+              200,
+              1.0
+            ],
+            [
+              5,
+              1.8398989553289002,
+              200,
+              1.0
+            ],
+            [
+              6,
+              1.8398989877352727,
+              200,
+              1.0
+            ],
+            [
+              7,
+              1.8398989214110029,
+              200,
+              1.0
+            ],
+            [
+              8,
+              1.8398989762008935,
+              200,
+              1.0
+            ]
+          ],
+          "coarse_format": "bfp4b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.02973226448902707,
+          "coarse_matrix_asymmetry": 0.006000225789809576,
+          "coarse_inverse_bytes": 1591382,
+          "relative_solution_error_vs_stock": 0.9667648558095168,
+          "relative_max_error_vs_stock": 0.9712145423636325
+        },
+        "coarse-factor-bf16": {
+          "solve_ms": 125.45170800876804,
+          "converged": true,
+          "relative_residual": 5.721108019124582e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 95,
+          "low_operator_applications": 95,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              26,
+              0.0019698319488103875
+            ],
+            [
+              2,
+              0.002000261354419233,
+              23,
+              0.001396767858772303
+            ],
+            [
+              3,
+              2.79392003286786e-06,
+              22,
+              0.0016484724777590235
+            ],
+            [
+              4,
+              4.605787609713153e-09,
+              24,
+              0.0012409138883055144
+            ]
+          ],
+          "coarse_format": "bf16",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.001471315232575753,
+          "coarse_matrix_asymmetry": 8.564426890090085e-18,
+          "coarse_inverse_bytes": 5658248,
+          "relative_solution_error_vs_stock": 2.477387223686958e-14,
+          "relative_max_error_vs_stock": 5.710210532731601e-14
+        },
+        "coarse-factor-bfp8b": {
+          "solve_ms": 132.90285898256116,
+          "converged": true,
+          "relative_residual": 5.940499231719241e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 101,
+          "low_operator_applications": 101,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              29,
+              0.0018566932477288422
+            ],
+            [
+              2,
+              0.0018916268137767628,
+              24,
+              0.0017806379925054622
+            ],
+            [
+              3,
+              3.3683783910285766e-06,
+              23,
+              0.0015784199790111048
+            ],
+            [
+              4,
+              5.316716462867924e-09,
+              25,
+              0.001115978535684343
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.003095282428579304,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 3005944,
+          "relative_solution_error_vs_stock": 9.037755698989066e-14,
+          "relative_max_error_vs_stock": 1.2297346254418412e-13
+        },
+        "coarse-factor-bfp4b": {
+          "solve_ms": 526.6878669790458,
+          "converged": true,
+          "relative_residual": 1.6135918341231798e-11,
+          "outer_iterations": 4,
+          "inner_iterations": 421,
+          "low_operator_applications": 421,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              123,
+              0.0019647327864881258
+            ],
+            [
+              2,
+              0.0021040548555630516,
+              95,
+              0.0019575128003499454
+            ],
+            [
+              3,
+              4.1198248713642894e-06,
+              106,
+              0.001984166725064205
+            ],
+            [
+              4,
+              8.176185379590726e-09,
+              97,
+              0.001973063837003096
+            ]
+          ],
+          "coarse_format": "bfp4b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.06913177503036479,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 1591382,
+          "relative_solution_error_vs_stock": 9.772620061891673e-13,
+          "relative_max_error_vs_stock": 2.37106295567157e-12
+        },
+        "stencil-tf32": {
+          "solve_ms": 144.43667902378365,
+          "converged": true,
+          "relative_residual": 1.5528283715128495e-11,
+          "outer_iterations": 5,
+          "inner_iterations": 104,
+          "low_operator_applications": 104,
+          "high_operator_applications": 6,
+          "history": [
+            [
+              1,
+              1.0,
+              26,
+              0.0018339426265579044
+            ],
+            [
+              2,
+              0.20864641472216297,
+              14,
+              0.0014846767019694093
+            ],
+            [
+              3,
+              0.0003179025959153253,
+              23,
+              0.0017831147696682976
+            ],
+            [
+              4,
+              1.5708144193165876e-06,
+              19,
+              0.0019360646390764074
+            ],
+            [
+              5,
+              3.838228784002459e-09,
+              22,
+              0.0014517881434518952
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "tf32",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 11316496,
+          "relative_solution_error_vs_stock": 1.147328143924917e-13,
+          "relative_max_error_vs_stock": 1.0339559786053292e-13
+        },
+        "stencil-bf16": {
+          "solve_ms": 156.3410029921215,
+          "converged": true,
+          "relative_residual": 1.4352956711878288e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 115,
+          "low_operator_applications": 115,
+          "high_operator_applications": 7,
+          "history": [
+            [
+              1,
+              1.0,
+              28,
+              0.0019395342448925797
+            ],
+            [
+              2,
+              1.492568089930587,
+              14,
+              0.0015456594109179219
+            ],
+            [
+              3,
+              0.004828481387288352,
+              20,
+              0.001467069246160066
+            ],
+            [
+              4,
+              7.362850254793349e-05,
+              16,
+              0.0017827269661004137
+            ],
+            [
+              5,
+              3.3809769337870476e-07,
+              20,
+              0.001540827380007643
+            ],
+            [
+              6,
+              4.423907377763697e-09,
+              17,
+              0.0014974779304151563
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 11316496,
+          "relative_solution_error_vs_stock": 2.3657621503832677e-13,
+          "relative_max_error_vs_stock": 3.474051300895815e-13
+        },
+        "stencil-bf16x2": {
+          "solve_ms": 203.9832840091549,
+          "converged": true,
+          "relative_residual": 1.4695866994085698e-11,
+          "outer_iterations": 4,
+          "inner_iterations": 92,
+          "low_operator_applications": 92,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              26,
+              0.001803230100094516
+            ],
+            [
+              2,
+              0.003229780110225732,
+              21,
+              0.0018131485762405309
+            ],
+            [
+              3,
+              5.856989003134853e-06,
+              23,
+              0.0013169456958107128
+            ],
+            [
+              4,
+              7.725004574062808e-09,
+              22,
+              0.00190206293943409
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16x2",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 11316496,
+          "relative_solution_error_vs_stock": 1.7196987271429767e-13,
+          "relative_max_error_vs_stock": 3.4016539887843964e-13
+        },
+        "stencil-bf16x3": {
+          "solve_ms": 311.3034480193164,
+          "converged": true,
+          "relative_residual": 5.601606321775232e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 95,
+          "low_operator_applications": 95,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              26,
+              0.0018033879663646793
+            ],
+            [
+              2,
+              0.0018373117828123571,
+              23,
+              0.0015238775855877925
+            ],
+            [
+              3,
+              2.799851066954132e-06,
+              22,
+              0.0015884869571491267
+            ],
+            [
+              4,
+              4.447477410453407e-09,
+              24,
+              0.0012581685590920407
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16x3",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 11316496,
+          "relative_solution_error_vs_stock": 7.713290357529333e-14,
+          "relative_max_error_vs_stock": 4.568168426185281e-14
+        },
+        "stencil-bf16x3+coarse-factor-bfp8b": {
+          "solve_ms": 320.9816779999528,
+          "converged": true,
+          "relative_residual": 6.923134871530019e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 101,
+          "low_operator_applications": 101,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              29,
+              0.001857591134050036
+            ],
+            [
+              2,
+              0.0018979074557086177,
+              24,
+              0.0018030728266612167
+            ],
+            [
+              3,
+              3.4228865037562566e-06,
+              23,
+              0.0016340480020911024
+            ],
+            [
+              4,
+              5.593278655502012e-09,
+              25,
+              0.00123673649837037
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": "bf16x3",
+          "coarse_matrix_relative_error_vs_fp32": 0.003095282428579304,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 3005944,
+          "relative_solution_error_vs_stock": 3.9825855508723355e-13,
+          "relative_max_error_vs_stock": 2.2603766425772816e-13
+        }
+      }
+    },
+    {
+      "physics": "dc",
+      "elements": [
+        320,
+        320
+      ],
+      "nodes": 206082,
+      "coarse_size": 1800,
+      "coarse_block": 11,
+      "config": {
+        "relative_tolerance": 1e-10,
+        "inner_relative_tolerance": 0.002,
+        "max_outer_iterations": 8,
+        "max_inner_iterations": 200
+      },
+      "runs": {
+        "fp32-stock": {
+          "solve_ms": 381.2768200004939,
+          "converged": true,
+          "relative_residual": 8.953580581062724e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 132,
+          "low_operator_applications": 132,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              37,
+              0.0014572202508172831
+            ],
+            [
+              2,
+              0.0017022141242100041,
+              31,
+              0.0019556203051546506
+            ],
+            [
+              3,
+              3.3291520968059892e-06,
+              31,
+              0.0018109278724873757
+            ],
+            [
+              4,
+              6.0290221668963355e-09,
+              33,
+              0.001482072616864021
+            ]
+          ],
+          "coarse_format": null,
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": null,
+          "coarse_matrix_asymmetry": null,
+          "relative_solution_error_vs_stock": 0.0,
+          "relative_max_error_vs_stock": 0.0
+        },
+        "coarse-fp32": {
+          "solve_ms": 377.01496097724885,
+          "converged": true,
+          "relative_residual": 8.28291758375808e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 133,
+          "low_operator_applications": 133,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              37,
+              0.001456755753855962
+            ],
+            [
+              2,
+              0.0016990680997411524,
+              32,
+              0.001409602248566189
+            ],
+            [
+              3,
+              2.3951110251445316e-06,
+              31,
+              0.001840122648300821
+            ],
+            [
+              4,
+              4.407583262086874e-09,
+              33,
+              0.0018755268156506564
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 12960000,
+          "relative_solution_error_vs_stock": 1.6783385947249877e-13,
+          "relative_max_error_vs_stock": 4.547665071705473e-13
+        },
+        "coarse-tf32": {
+          "solve_ms": 4387.954350997461,
+          "converged": false,
+          "relative_residual": 0.04544599882808878,
+          "outer_iterations": 8,
+          "inner_iterations": 1600,
+          "low_operator_applications": 1600,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.06781021073698432
+            ],
+            [
+              2,
+              0.0678440293920298,
+              200,
+              0.8492694169022207
+            ],
+            [
+              3,
+              0.05761787185058153,
+              200,
+              1.0536549532987003
+            ],
+            [
+              4,
+              0.06070936049483473,
+              200,
+              0.940726698675211
+            ],
+            [
+              5,
+              0.057110908866665484,
+              200,
+              0.9730587664454355
+            ],
+            [
+              6,
+              0.0555722664239557,
+              200,
+              0.9822827387888334
+            ],
+            [
+              7,
+              0.05458768576080294,
+              200,
+              0.8878207956906407
+            ],
+            [
+              8,
+              0.04846408175194884,
+              200,
+              0.9377247252716194
+            ]
+          ],
+          "coarse_format": "tf32",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 7.318347837188875e-05,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 12960000,
+          "relative_solution_error_vs_stock": 0.005710477445419512,
+          "relative_max_error_vs_stock": 0.003413557002986236
+        },
+        "coarse-bf16": {
+          "solve_ms": 4322.892527008662,
+          "converged": false,
+          "relative_residual": 2.314713724886259,
+          "outer_iterations": 8,
+          "inner_iterations": 1600,
+          "low_operator_applications": 1600,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              4.6830659613056005
+            ],
+            [
+              2,
+              4.6830627086240915,
+              200,
+              0.5817919258342862
+            ],
+            [
+              3,
+              2.7245700213963655,
+              200,
+              1.0440734083058534
+            ],
+            [
+              4,
+              2.8446507700528514,
+              200,
+              0.7127832819120595
+            ],
+            [
+              5,
+              2.0276191977722977,
+              200,
+              1.1049220311592105
+            ],
+            [
+              6,
+              2.2403607729344595,
+              200,
+              0.7816537600186523
+            ],
+            [
+              7,
+              1.7511872045437518,
+              200,
+              1.2580889831953044
+            ],
+            [
+              8,
+              2.2031490786430576,
+              200,
+              1.0506389328137808
+            ]
+          ],
+          "coarse_format": "bf16",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0005847826353240934,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 6480000,
+          "relative_solution_error_vs_stock": 0.19180304366126882,
+          "relative_max_error_vs_stock": 0.2482459245600945
+        },
+        "coarse-bfp8b": {
+          "solve_ms": 4317.703289008932,
+          "converged": false,
+          "relative_residual": 2.6372859888088978,
+          "outer_iterations": 8,
+          "inner_iterations": 1600,
+          "low_operator_applications": 1600,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              4.450511129327119
+            ],
+            [
+              2,
+              4.450508602205336,
+              200,
+              0.867863219638138
+            ],
+            [
+              3,
+              3.8624323539595213,
+              200,
+              1.1022055546850995
+            ],
+            [
+              4,
+              4.257195044557825,
+              200,
+              0.8003721972132569
+            ],
+            [
+              5,
+              3.4073387119991185,
+              200,
+              0.9568575167814767
+            ],
+            [
+              6,
+              3.260336631951129,
+              200,
+              0.9578644773379444
+            ],
+            [
+              7,
+              3.1229608348702502,
+              200,
+              0.9087123731704918
+            ],
+            [
+              8,
+              2.8378736306493475,
+              200,
+              0.9293178233123468
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0011699720290485815,
+          "coarse_matrix_asymmetry": 2.6020206743316255e-05,
+          "coarse_inverse_bytes": 3442500,
+          "relative_solution_error_vs_stock": 0.3732674275748239,
+          "relative_max_error_vs_stock": 0.45946033304068074
+        },
+        "coarse-bfp4b": {
+          "solve_ms": 4281.469829991693,
+          "converged": false,
+          "relative_residual": 1.2710210366251895,
+          "outer_iterations": 8,
+          "inner_iterations": 1600,
+          "low_operator_applications": 1600,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              1.029218380327134
+            ],
+            [
+              2,
+              1.0292085915034441,
+              200,
+              0.8512565289907934
+            ],
+            [
+              3,
+              0.876122830340721,
+              200,
+              0.912395970516886
+            ],
+            [
+              4,
+              0.7993691280833819,
+              200,
+              0.8801771538403579
+            ],
+            [
+              5,
+              0.7035863659844708,
+              200,
+              1.8334778873213569
+            ],
+            [
+              6,
+              1.290009008166941,
+              200,
+              0.9852797736957647
+            ],
+            [
+              7,
+              1.2710198750788473,
+              200,
+              1.0000009513140085
+            ],
+            [
+              8,
+              1.271021031235496,
+              200,
+              1.0
+            ]
+          ],
+          "coarse_format": "bfp4b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.006270311850133531,
+          "coarse_matrix_asymmetry": 0.0005253056184702296,
+          "coarse_inverse_bytes": 1822500,
+          "relative_solution_error_vs_stock": 0.8866393788323526,
+          "relative_max_error_vs_stock": 0.9149844033308537
+        },
+        "coarse-factor-bf16": {
+          "solve_ms": 403.97053500055335,
+          "converged": true,
+          "relative_residual": 9.108539282816515e-12,
+          "outer_iterations": 4,
+          "inner_iterations": 136,
+          "low_operator_applications": 136,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              38,
+              0.0015931299657810003
+            ],
+            [
+              2,
+              0.0018279911144031063,
+              32,
+              0.0016707811230042208
+            ],
+            [
+              3,
+              3.055162181637396e-06,
+              32,
+              0.001945337273583921
+            ],
+            [
+              4,
+              5.943601723530417e-09,
+              34,
+              0.0015295791773922997
+            ]
+          ],
+          "coarse_format": "bf16",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0007496254235734713,
+          "coarse_matrix_asymmetry": 1.439367328422939e-19,
+          "coarse_inverse_bytes": 6480000,
+          "relative_solution_error_vs_stock": 2.9484600842987423e-13,
+          "relative_max_error_vs_stock": 3.4699149820967604e-13
+        },
+        "coarse-factor-bfp8b": {
+          "solve_ms": 439.489540993236,
+          "converged": true,
+          "relative_residual": 1.0213560693876005e-11,
+          "outer_iterations": 4,
+          "inner_iterations": 144,
+          "low_operator_applications": 144,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              41,
+              0.0016600619557884525
+            ],
+            [
+              2,
+              0.001893952395181735,
+              34,
+              0.0019908156904393714
+            ],
+            [
+              3,
+              3.7706233290007926e-06,
+              33,
+              0.00194429958174034
+            ],
+            [
+              4,
+              7.331213092283911e-09,
+              36,
+              0.0013909136685262388
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.001560448941865797,
+          "coarse_matrix_asymmetry": 4.552038266063813e-20,
+          "coarse_inverse_bytes": 3442500,
+          "relative_solution_error_vs_stock": 2.428329431280783e-13,
+          "relative_max_error_vs_stock": 3.165703257638962e-13
+        },
+        "coarse-factor-bfp4b": {
+          "solve_ms": 1406.3939049956389,
+          "converged": true,
+          "relative_residual": 1.718979970897006e-11,
+          "outer_iterations": 4,
+          "inner_iterations": 501,
+          "low_operator_applications": 501,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              142,
+              0.001908353367405599
+            ],
+            [
+              2,
+              0.0025914337208013485,
+              118,
+              0.001929047416281525
+            ],
+            [
+              3,
+              5.000834401233089e-06,
+              127,
+              0.0018303760452767844
+            ],
+            [
+              4,
+              9.156427390778112e-09,
+              114,
+              0.0018764285750137882
+            ]
+          ],
+          "coarse_format": "bfp4b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.01059290017695561,
+          "coarse_matrix_asymmetry": 6.446468182349852e-20,
+          "coarse_inverse_bytes": 1822500,
+          "relative_solution_error_vs_stock": 4.948402673816441e-13,
+          "relative_max_error_vs_stock": 2.368848664922697e-12
+        },
+        "stencil-tf32": {
+          "solve_ms": 444.88913999521174,
+          "converged": true,
+          "relative_residual": 3.659958323735555e-11,
+          "outer_iterations": 5,
+          "inner_iterations": 145,
+          "low_operator_applications": 145,
+          "high_operator_applications": 6,
+          "history": [
+            [
+              1,
+              1.0,
+              37,
+              0.001686891194002431
+            ],
+            [
+              2,
+              0.3779896059295572,
+              17,
+              0.001981866586165156
+            ],
+            [
+              3,
+              0.0007583565928260269,
+              31,
+              0.0018133426426511395
+            ],
+            [
+              4,
+              3.271860875097857e-06,
+              29,
+              0.001633244103741479
+            ],
+            [
+              5,
+              8.656686187457342e-09,
+              31,
+              0.0018436668853355157
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "tf32",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 12960000,
+          "relative_solution_error_vs_stock": 9.672156077140683e-14,
+          "relative_max_error_vs_stock": 2.0214068533051064e-13
+        },
+        "stencil-bf16": {
+          "solve_ms": 485.166422004113,
+          "converged": true,
+          "relative_residual": 9.651478958316201e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 161,
+          "low_operator_applications": 161,
+          "high_operator_applications": 7,
+          "history": [
+            [
+              1,
+              1.0,
+              45,
+              0.0018694390902014356
+            ],
+            [
+              2,
+              2.7034321701880524,
+              18,
+              0.001748294537994465
+            ],
+            [
+              3,
+              0.008658523164218718,
+              28,
+              0.0017882902142098561
+            ],
+            [
+              4,
+              0.00023377003612675,
+              21,
+              0.0016560250958488744
+            ],
+            [
+              5,
+              1.1349494261308512e-06,
+              29,
+              0.0017917084889422423
+            ],
+            [
+              6,
+              3.0412772599872475e-08,
+              20,
+              0.0019604001111351295
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 12960000,
+          "relative_solution_error_vs_stock": 6.96777834302911e-13,
+          "relative_max_error_vs_stock": 2.1416905680413805e-12
+        },
+        "stencil-bf16x2": {
+          "solve_ms": 668.4130229987204,
+          "converged": true,
+          "relative_residual": 3.814057743043422e-11,
+          "outer_iterations": 4,
+          "inner_iterations": 129,
+          "low_operator_applications": 129,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              37,
+              0.0014692131874547943
+            ],
+            [
+              2,
+              0.005026144037843558,
+              28,
+              0.001963553975474702
+            ],
+            [
+              3,
+              1.131874480661531e-05,
+              31,
+              0.0019919762717166777
+            ],
+            [
+              4,
+              2.3143779723367028e-08,
+              33,
+              0.0014715516631074353
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16x2",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 12960000,
+          "relative_solution_error_vs_stock": 5.507326803598141e-13,
+          "relative_max_error_vs_stock": 8.725572800690037e-13
+        },
+        "stencil-bf16x3": {
+          "solve_ms": 960.0326979998499,
+          "converged": true,
+          "relative_residual": 1.732158603295535e-11,
+          "outer_iterations": 4,
+          "inner_iterations": 138,
+          "low_operator_applications": 138,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              37,
+              0.001468159323996315
+            ],
+            [
+              2,
+              0.0017080341412587083,
+              33,
+              0.0017924771304111198
+            ],
+            [
+              3,
+              3.268893702183813e-06,
+              34,
+              0.0019102631958363627
+            ],
+            [
+              4,
+              7.57113224282008e-09,
+              34,
+              0.0019480021934774258
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16x3",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 12960000,
+          "relative_solution_error_vs_stock": 6.344879886076417e-12,
+          "relative_max_error_vs_stock": 3.0231040117993693e-12
+        },
+        "stencil-bf16x3+coarse-factor-bfp8b": {
+          "solve_ms": 1032.4907489994075,
+          "converged": true,
+          "relative_residual": 1.0476403884876131e-11,
+          "outer_iterations": 4,
+          "inner_iterations": 144,
+          "low_operator_applications": 144,
+          "high_operator_applications": 5,
+          "history": [
+            [
+              1,
+              1.0,
+              41,
+              0.0016717040474062428
+            ],
+            [
+              2,
+              0.0019141054142217074,
+              34,
+              0.0019862768091940767
+            ],
+            [
+              3,
+              3.8025382153993094e-06,
+              33,
+              0.001943171607251662
+            ],
+            [
+              4,
+              7.389395912626991e-09,
+              36,
+              0.0014161297492001992
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": "bf16x3",
+          "coarse_matrix_relative_error_vs_fp32": 0.001560448941865797,
+          "coarse_matrix_asymmetry": 4.552038266063813e-20,
+          "coarse_inverse_bytes": 3442500,
+          "relative_solution_error_vs_stock": 7.24346404956188e-14,
+          "relative_max_error_vs_stock": 2.0744437657928146e-13
+        }
+      }
+    },
+    {
+      "physics": "thermal",
+      "elements": [
+        50,
+        50
+      ],
+      "nodes": 13005,
+      "coarse_size": 845,
+      "coarse_block": 4,
+      "config": {
+        "relative_tolerance": 1e-10,
+        "inner_relative_tolerance": 0.002,
+        "max_outer_iterations": 16,
+        "max_inner_iterations": 200
+      },
+      "runs": {
+        "fp32-stock": {
+          "solve_ms": 451.66349099599756,
+          "converged": true,
+          "relative_residual": 2.02625541580855e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 585,
+          "low_operator_applications": 585,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              103,
+              0.0018025677586802377
+            ],
+            [
+              2,
+              0.044844661306796076,
+              86,
+              0.0018052972010647267
+            ],
+            [
+              3,
+              0.0008912062452552716,
+              85,
+              0.0019843209366861188
+            ],
+            [
+              4,
+              1.990775276929882e-05,
+              75,
+              0.0017805738049500868
+            ],
+            [
+              5,
+              5.784339496965177e-07,
+              75,
+              0.0019007706918660458
+            ],
+            [
+              6,
+              9.080276266603623e-09,
+              86,
+              0.0014731467362873814
+            ],
+            [
+              7,
+              3.053146449673573e-10,
+              75,
+              0.0017384226936039892
+            ]
+          ],
+          "coarse_format": null,
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": null,
+          "coarse_matrix_asymmetry": null,
+          "relative_solution_error_vs_stock": 0.0,
+          "relative_max_error_vs_stock": 0.0
+        },
+        "coarse-fp32": {
+          "solve_ms": 447.94674101285636,
+          "converged": true,
+          "relative_residual": 2.0303659693420902e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 584,
+          "low_operator_applications": 584,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              103,
+              0.0018051975268529993
+            ],
+            [
+              2,
+              0.04392250902831748,
+              86,
+              0.001790854460134246
+            ],
+            [
+              3,
+              0.0008858376332583891,
+              75,
+              0.0019686109662874784
+            ],
+            [
+              4,
+              1.8745546567206338e-05,
+              85,
+              0.001959458911894515
+            ],
+            [
+              5,
+              6.289949293706172e-07,
+              74,
+              0.0019851785654275205
+            ],
+            [
+              6,
+              9.16540705724166e-09,
+              86,
+              0.0015301512513531672
+            ],
+            [
+              7,
+              3.09831650246876e-10,
+              75,
+              0.0017359835617980135
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 2856100,
+          "relative_solution_error_vs_stock": 2.9139498654921413e-12,
+          "relative_max_error_vs_stock": 2.5545375309433387e-12
+        },
+        "coarse-tf32": {
+          "solve_ms": 2418.823671992868,
+          "converged": false,
+          "relative_residual": 0.005905880989373288,
+          "outer_iterations": 16,
+          "inner_iterations": 3200,
+          "low_operator_applications": 3200,
+          "high_operator_applications": 17,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              7.005589048502519
+            ],
+            [
+              2,
+              7.006205499500976,
+              200,
+              3.4262713894869203
+            ],
+            [
+              3,
+              24.005161675175522,
+              200,
+              0.4327723723804468
+            ],
+            [
+              4,
+              10.388969849438443,
+              200,
+              0.5123558212235332
+            ],
+            [
+              5,
+              5.322842020728089,
+              200,
+              0.9116401653165723
+            ],
+            [
+              6,
+              4.85252188153623,
+              200,
+              1.0469131069070952
+            ],
+            [
+              7,
+              5.080172125816105,
+              200,
+              0.8367248785533832
+            ],
+            [
+              8,
+              4.250731254167162,
+              200,
+              0.09508388436468532
+            ],
+            [
+              9,
+              0.4041737848828513,
+              200,
+              2.993509841100181
+            ],
+            [
+              10,
+              1.2099008897404033,
+              200,
+              0.2610443931762293
+            ],
+            [
+              11,
+              0.3158388409299694,
+              200,
+              1.2189046783262718
+            ],
+            [
+              12,
+              0.3849782000883041,
+              200,
+              0.7121498984000103
+            ],
+            [
+              13,
+              0.27416148353750974,
+              200,
+              1.702941164157653
+            ],
+            [
+              14,
+              0.46688258879382805,
+              200,
+              2.043371618987391
+            ],
+            [
+              15,
+              0.954013138004802,
+              200,
+              0.008634069950311045
+            ],
+            [
+              16,
+              0.008238966973229464,
+              200,
+              0.7168242510193633
+            ]
+          ],
+          "coarse_format": "tf32",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.00022336077242888336,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 2856100,
+          "relative_solution_error_vs_stock": 2.334713243347282e-05,
+          "relative_max_error_vs_stock": 2.833261831401238e-05
+        },
+        "coarse-bf16": {
+          "solve_ms": 2495.645004994003,
+          "converged": false,
+          "relative_residual": 0.10920563541840757,
+          "outer_iterations": 16,
+          "inner_iterations": 3200,
+          "low_operator_applications": 3200,
+          "high_operator_applications": 17,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              7.165999956197382
+            ],
+            [
+              2,
+              7.169358720712885,
+              200,
+              0.4648321558761694
+            ],
+            [
+              3,
+              3.332488491031862,
+              200,
+              9.936810131467368
+            ],
+            [
+              4,
+              33.114592601868104,
+              200,
+              0.10751408288139527
+            ],
+            [
+              5,
+              3.560206335145771,
+              200,
+              1.6100328377983235
+            ],
+            [
+              6,
+              5.732007840108936,
+              200,
+              0.742285395260114
+            ],
+            [
+              7,
+              4.254727757709581,
+              200,
+              0.39781016216644577
+            ],
+            [
+              8,
+              1.6925708741605814,
+              200,
+              6.3682176781694855
+            ],
+            [
+              9,
+              10.778611134604319,
+              200,
+              0.31208618593925963
+            ],
+            [
+              10,
+              3.363848718179714,
+              200,
+              1.7177056140721105
+            ],
+            [
+              11,
+              5.778016046254995,
+              200,
+              0.15099087706493833
+            ],
+            [
+              12,
+              0.872432769134957,
+              200,
+              0.32248979827046576
+            ],
+            [
+              13,
+              0.28134335072480054,
+              200,
+              1.3508220389390597
+            ],
+            [
+              14,
+              0.38003938999094206,
+              200,
+              1.9781389836473109
+            ],
+            [
+              15,
+              0.7517686163045257,
+              200,
+              0.1080693956154466
+            ],
+            [
+              16,
+              0.08124975727708807,
+              200,
+              1.344003041066439
+            ]
+          ],
+          "coarse_format": "bf16",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0017874310614824243,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 1428050,
+          "relative_solution_error_vs_stock": 0.001271624535659704,
+          "relative_max_error_vs_stock": 0.002035463981921193
+        },
+        "coarse-bfp8b": {
+          "solve_ms": 2511.094121990027,
+          "converged": false,
+          "relative_residual": 2.8772181862017248,
+          "outer_iterations": 16,
+          "inner_iterations": 3200,
+          "low_operator_applications": 3200,
+          "high_operator_applications": 17,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              4.124015598247805
+            ],
+            [
+              2,
+              4.120175611429657,
+              200,
+              1.0955676379172803
+            ],
+            [
+              3,
+              4.513933684172122,
+              200,
+              1.0436354626711182
+            ],
+            [
+              4,
+              4.710898082783027,
+              200,
+              0.9012847418374416
+            ],
+            [
+              5,
+              4.24585053788453,
+              200,
+              1.1202885264908633
+            ],
+            [
+              6,
+              4.756591043372057,
+              200,
+              0.7024904147509828
+            ],
+            [
+              7,
+              3.34144931444688,
+              200,
+              0.8573362274351773
+            ],
+            [
+              8,
+              2.864751511320023,
+              200,
+              0.7775822045208546
+            ],
+            [
+              9,
+              2.2275696275384993,
+              200,
+              2.04228067802071
+            ],
+            [
+              10,
+              4.549316596745235,
+              200,
+              1.2908818366240609
+            ],
+            [
+              11,
+              5.872638939736993,
+              200,
+              0.3777512964661666
+            ],
+            [
+              12,
+              2.218440908047172,
+              200,
+              3.46227577210728
+            ],
+            [
+              13,
+              7.680865548919532,
+              200,
+              0.3719668228129886
+            ],
+            [
+              14,
+              2.857025972354706,
+              200,
+              1.0901271390664808
+            ],
+            [
+              15,
+              3.114512518797627,
+              200,
+              1.5761627043780042
+            ],
+            [
+              16,
+              4.908948115376578,
+              200,
+              0.5861132614590069
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.003751587834392159,
+          "coarse_matrix_asymmetry": 0.0012178264972077298,
+          "coarse_inverse_bytes": 758652,
+          "relative_solution_error_vs_stock": 0.06109639574993967,
+          "relative_max_error_vs_stock": 0.19693028382597083
+        },
+        "coarse-bfp4b": {
+          "solve_ms": 2450.1232389884535,
+          "converged": false,
+          "relative_residual": 2.0030898557517167,
+          "outer_iterations": 16,
+          "inner_iterations": 3200,
+          "low_operator_applications": 3200,
+          "high_operator_applications": 17,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              2.997065149319889
+            ],
+            [
+              2,
+              2.9997549425778907,
+              200,
+              0.6536105638263794
+            ],
+            [
+              3,
+              1.9606504459069134,
+              200,
+              0.9987248052103492
+            ],
+            [
+              4,
+              1.958151428984366,
+              200,
+              0.9900113453455065
+            ],
+            [
+              5,
+              1.9385918071155235,
+              200,
+              0.998638550014613
+            ],
+            [
+              6,
+              1.9359526342971807,
+              200,
+              0.9923135793405733
+            ],
+            [
+              7,
+              1.92107215992193,
+              200,
+              1.0453125067335813
+            ],
+            [
+              8,
+              2.008103978506478,
+              200,
+              0.9915605729107793
+            ],
+            [
+              9,
+              1.9911566852042921,
+              200,
+              1.0282682477823015
+            ],
+            [
+              10,
+              2.04744412859756,
+              200,
+              0.979666916849194
+            ],
+            [
+              11,
+              2.005811819771433,
+              200,
+              1.0011261876488127
+            ],
+            [
+              12,
+              2.0080716095154454,
+              200,
+              1.000540009744762
+            ],
+            [
+              13,
+              2.0091540009226594,
+              200,
+              0.9988147013592089
+            ],
+            [
+              14,
+              2.0067726570799587,
+              200,
+              1.0006820498038123
+            ],
+            [
+              15,
+              2.0081412750947845,
+              200,
+              0.9990897208844669
+            ],
+            [
+              16,
+              2.0063130251379264,
+              200,
+              0.9983920554695848
+            ]
+          ],
+          "coarse_format": "bfp4b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.05354265281824063,
+          "coarse_matrix_asymmetry": 0.02287637205709229,
+          "coarse_inverse_bytes": 401639,
+          "relative_solution_error_vs_stock": 0.06346355409593654,
+          "relative_max_error_vs_stock": 0.20918771257736332
+        },
+        "coarse-factor-bf16": {
+          "solve_ms": 478.5797290096525,
+          "converged": true,
+          "relative_residual": 2.0783078336551384e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 606,
+          "low_operator_applications": 606,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              110,
+              0.0015551443517351745
+            ],
+            [
+              2,
+              0.04611574070250627,
+              89,
+              0.0014120652311241304
+            ],
+            [
+              3,
+              0.0012756669657478248,
+              76,
+              0.0017170249538787377
+            ],
+            [
+              4,
+              1.936279407553916e-05,
+              88,
+              0.0013688160737488698
+            ],
+            [
+              5,
+              6.140211380003236e-07,
+              78,
+              0.0016606198437498355
+            ],
+            [
+              6,
+              1.8315506390751365e-08,
+              77,
+              0.0017167174236388254
+            ],
+            [
+              7,
+              2.954138369631717e-10,
+              88,
+              0.0014434242786131597
+            ]
+          ],
+          "coarse_format": "bf16",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.001117062537409424,
+          "coarse_matrix_asymmetry": 4.284285673343881e-17,
+          "coarse_inverse_bytes": 1428050,
+          "relative_solution_error_vs_stock": 4.1563039848457543e-13,
+          "relative_max_error_vs_stock": 7.871941223392187e-13
+        },
+        "coarse-factor-bfp8b": {
+          "solve_ms": 506.9623239978682,
+          "converged": true,
+          "relative_residual": 2.0730625049453763e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 608,
+          "low_operator_applications": 608,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              110,
+              0.0017316583897969402
+            ],
+            [
+              2,
+              0.04492597151686905,
+              88,
+              0.0017286825968375677
+            ],
+            [
+              3,
+              0.001278898308765879,
+              77,
+              0.0015438037082256347
+            ],
+            [
+              4,
+              1.9244029977563964e-05,
+              89,
+              0.0014032530703556188
+            ],
+            [
+              5,
+              6.294267834084134e-07,
+              77,
+              0.0015797660550928843
+            ],
+            [
+              6,
+              1.7940754502204633e-08,
+              78,
+              0.0016249578470706374
+            ],
+            [
+              7,
+              2.9769406553109255e-10,
+              89,
+              0.001540737999964152
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.002842173639979092,
+          "coarse_matrix_asymmetry": 2.3784544088231496e-17,
+          "coarse_inverse_bytes": 758652,
+          "relative_solution_error_vs_stock": 3.1092893549786543e-12,
+          "relative_max_error_vs_stock": 2.9345163637932244e-12
+        },
+        "coarse-factor-bfp4b": {
+          "solve_ms": 557.7083629905246,
+          "converged": true,
+          "relative_residual": 2.015952851295112e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 737,
+          "low_operator_applications": 737,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              146,
+              0.0015214498039117846
+            ],
+            [
+              2,
+              0.05328694078089267,
+              100,
+              0.0018564626336545415
+            ],
+            [
+              3,
+              0.000681298788138029,
+              99,
+              0.0017925697423720728
+            ],
+            [
+              4,
+              2.068383504767374e-05,
+              99,
+              0.0018102806696168163
+            ],
+            [
+              5,
+              6.618724297161362e-07,
+              98,
+              0.0017048676845475284
+            ],
+            [
+              6,
+              1.0170861564413781e-08,
+              97,
+              0.0016674863395236908
+            ],
+            [
+              7,
+              3.1527619460592917e-10,
+              98,
+              0.0018558290058227728
+            ]
+          ],
+          "coarse_format": "bfp4b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.04798239462710857,
+          "coarse_matrix_asymmetry": 2.850106352803615e-18,
+          "coarse_inverse_bytes": 401639,
+          "relative_solution_error_vs_stock": 1.5519448478309138e-12,
+          "relative_max_error_vs_stock": 1.7719433435032267e-12
+        },
+        "stencil-tf32": {
+          "solve_ms": 360.80835000029765,
+          "converged": true,
+          "relative_residual": 7.132712286002538e-11,
+          "outer_iterations": 8,
+          "inner_iterations": 475,
+          "low_operator_applications": 475,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              111,
+              0.001843588614258264
+            ],
+            [
+              2,
+              11.831099503813986,
+              9,
+              0.001664544426171847
+            ],
+            [
+              3,
+              0.3816952260587215,
+              65,
+              0.0018049807072805831
+            ],
+            [
+              4,
+              0.01468312746592506,
+              53,
+              0.001773864391212328
+            ],
+            [
+              5,
+              0.0002899813661147985,
+              65,
+              0.0013638898154868908
+            ],
+            [
+              6,
+              9.10796650276538e-06,
+              54,
+              0.0016877797147041031
+            ],
+            [
+              7,
+              2.002210192453104e-07,
+              65,
+              0.0018767101977091559
+            ],
+            [
+              8,
+              8.264735038118984e-09,
+              53,
+              0.0016663859659889243
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "tf32",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 2856100,
+          "relative_solution_error_vs_stock": 2.8064937834462102e-12,
+          "relative_max_error_vs_stock": 2.4308234923410502e-12
+        },
+        "stencil-bf16": {
+          "solve_ms": 557.4335389828775,
+          "converged": true,
+          "relative_residual": 6.144660113542275e-11,
+          "outer_iterations": 10,
+          "inner_iterations": 732,
+          "low_operator_applications": 732,
+          "high_operator_applications": 11,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.43483118719319824
+            ],
+            [
+              2,
+              17.88822616184863,
+              24,
+              0.00190506194422439
+            ],
+            [
+              3,
+              2.428969444344259,
+              45,
+              0.0017924682822563138
+            ],
+            [
+              4,
+              0.06758499544932425,
+              68,
+              0.001643264282387673
+            ],
+            [
+              5,
+              0.003298449139223046,
+              54,
+              0.0015150627621612375
+            ],
+            [
+              6,
+              5.772375763610242e-05,
+              67,
+              0.0016048033510793521
+            ],
+            [
+              7,
+              3.4971058135327077e-06,
+              53,
+              0.0013627569124413559
+            ],
+            [
+              8,
+              3.873666203309389e-08,
+              66,
+              0.0015646750237447876
+            ],
+            [
+              9,
+              2.844198127732892e-09,
+              54,
+              0.001982540730090912
+            ],
+            [
+              10,
+              1.7975772582817825e-10,
+              101,
+              0.0015804633112768726
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 2856100,
+          "relative_solution_error_vs_stock": 4.202513384261742e-12,
+          "relative_max_error_vs_stock": 3.330231816034791e-12
+        },
+        "stencil-bf16x2": {
+          "solve_ms": 754.7582819825038,
+          "converged": true,
+          "relative_residual": 1.8665906079191006e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 520,
+          "low_operator_applications": 520,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              105,
+              0.0017660936532057157
+            ],
+            [
+              2,
+              0.4196430031048411,
+              52,
+              0.001728619547141234
+            ],
+            [
+              3,
+              0.005521751019474169,
+              74,
+              0.0017124906221245597
+            ],
+            [
+              4,
+              9.859608893841452e-05,
+              64,
+              0.0018817352334753008
+            ],
+            [
+              5,
+              2.92856708632987e-06,
+              75,
+              0.001594332293788618
+            ],
+            [
+              6,
+              1.5042587126386155e-08,
+              75,
+              0.0016393934098230356
+            ],
+            [
+              7,
+              3.750051296961701e-10,
+              75,
+              0.001570168297184629
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16x2",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 2856100,
+          "relative_solution_error_vs_stock": 3.474107157569968e-12,
+          "relative_max_error_vs_stock": 3.3728417393107256e-12
+        },
+        "stencil-bf16x3": {
+          "solve_ms": 1199.0618539857678,
+          "converged": true,
+          "relative_residual": 4.4418842586919274e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 568,
+          "low_operator_applications": 568,
+          "high_operator_applications": 7,
+          "history": [
+            [
+              1,
+              1.0,
+              103,
+              0.001808665616316385
+            ],
+            [
+              2,
+              0.04478161946834323,
+              87,
+              0.001486643836740589
+            ],
+            [
+              3,
+              0.0006492006613615315,
+              97,
+              0.0017714090431362108
+            ],
+            [
+              4,
+              1.2233879488977784e-05,
+              97,
+              0.001852456057594853
+            ],
+            [
+              5,
+              1.585864906995693e-07,
+              87,
+              0.0017619988611474696
+            ],
+            [
+              6,
+              1.1373650852331668e-09,
+              97,
+              0.001533876081161289
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16x3",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 2856100,
+          "relative_solution_error_vs_stock": 1.3514214209417052e-11,
+          "relative_max_error_vs_stock": 1.1299013774145011e-11
+        },
+        "stencil-bf16x3+coarse-factor-bfp8b": {
+          "solve_ms": 1311.4045689872,
+          "converged": true,
+          "relative_residual": 2.3591579913727922e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 587,
+          "low_operator_applications": 587,
+          "high_operator_applications": 7,
+          "history": [
+            [
+              1,
+              1.0,
+              111,
+              0.0015500620932217557
+            ],
+            [
+              2,
+              0.046886771125718894,
+              89,
+              0.001413341939237745
+            ],
+            [
+              3,
+              0.0006412132803708295,
+              99,
+              0.0015229514460216673
+            ],
+            [
+              4,
+              7.3645423868355326e-06,
+              99,
+              0.001397599910522886
+            ],
+            [
+              5,
+              8.214813359609287e-08,
+              100,
+              0.0015472791431836855
+            ],
+            [
+              6,
+              2.6268200374251278e-09,
+              89,
+              0.0016372146954804767
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": "bf16x3",
+          "coarse_matrix_relative_error_vs_fp32": 0.002842173639979092,
+          "coarse_matrix_asymmetry": 2.3784544088231496e-17,
+          "coarse_inverse_bytes": 758652,
+          "relative_solution_error_vs_stock": 1.1814660761425392e-11,
+          "relative_max_error_vs_stock": 8.799433360154158e-12
+        }
+      }
+    },
+    {
+      "physics": "thermal",
+      "elements": [
+        100,
+        100
+      ],
+      "nodes": 51005,
+      "coarse_size": 1445,
+      "coarse_block": 6,
+      "config": {
+        "relative_tolerance": 1e-10,
+        "inner_relative_tolerance": 0.002,
+        "max_outer_iterations": 16,
+        "max_inner_iterations": 200
+      },
+      "runs": {
+        "fp32-stock": {
+          "solve_ms": 1725.2741049742326,
+          "converged": true,
+          "relative_residual": 1.3542619389050196e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 805,
+          "low_operator_applications": 805,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              152,
+              0.0017873312208502674
+            ],
+            [
+              2,
+              0.03794524009462502,
+              120,
+              0.0017553157777028233
+            ],
+            [
+              3,
+              0.0009098354192650385,
+              106,
+              0.0016286912314064776
+            ],
+            [
+              4,
+              1.5583167864425014e-05,
+              107,
+              0.001992666491558407
+            ],
+            [
+              5,
+              4.860491056324594e-07,
+              106,
+              0.001981801123756828
+            ],
+            [
+              6,
+              7.680115176754167e-09,
+              108,
+              0.001737445101734431
+            ],
+            [
+              7,
+              2.3748135146976864e-10,
+              106,
+              0.001882248415488315
+            ]
+          ],
+          "coarse_format": null,
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": null,
+          "coarse_matrix_asymmetry": null,
+          "relative_solution_error_vs_stock": 0.0,
+          "relative_max_error_vs_stock": 0.0
+        },
+        "coarse-fp32": {
+          "solve_ms": 1749.7319329995662,
+          "converged": true,
+          "relative_residual": 1.3554445148762373e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 806,
+          "low_operator_applications": 806,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              152,
+              0.001790994007341269
+            ],
+            [
+              2,
+              0.03854891112772601,
+              120,
+              0.001720723543861848
+            ],
+            [
+              3,
+              0.0008952464759122053,
+              106,
+              0.0019105198444376136
+            ],
+            [
+              4,
+              1.5651378228542998e-05,
+              108,
+              0.0015320138159457626
+            ],
+            [
+              5,
+              4.859649547373488e-07,
+              106,
+              0.0016457303160505995
+            ],
+            [
+              6,
+              7.703676960065175e-09,
+              108,
+              0.0017675771328178322
+            ],
+            [
+              7,
+              2.3836572806463635e-10,
+              106,
+              0.0017826710290427465
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 8352100,
+          "relative_solution_error_vs_stock": 1.112550886455094e-12,
+          "relative_max_error_vs_stock": 1.1467375423354448e-12
+        },
+        "coarse-tf32": {
+          "solve_ms": 2324.7761219972745,
+          "converged": true,
+          "relative_residual": 1.3741392297371212e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 1067,
+          "low_operator_applications": 1067,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.007505823691943306
+            ],
+            [
+              2,
+              0.04333749845904611,
+              163,
+              0.001695406216897339
+            ],
+            [
+              3,
+              0.0006154593326644145,
+              145,
+              0.0018362087052795038
+            ],
+            [
+              4,
+              1.8306306906932957e-05,
+              130,
+              0.0019897785911251087
+            ],
+            [
+              5,
+              5.340101870606318e-07,
+              142,
+              0.0019660178693259186
+            ],
+            [
+              6,
+              8.876477989392598e-09,
+              144,
+              0.001851346019084431
+            ],
+            [
+              7,
+              2.722203989501562e-10,
+              143,
+              0.0019123012671360612
+            ]
+          ],
+          "coarse_format": "tf32",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.00022439649303725322,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 8352100,
+          "relative_solution_error_vs_stock": 4.540804855309057e-13,
+          "relative_max_error_vs_stock": 6.805013494965557e-13
+        },
+        "coarse-bf16": {
+          "solve_ms": 6991.087170987157,
+          "converged": false,
+          "relative_residual": 6.088658891806398,
+          "outer_iterations": 16,
+          "inner_iterations": 3200,
+          "low_operator_applications": 3200,
+          "high_operator_applications": 17,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              7.509562054818282
+            ],
+            [
+              2,
+              7.510864114928594,
+              200,
+              0.7543723355837705
+            ],
+            [
+              3,
+              5.6659791486924975,
+              200,
+              1.119214726759027
+            ],
+            [
+              4,
+              6.341444031421371,
+              200,
+              0.9749702133702607
+            ],
+            [
+              5,
+              6.1827181647835605,
+              200,
+              0.985150244955255
+            ],
+            [
+              6,
+              6.090921011884442,
+              200,
+              0.9996287698240078
+            ],
+            [
+              7,
+              6.088667129197484,
+              200,
+              0.9999988868711883
+            ],
+            [
+              8,
+              6.088660098490388,
+              200,
+              1.0
+            ],
+            [
+              9,
+              6.088659978731912,
+              200,
+              1.0
+            ],
+            [
+              10,
+              6.088658838042752,
+              200,
+              0.9999997217174099
+            ],
+            [
+              11,
+              6.088657454067052,
+              200,
+              1.0
+            ],
+            [
+              12,
+              6.088657679367417,
+              200,
+              1.000000139141324
+            ],
+            [
+              13,
+              6.088658011502894,
+              200,
+              1.0
+            ],
+            [
+              14,
+              6.088658508060212,
+              200,
+              1.00000027828259
+            ],
+            [
+              15,
+              6.088660238804719,
+              200,
+              1.0
+            ],
+            [
+              16,
+              6.088659992468885,
+              200,
+              1.0
+            ]
+          ],
+          "coarse_format": "bf16",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0018084538724525952,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 4176050,
+          "relative_solution_error_vs_stock": 0.06863155820222284,
+          "relative_max_error_vs_stock": 0.24233494438995612
+        },
+        "coarse-bfp8b": {
+          "solve_ms": 6964.641761005623,
+          "converged": false,
+          "relative_residual": 5.473364096473814,
+          "outer_iterations": 16,
+          "inner_iterations": 3200,
+          "low_operator_applications": 3200,
+          "high_operator_applications": 17,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              4.775657536216567
+            ],
+            [
+              2,
+              4.774233544485894,
+              200,
+              0.8582498863881768
+            ],
+            [
+              3,
+              4.097436698362991,
+              200,
+              1.3294269578777216
+            ],
+            [
+              4,
+              5.447248494360701,
+              200,
+              0.9597480151891994
+            ],
+            [
+              5,
+              5.227988212928779,
+              200,
+              0.70878895080733
+            ],
+            [
+              6,
+              3.7055447605655982,
+              200,
+              0.8997489001377929
+            ],
+            [
+              7,
+              3.3340589398108635,
+              200,
+              1.3065588809242017
+            ],
+            [
+              8,
+              4.35614475975106,
+              200,
+              1.4216575058404826
+            ],
+            [
+              9,
+              6.192953336463504,
+              200,
+              0.7505927457658281
+            ],
+            [
+              10,
+              4.648387223856865,
+              200,
+              1.1315372761212426
+            ],
+            [
+              11,
+              5.25982270630861,
+              200,
+              0.9583219076450036
+            ],
+            [
+              12,
+              5.040601630820186,
+              200,
+              0.8358969204768503
+            ],
+            [
+              13,
+              4.213420327850528,
+              200,
+              1.001193438711026
+            ],
+            [
+              14,
+              4.218448370496688,
+              200,
+              0.6447183474083816
+            ],
+            [
+              15,
+              2.719711835800662,
+              200,
+              2.100164377263419
+            ],
+            [
+              16,
+              5.711852249471679,
+              200,
+              0.9582468656764456
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.003673466362046611,
+          "coarse_matrix_asymmetry": 0.0007217118334249061,
+          "coarse_inverse_bytes": 2218527,
+          "relative_solution_error_vs_stock": 0.06888631458394845,
+          "relative_max_error_vs_stock": 0.23570359748137837
+        },
+        "coarse-bfp4b": {
+          "solve_ms": 6937.169501994504,
+          "converged": false,
+          "relative_residual": 2.2918664022333832,
+          "outer_iterations": 16,
+          "inner_iterations": 3200,
+          "low_operator_applications": 3200,
+          "high_operator_applications": 17,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              2.0630448581571175
+            ],
+            [
+              2,
+              2.0635625373926163,
+              200,
+              1.114505170649338
+            ],
+            [
+              3,
+              2.299853250803088,
+              200,
+              1.0146095063736207
+            ],
+            [
+              4,
+              2.333453597479494,
+              200,
+              0.9815136240505415
+            ],
+            [
+              5,
+              2.290315522417903,
+              200,
+              1.000013501284379
+            ],
+            [
+              6,
+              2.2903454253242694,
+              200,
+              1.0001220648038345
+            ],
+            [
+              7,
+              2.2906249974472948,
+              200,
+              1.0000051778747931
+            ],
+            [
+              8,
+              2.2906367747610132,
+              200,
+              1.0023336375935434
+            ],
+            [
+              9,
+              2.2959822799168395,
+              200,
+              0.9990462653989072
+            ],
+            [
+              10,
+              2.293792406509665,
+              200,
+              0.9976339317000799
+            ],
+            [
+              11,
+              2.2883650740445263,
+              200,
+              0.9991279621589998
+            ],
+            [
+              12,
+              2.2863695670239625,
+              200,
+              0.9999801762920495
+            ],
+            [
+              13,
+              2.28632416393401,
+              200,
+              0.9994297328720926
+            ],
+            [
+              14,
+              2.2850203511453353,
+              200,
+              1.000352032226057
+            ],
+            [
+              15,
+              2.2858246047743136,
+              200,
+              1.001204808895146
+            ],
+            [
+              16,
+              2.2885787394619537,
+              200,
+              1.0014365717879623
+            ]
+          ],
+          "coarse_format": "bfp4b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.040551108865148025,
+          "coarse_matrix_asymmetry": 0.01397662722838196,
+          "coarse_inverse_bytes": 1174514,
+          "relative_solution_error_vs_stock": 0.06999955749566422,
+          "relative_max_error_vs_stock": 0.24993545659673091
+        },
+        "coarse-factor-bf16": {
+          "solve_ms": 1772.8926290001255,
+          "converged": true,
+          "relative_residual": 1.3620604230166373e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 805,
+          "low_operator_applications": 805,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              154,
+              0.0018578371202790961
+            ],
+            [
+              2,
+              0.038816954835017826,
+              120,
+              0.001995186166207402
+            ],
+            [
+              3,
+              0.0005458852561682499,
+              109,
+              0.0017842111682523486
+            ],
+            [
+              4,
+              1.5618264523185903e-05,
+              108,
+              0.0018473975819788015
+            ],
+            [
+              5,
+              4.7448581706604403e-07,
+              97,
+              0.0019797618692243037
+            ],
+            [
+              6,
+              7.320139213060118e-09,
+              109,
+              0.0016934411240351625
+            ],
+            [
+              7,
+              2.4050471843287483e-10,
+              108,
+              0.0017553621368573676
+            ]
+          ],
+          "coarse_format": "bf16",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0011394307621756512,
+          "coarse_matrix_asymmetry": 2.5157647806880346e-17,
+          "coarse_inverse_bytes": 4176050,
+          "relative_solution_error_vs_stock": 1.9945058712292992e-13,
+          "relative_max_error_vs_stock": 3.427045494474299e-13
+        },
+        "coarse-factor-bfp8b": {
+          "solve_ms": 1762.2474750096444,
+          "converged": true,
+          "relative_residual": 1.3528613870851214e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 810,
+          "low_operator_applications": 810,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              156,
+              0.001756807586428077
+            ],
+            [
+              2,
+              0.03901508685210801,
+              122,
+              0.0018113857486325954
+            ],
+            [
+              3,
+              0.0007475430183456414,
+              111,
+              0.0015019618756195955
+            ],
+            [
+              4,
+              1.5865512220405395e-05,
+              110,
+              0.0019007467469920134
+            ],
+            [
+              5,
+              4.863935145541781e-07,
+              100,
+              0.001885985188820907
+            ],
+            [
+              6,
+              7.440201912873514e-09,
+              111,
+              0.0019308614101246281
+            ],
+            [
+              7,
+              2.419240936679368e-10,
+              100,
+              0.0019277268466427364
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.002802586680078465,
+          "coarse_matrix_asymmetry": 1.6326953881145533e-17,
+          "coarse_inverse_bytes": 2218527,
+          "relative_solution_error_vs_stock": 2.8326156734763446e-13,
+          "relative_max_error_vs_stock": 7.106660531154004e-13
+        },
+        "coarse-factor-bfp4b": {
+          "solve_ms": 3107.734018994961,
+          "converged": true,
+          "relative_residual": 1.4386546673368599e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 1400,
+          "low_operator_applications": 1400,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.09996516354772514
+            ],
+            [
+              2,
+              0.10918987059966988,
+              200,
+              0.010377590056150755
+            ],
+            [
+              3,
+              0.0013095819483132714,
+              200,
+              0.012448968463699044
+            ],
+            [
+              4,
+              2.6275863795041674e-05,
+              200,
+              0.02441373820189065
+            ],
+            [
+              5,
+              7.182334484202073e-07,
+              200,
+              0.004745656740933171
+            ],
+            [
+              6,
+              1.0870422573931328e-08,
+              200,
+              0.0071341960388234486
+            ],
+            [
+              7,
+              3.299468503043332e-10,
+              200,
+              0.010951905704083411
+            ]
+          ],
+          "coarse_format": "bfp4b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.04566379475152756,
+          "coarse_matrix_asymmetry": 5.806672285208845e-18,
+          "coarse_inverse_bytes": 1174514,
+          "relative_solution_error_vs_stock": 1.6614828780734869e-12,
+          "relative_max_error_vs_stock": 1.4380902749079367e-12
+        },
+        "stencil-tf32": {
+          "solve_ms": 1603.068528987933,
+          "converged": true,
+          "relative_residual": 3.7562750530776695e-11,
+          "outer_iterations": 8,
+          "inner_iterations": 718,
+          "low_operator_applications": 718,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              156,
+              0.0017675043128923121
+            ],
+            [
+              2,
+              0.7566367366104955,
+              78,
+              0.0018824706883876405
+            ],
+            [
+              3,
+              0.28221054089630626,
+              40,
+              0.0018253908983348244
+            ],
+            [
+              4,
+              0.003913734201500062,
+              98,
+              0.0019526035415771558
+            ],
+            [
+              5,
+              0.00015213600533904334,
+              74,
+              0.001973390677942951
+            ],
+            [
+              6,
+              2.8259741775160256e-06,
+              87,
+              0.0018111410067003526
+            ],
+            [
+              7,
+              6.200223835884182e-08,
+              87,
+              0.0017110463321262218
+            ],
+            [
+              8,
+              1.3143080723403564e-09,
+              98,
+              0.0015839216383719827
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "tf32",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 8352100,
+          "relative_solution_error_vs_stock": 4.035061320812065e-12,
+          "relative_max_error_vs_stock": 3.3029153450586564e-12
+        },
+        "stencil-bf16": {
+          "solve_ms": 1945.3110870090313,
+          "converged": true,
+          "relative_residual": 3.221378001751883e-11,
+          "outer_iterations": 9,
+          "inner_iterations": 887,
+          "low_operator_applications": 887,
+          "high_operator_applications": 10,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              1.8988691582193642
+            ],
+            [
+              2,
+              18.49241264588676,
+              57,
+              0.0019823419241283553
+            ],
+            [
+              3,
+              1.5471266078223576,
+              65,
+              0.0015227794592873494
+            ],
+            [
+              4,
+              0.029199653999911836,
+              91,
+              0.0018843262136392172
+            ],
+            [
+              5,
+              0.0011887552799592581,
+              75,
+              0.0016944185247167634
+            ],
+            [
+              6,
+              1.6037364559321244e-05,
+              102,
+              0.001605239157747836
+            ],
+            [
+              7,
+              6.923763030197485e-07,
+              65,
+              0.0018463970758712805
+            ],
+            [
+              8,
+              8.471819214475017e-09,
+              96,
+              0.0016504727025270095
+            ],
+            [
+              9,
+              2.2341832153466822e-10,
+              136,
+              0.0019684765847874093
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 8352100,
+          "relative_solution_error_vs_stock": 4.414568920737945e-12,
+          "relative_max_error_vs_stock": 3.569609629434791e-12
+        },
+        "stencil-bf16x2": {
+          "solve_ms": 3154.379058018094,
+          "converged": true,
+          "relative_residual": 3.6684787789961595e-11,
+          "outer_iterations": 7,
+          "inner_iterations": 754,
+          "low_operator_applications": 754,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              153,
+              0.0018121096849996834
+            ],
+            [
+              2,
+              0.3074251168875763,
+              84,
+              0.0017051275966173123
+            ],
+            [
+              3,
+              0.0025609486179711477,
+              109,
+              0.0017113638906549242
+            ],
+            [
+              4,
+              4.814638290499634e-05,
+              107,
+              0.0018986320655947416
+            ],
+            [
+              5,
+              7.301513591129802e-07,
+              108,
+              0.0015111883427510915
+            ],
+            [
+              6,
+              1.6041131060296513e-08,
+              96,
+              0.001606171337526124
+            ],
+            [
+              7,
+              4.949558385681181e-10,
+              97,
+              0.0018568625035617823
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16x2",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 8352100,
+          "relative_solution_error_vs_stock": 2.9837973763539537e-12,
+          "relative_max_error_vs_stock": 3.000789504050863e-12
+        },
+        "stencil-bf16x3": {
+          "solve_ms": 5049.630463996436,
+          "converged": true,
+          "relative_residual": 2.3255120721102696e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 842,
+          "low_operator_applications": 842,
+          "high_operator_applications": 7,
+          "history": [
+            [
+              1,
+              1.0,
+              152,
+              0.0017677390671227762
+            ],
+            [
+              2,
+              0.037941231386669015,
+              130,
+              0.0016650600958718423
+            ],
+            [
+              3,
+              0.00038992300294722284,
+              143,
+              0.001740928726947855
+            ],
+            [
+              4,
+              8.785655176720775e-06,
+              142,
+              0.0015925099523605413
+            ],
+            [
+              5,
+              6.942014792910811e-08,
+              133,
+              0.0017539541289912333
+            ],
+            [
+              6,
+              1.0174720721803806e-09,
+              142,
+              0.0019999628237162845
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16x3",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 8352100,
+          "relative_solution_error_vs_stock": 2.07182364789946e-12,
+          "relative_max_error_vs_stock": 3.396521687240944e-12
+        },
+        "stencil-bf16x3+coarse-factor-bfp8b": {
+          "solve_ms": 4949.730152002303,
+          "converged": true,
+          "relative_residual": 3.471970797964606e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 824,
+          "low_operator_applications": 824,
+          "high_operator_applications": 7,
+          "history": [
+            [
+              1,
+              1.0,
+              156,
+              0.001972674753183663
+            ],
+            [
+              2,
+              0.038667887405924264,
+              123,
+              0.001990038662683893
+            ],
+            [
+              3,
+              0.00035274990901440386,
+              144,
+              0.0016926362908050712
+            ],
+            [
+              4,
+              2.917721862175112e-06,
+              144,
+              0.0015089071329327506
+            ],
+            [
+              5,
+              3.267864892119004e-08,
+              134,
+              0.0016344677652015778
+            ],
+            [
+              6,
+              1.048846345123911e-09,
+              123,
+              0.0018582813734758345
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": "bf16x3",
+          "coarse_matrix_relative_error_vs_fp32": 0.002802586680078465,
+          "coarse_matrix_asymmetry": 1.6326953881145533e-17,
+          "coarse_inverse_bytes": 2218527,
+          "relative_solution_error_vs_stock": 2.9818590563159406e-11,
+          "relative_max_error_vs_stock": 2.180680639353281e-11
+        }
+      }
+    },
+    {
+      "physics": "thermal",
+      "elements": [
+        200,
+        200
+      ],
+      "nodes": 202005,
+      "coarse_size": 1805,
+      "coarse_block": 11,
+      "config": {
+        "relative_tolerance": 1e-10,
+        "inner_relative_tolerance": 0.002,
+        "max_outer_iterations": 16,
+        "max_inner_iterations": 200
+      },
+      "runs": {
+        "fp32-stock": {
+          "solve_ms": 7409.2401360103395,
+          "converged": true,
+          "relative_residual": 9.656215191130666e-12,
+          "outer_iterations": 7,
+          "inner_iterations": 1025,
+          "low_operator_applications": 1025,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.0028849780395776093
+            ],
+            [
+              2,
+              0.03117371090364478,
+              168,
+              0.0018911286989784267
+            ],
+            [
+              3,
+              0.0004483740384458192,
+              141,
+              0.0019448987712122699
+            ],
+            [
+              4,
+              1.2715148233320905e-05,
+              128,
+              0.0018627333599467101
+            ],
+            [
+              5,
+              3.74666105867397e-07,
+              125,
+              0.001852766979682791
+            ],
+            [
+              6,
+              5.86915709930425e-09,
+              139,
+              0.001963362256610229
+            ],
+            [
+              7,
+              1.9133961704636708e-10,
+              124,
+              0.0019494915462561256
+            ]
+          ],
+          "coarse_format": null,
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": null,
+          "coarse_matrix_asymmetry": null,
+          "relative_solution_error_vs_stock": 0.0,
+          "relative_max_error_vs_stock": 0.0
+        },
+        "coarse-fp32": {
+          "solve_ms": 7511.925129976589,
+          "converged": true,
+          "relative_residual": 9.633814892579056e-12,
+          "outer_iterations": 7,
+          "inner_iterations": 1024,
+          "low_operator_applications": 1024,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.003019539989054521
+            ],
+            [
+              2,
+              0.031164778627139487,
+              168,
+              0.0018889460903736039
+            ],
+            [
+              3,
+              0.00044955811601561077,
+              141,
+              0.0019238641217634944
+            ],
+            [
+              4,
+              1.261001544478328e-05,
+              125,
+              0.0019000974211059666
+            ],
+            [
+              5,
+              3.7335477708950127e-07,
+              124,
+              0.0019841098693851107
+            ],
+            [
+              6,
+              5.833080797192537e-09,
+              138,
+              0.0018317821621282675
+            ],
+            [
+              7,
+              1.9031699885854842e-10,
+              128,
+              0.0018507473998853755
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 13032100,
+          "relative_solution_error_vs_stock": 5.525862117078473e-13,
+          "relative_max_error_vs_stock": 4.825533832064155e-13
+        },
+        "coarse-tf32": {
+          "solve_ms": 23878.30830999883,
+          "converged": false,
+          "relative_residual": 2.844695860829983e-06,
+          "outer_iterations": 16,
+          "inner_iterations": 3200,
+          "low_operator_applications": 3200,
+          "high_operator_applications": 17,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.5142394303749817
+            ],
+            [
+              2,
+              0.5149270812594635,
+              200,
+              0.3677171097713177
+            ],
+            [
+              3,
+              0.1893394151335726,
+              200,
+              0.307057170784319
+            ],
+            [
+              4,
+              0.05813820989283806,
+              200,
+              0.05662287082516884
+            ],
+            [
+              5,
+              0.003291995866754853,
+              200,
+              0.24876106719409627
+            ],
+            [
+              6,
+              0.0008189174943696228,
+              200,
+              0.7718837011687958
+            ],
+            [
+              7,
+              0.0006321088385404188,
+              200,
+              0.8512680642233235
+            ],
+            [
+              8,
+              0.0005380941933776216,
+              200,
+              0.2964543828483007
+            ],
+            [
+              9,
+              0.00015951252406891587,
+              200,
+              0.7435496376154666
+            ],
+            [
+              10,
+              0.00011860550555580339,
+              200,
+              2.3727373915498124
+            ],
+            [
+              11,
+              0.0002814193801489569,
+              200,
+              0.4736051461403526
+            ],
+            [
+              12,
+              0.00013328160480075243,
+              200,
+              0.560386943871569
+            ],
+            [
+              13,
+              7.468927676171783e-05,
+              200,
+              1.0373223967768483
+            ],
+            [
+              14,
+              7.747687886115158e-05,
+              200,
+              0.2178762265603118
+            ],
+            [
+              15,
+              1.6880352274166524e-05,
+              200,
+              0.7909826931320569
+            ],
+            [
+              16,
+              1.3352061731660748e-05,
+              200,
+              0.21305149312055896
+            ]
+          ],
+          "coarse_format": "tf32",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.00022470453017704346,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 13032100,
+          "relative_solution_error_vs_stock": 1.614918252046991e-08,
+          "relative_max_error_vs_stock": 5.861986562441807e-08
+        },
+        "coarse-bf16": {
+          "solve_ms": 23245.960866013775,
+          "converged": false,
+          "relative_residual": 7.279787141174514,
+          "outer_iterations": 16,
+          "inner_iterations": 3200,
+          "low_operator_applications": 3200,
+          "high_operator_applications": 17,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              8.373949072674277
+            ],
+            [
+              2,
+              8.375776799304463,
+              200,
+              0.6093235960407613
+            ],
+            [
+              3,
+              5.103558911890558,
+              200,
+              1.056013813983075
+            ],
+            [
+              4,
+              5.389419001348968,
+              200,
+              0.9239732994948059
+            ],
+            [
+              5,
+              4.979679420402583,
+              200,
+              1.0099292652422918
+            ],
+            [
+              6,
+              5.029124153910244,
+              200,
+              0.7941113742499118
+            ],
+            [
+              7,
+              3.9936811404994184,
+              200,
+              1.0268000058651852
+            ],
+            [
+              8,
+              4.100707684643293,
+              200,
+              0.9077983335810521
+            ],
+            [
+              9,
+              3.722615956404704,
+              200,
+              0.9498075082072259
+            ],
+            [
+              10,
+              3.5357691718309425,
+              200,
+              1.1357785223511725
+            ],
+            [
+              11,
+              4.015851682793226,
+              200,
+              1.190506785766949
+            ],
+            [
+              12,
+              4.780897614106607,
+              200,
+              0.9585366377987762
+            ],
+            [
+              13,
+              4.582663157277784,
+              200,
+              0.5412445225579469
+            ],
+            [
+              14,
+              2.4803423970331466,
+              200,
+              1.7963579986000642
+            ],
+            [
+              15,
+              4.455578288374975,
+              200,
+              1.6528159733966268
+            ],
+            [
+              16,
+              7.364249011177071,
+              200,
+              0.9885308747378535
+            ]
+          ],
+          "coarse_format": "bf16",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0018001875476442812,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 6516050,
+          "relative_solution_error_vs_stock": 0.06827104338724349,
+          "relative_max_error_vs_stock": 0.21002972665866101
+        },
+        "coarse-bfp8b": {
+          "solve_ms": 23522.62940298533,
+          "converged": false,
+          "relative_residual": 2.0151910562421835,
+          "outer_iterations": 16,
+          "inner_iterations": 3200,
+          "low_operator_applications": 3200,
+          "high_operator_applications": 17,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              3.1255988866593927
+            ],
+            [
+              2,
+              3.1249587988453857,
+              200,
+              0.9412993381724388
+            ],
+            [
+              3,
+              2.941523351784619,
+              200,
+              0.9968659485040886
+            ],
+            [
+              4,
+              2.932313440180094,
+              200,
+              0.9637801905615058
+            ],
+            [
+              5,
+              2.826103963025056,
+              200,
+              1.487423262975269
+            ],
+            [
+              6,
+              4.203617950210495,
+              200,
+              0.6188057142162641
+            ],
+            [
+              7,
+              2.601221561114763,
+              200,
+              0.9461947532849398
+            ],
+            [
+              8,
+              2.4612586177201634,
+              200,
+              1.4396669942972373
+            ],
+            [
+              9,
+              3.5433928350278916,
+              200,
+              1.091687682195125
+            ],
+            [
+              10,
+              3.868286560089297,
+              200,
+              1.054549191365659
+            ],
+            [
+              11,
+              4.079299983759806,
+              200,
+              0.49037344615935385
+            ],
+            [
+              12,
+              2.0003812474273093,
+              200,
+              0.9205510471278476
+            ],
+            [
+              13,
+              1.8414527446620153,
+              200,
+              1.5747309226326769
+            ],
+            [
+              14,
+              2.8997928978949497,
+              200,
+              1.0948684854340183
+            ],
+            [
+              15,
+              3.1748937702096085,
+              200,
+              0.6361748631205779
+            ],
+            [
+              16,
+              2.0197854018830883,
+              200,
+              0.9977252520761068
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0036987306892874642,
+          "coarse_matrix_asymmetry": 0.0007668335573936618,
+          "coarse_inverse_bytes": 3461652,
+          "relative_solution_error_vs_stock": 0.0687623815934316,
+          "relative_max_error_vs_stock": 0.2466181328477404
+        },
+        "coarse-bfp4b": {
+          "solve_ms": 23321.05472398689,
+          "converged": false,
+          "relative_residual": 2.3050217436522322,
+          "outer_iterations": 16,
+          "inner_iterations": 3200,
+          "low_operator_applications": 3200,
+          "high_operator_applications": 17,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              2.7510388270963873
+            ],
+            [
+              2,
+              2.751058206366446,
+              200,
+              0.826849018539708
+            ],
+            [
+              3,
+              2.2747060542472255,
+              200,
+              1.0575181771530489
+            ],
+            [
+              4,
+              2.405545602724203,
+              200,
+              0.9359955650309872
+            ],
+            [
+              5,
+              2.2515796589935824,
+              200,
+              0.9999998009590061
+            ],
+            [
+              6,
+              2.251579304795515,
+              200,
+              1.0264722584237318
+            ],
+            [
+              7,
+              2.311183641260503,
+              200,
+              0.9729035749239914
+            ],
+            [
+              8,
+              2.2485581049499292,
+              200,
+              0.9769562208988878
+            ],
+            [
+              9,
+              2.196742975979464,
+              200,
+              0.9793060803230751
+            ],
+            [
+              10,
+              2.1512836856255197,
+              200,
+              1.0064679380704513
+            ],
+            [
+              11,
+              2.1651977037461028,
+              200,
+              0.9838224338282362
+            ],
+            [
+              12,
+              2.1301699859921177,
+              200,
+              0.9857050127269147
+            ],
+            [
+              13,
+              2.099719400503276,
+              200,
+              0.9961984828365765
+            ],
+            [
+              14,
+              2.091737233762445,
+              200,
+              0.9994494464505079
+            ],
+            [
+              15,
+              2.0905854811044913,
+              200,
+              1.0741302281650706
+            ],
+            [
+              16,
+              2.245560887073678,
+              200,
+              1.0264792795094193
+            ]
+          ],
+          "coarse_format": "bfp4b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.032508743652814844,
+          "coarse_matrix_asymmetry": 0.015210981491931211,
+          "coarse_inverse_bytes": 1832639,
+          "relative_solution_error_vs_stock": 0.07551131031849906,
+          "relative_max_error_vs_stock": 0.2777954730861971
+        },
+        "coarse-factor-bf16": {
+          "solve_ms": 6664.204667991726,
+          "converged": true,
+          "relative_residual": 9.386597191623788e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 900,
+          "low_operator_applications": 900,
+          "high_operator_applications": 7,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.003107407576002138
+            ],
+            [
+              2,
+              0.03130082383027668,
+              168,
+              0.0019279202495660309
+            ],
+            [
+              3,
+              0.0004470527773621266,
+              137,
+              0.0018103366492433627
+            ],
+            [
+              4,
+              1.2439317340772418e-05,
+              126,
+              0.0019990849940000957
+            ],
+            [
+              5,
+              1.8999221802863635e-07,
+              144,
+              0.001885439331989606
+            ],
+            [
+              6,
+              6.207079152155598e-09,
+              125,
+              0.0018916934814339303
+            ]
+          ],
+          "coarse_format": "bf16",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0012265564343251585,
+          "coarse_matrix_asymmetry": 2.6871766311634466e-17,
+          "coarse_inverse_bytes": 6516050,
+          "relative_solution_error_vs_stock": 1.3643417318102572e-10,
+          "relative_max_error_vs_stock": 9.2025488721912e-11
+        },
+        "coarse-factor-bfp8b": {
+          "solve_ms": 7613.855934992898,
+          "converged": true,
+          "relative_residual": 9.65822184218784e-12,
+          "outer_iterations": 7,
+          "inner_iterations": 1036,
+          "low_operator_applications": 1036,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.003228835268056679
+            ],
+            [
+              2,
+              0.031364195209494045,
+              165,
+              0.0019750473291255516
+            ],
+            [
+              3,
+              0.00044464567831427326,
+              136,
+              0.0019909771116110586
+            ],
+            [
+              4,
+              1.2443339528721095e-05,
+              129,
+              0.0019875626965183964
+            ],
+            [
+              5,
+              1.9425921108652e-07,
+              147,
+              0.001986486668708052
+            ],
+            [
+              6,
+              6.287589620377423e-09,
+              130,
+              0.001976016716586189
+            ],
+            [
+              7,
+              1.8455401754905303e-10,
+              129,
+              0.001979180899532848
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.0030760933162223597,
+          "coarse_matrix_asymmetry": 2.0915794165972073e-17,
+          "coarse_inverse_bytes": 3461652,
+          "relative_solution_error_vs_stock": 1.6868223511219195e-13,
+          "relative_max_error_vs_stock": 2.626375626970552e-13
+        },
+        "coarse-factor-bfp4b": {
+          "solve_ms": 10302.785438019782,
+          "converged": true,
+          "relative_residual": 9.795647428358678e-12,
+          "outer_iterations": 7,
+          "inner_iterations": 1380,
+          "low_operator_applications": 1380,
+          "high_operator_applications": 8,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.029187228342382115
+            ],
+            [
+              2,
+              0.042533608646984404,
+              200,
+              0.0037363432719082768
+            ],
+            [
+              3,
+              0.0005063013527864032,
+              200,
+              0.0034308818975620683
+            ],
+            [
+              4,
+              1.4909777363299087e-05,
+              197,
+              0.0019985744201966743
+            ],
+            [
+              5,
+              2.3338246799256628e-07,
+              200,
+              0.0026984462858804337
+            ],
+            [
+              6,
+              7.298396897444328e-09,
+              200,
+              0.002285433180185177
+            ],
+            [
+              7,
+              2.2370391841434256e-10,
+              183,
+              0.0018665907455891377
+            ]
+          ],
+          "coarse_format": "bfp4b",
+          "stencil_format": null,
+          "coarse_matrix_relative_error_vs_fp32": 0.04876940490893511,
+          "coarse_matrix_asymmetry": 1.3524855673052165e-17,
+          "coarse_inverse_bytes": 1832639,
+          "relative_solution_error_vs_stock": 9.628139924371168e-13,
+          "relative_max_error_vs_stock": 8.607419533247851e-13
+        },
+        "stencil-tf32": {
+          "solve_ms": 7280.2804469829425,
+          "converged": true,
+          "relative_residual": 2.4630149626249015e-11,
+          "outer_iterations": 8,
+          "inner_iterations": 958,
+          "low_operator_applications": 958,
+          "high_operator_applications": 9,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.004178695685002199
+            ],
+            [
+              2,
+              6.411606857760552,
+              63,
+              0.001953571326345949
+            ],
+            [
+              3,
+              0.1995980791080952,
+              111,
+              0.0019950379496781133
+            ],
+            [
+              4,
+              0.003327577602012916,
+              119,
+              0.0018482522849288298
+            ],
+            [
+              5,
+              8.86778631787489e-05,
+              115,
+              0.0019661141481738757
+            ],
+            [
+              6,
+              1.4065380047294578e-06,
+              131,
+              0.0018915320492092198
+            ],
+            [
+              7,
+              4.4678592849236134e-08,
+              96,
+              0.001956528337289776
+            ],
+            [
+              8,
+              7.591823061655635e-10,
+              123,
+              0.001853062360975882
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "tf32",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 13032100,
+          "relative_solution_error_vs_stock": 4.315461474897238e-12,
+          "relative_max_error_vs_stock": 3.09500576829407e-12
+        },
+        "stencil-bf16": {
+          "solve_ms": 9150.044040987268,
+          "converged": true,
+          "relative_residual": 2.2528515167628398e-11,
+          "outer_iterations": 9,
+          "inner_iterations": 1228,
+          "low_operator_applications": 1228,
+          "high_operator_applications": 10,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              2.63362357949283
+            ],
+            [
+              2,
+              15.570589603339023,
+              113,
+              0.0018876525050773862
+            ],
+            [
+              3,
+              0.31112074658622096,
+              116,
+              0.001955592117651991
+            ],
+            [
+              4,
+              0.006279675226763188,
+              137,
+              0.0019880344278492565
+            ],
+            [
+              5,
+              0.00020912640055360587,
+              96,
+              0.0018893088142023535
+            ],
+            [
+              6,
+              4.042561990697631e-06,
+              121,
+              0.001957034311040929
+            ],
+            [
+              7,
+              1.3452938229102383e-07,
+              102,
+              0.0019094177424544639
+            ],
+            [
+              8,
+              2.8821435332308264e-09,
+              145,
+              0.0018592919619332396
+            ],
+            [
+              9,
+              1.7559121003925078e-10,
+              198,
+              0.001955728509228519
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 13032100,
+          "relative_solution_error_vs_stock": 3.641695434999172e-12,
+          "relative_max_error_vs_stock": 2.6501760404455914e-12
+        },
+        "stencil-bf16x2": {
+          "solve_ms": 13266.010911989724,
+          "converged": true,
+          "relative_residual": 4.8605010615395437e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 943,
+          "low_operator_applications": 943,
+          "high_operator_applications": 7,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.0030359146290726982
+            ],
+            [
+              2,
+              0.2123186456599659,
+              125,
+              0.0019750545159686675
+            ],
+            [
+              3,
+              0.0011305799256603375,
+              157,
+              0.0019685992437856103
+            ],
+            [
+              4,
+              2.3853097898559448e-05,
+              146,
+              0.0018942921570021998
+            ],
+            [
+              5,
+              8.155475599776204e-08,
+              164,
+              0.0019655906106262285
+            ],
+            [
+              6,
+              1.482393768949637e-09,
+              151,
+              0.001938617283863717
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16x2",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 13032100,
+          "relative_solution_error_vs_stock": 7.817316898615686e-12,
+          "relative_max_error_vs_stock": 6.1458617695919425e-12
+        },
+        "stencil-bf16x3": {
+          "solve_ms": 23726.77480598213,
+          "converged": true,
+          "relative_residual": 9.923733575858252e-12,
+          "outer_iterations": 6,
+          "inner_iterations": 1153,
+          "low_operator_applications": 1153,
+          "high_operator_applications": 7,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.002863172126191798
+            ],
+            [
+              2,
+              0.031311205916280206,
+              185,
+              0.0019992961346218157
+            ],
+            [
+              3,
+              0.00023109221321179811,
+              188,
+              0.001854369230621881
+            ],
+            [
+              4,
+              7.337430379795284e-06,
+              200,
+              0.0020305892834828047
+            ],
+            [
+              5,
+              2.3898027169619786e-08,
+              188,
+              0.0019354595406599544
+            ],
+            [
+              6,
+              1.977505326762517e-10,
+              192,
+              0.0018530865856776224
+            ]
+          ],
+          "coarse_format": "fp32",
+          "stencil_format": "bf16x3",
+          "coarse_matrix_relative_error_vs_fp32": 0.0,
+          "coarse_matrix_asymmetry": 0.0,
+          "coarse_inverse_bytes": 13032100,
+          "relative_solution_error_vs_stock": 3.4849807230677e-12,
+          "relative_max_error_vs_stock": 2.7134851402891953e-12
+        },
+        "stencil-bf16x3+coarse-factor-bfp8b": {
+          "solve_ms": 23370.696377998684,
+          "converged": true,
+          "relative_residual": 1.3423439248439427e-11,
+          "outer_iterations": 6,
+          "inner_iterations": 1133,
+          "low_operator_applications": 1133,
+          "high_operator_applications": 7,
+          "history": [
+            [
+              1,
+              1.0,
+              200,
+              0.0032446785973683045
+            ],
+            [
+              2,
+              0.0314452159408143,
+              187,
+              0.0019302722846722253
+            ],
+            [
+              3,
+              7.448893536160722e-05,
+              185,
+              0.0019184446385845746
+            ],
+            [
+              4,
+              4.3590562636730404e-07,
+              183,
+              0.0019626474724925005
+            ],
+            [
+              5,
+              6.401383750725743e-09,
+              191,
+              0.0019925086334694883
+            ],
+            [
+              6,
+              4.3912843448183315e-10,
+              187,
+              0.0019987344601946296
+            ]
+          ],
+          "coarse_format": "bfp8b",
+          "stencil_format": "bf16x3",
+          "coarse_matrix_relative_error_vs_fp32": 0.0030760933162223597,
+          "coarse_matrix_asymmetry": 2.0915794165972073e-17,
+          "coarse_inverse_bytes": 3461652,
+          "relative_solution_error_vs_stock": 1.835728437062701e-11,
+          "relative_max_error_vs_stock": 1.3044173611197243e-11
+        }
+      }
+    }
+  ],
+  "decision": {
+    "adopted": false,
+    "scope": "precision feasibility only; nothing in src/ changes. Viable variants are carried to the Blackhole microbenchmark",
+    "viable_by_variant": {
+      "coarse-fp32": true,
+      "coarse-tf32": false,
+      "coarse-bf16": false,
+      "coarse-bfp8b": false,
+      "coarse-bfp4b": false,
+      "coarse-factor-bf16": true,
+      "coarse-factor-bfp8b": true,
+      "coarse-factor-bfp4b": false,
+      "stencil-tf32": false,
+      "stencil-bf16": false,
+      "stencil-bf16x2": true,
+      "stencil-bf16x3": false,
+      "stencil-bf16x3+coarse-factor-bfp8b": false
+    },
+    "candidates_for_device_measurement": [
+      "coarse-factor-bf16",
+      "coarse-factor-bfp8b",
+      "stencil-bf16x2"
+    ]
+  }
+}
