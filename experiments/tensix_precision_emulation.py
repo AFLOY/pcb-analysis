@@ -231,7 +231,7 @@ def _case(physics: str, elements: int, operator: Any, rhs: np.ndarray, config: M
     }
 
 
-def _verdict(run: dict[str, Any], stock: dict[str, Any], config: MPIRConfig) -> bool:
+def verdict(run: dict[str, Any], stock: dict[str, Any], config: MPIRConfig) -> bool:
     if "failed" in run or not run["converged"] or run["relative_residual"] > config.relative_tolerance:
         return False
     return (run["outer_iterations"] <= stock["outer_iterations"] + 1
@@ -262,7 +262,7 @@ def run(dc_sizes: list[int], thermal_sizes: list[int], variants: list[Variant]) 
 
     verdicts: dict[str, Any] = {}
     for variant in variants[1:]:
-        per_case = [_verdict(case["runs"][variant.name], case["runs"]["fp32-stock"],
+        per_case = [verdict(case["runs"][variant.name], case["runs"]["fp32-stock"],
                              DC_CONFIG if case["physics"] == "dc" else THERMAL_CONFIG) for case in cases]
         verdicts[variant.name] = all(per_case)
     candidates = [name for name, ok in verdicts.items() if ok and name != "coarse-fp32"]

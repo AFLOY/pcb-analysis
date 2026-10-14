@@ -45,3 +45,4 @@ experiments/*
 !experiments/port_basis_workers_benchmark.py
 !experiments/tensix_precision_emulation.py
 !experiments/tensix_formats.py
+!experiments/tensix_coarse_gemv_benchmark.py
