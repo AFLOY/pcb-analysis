@@ -47,4 +47,5 @@ experiments/*
 !experiments/tensix_formats.py
 !experiments/tensix_coarse_gemv_benchmark.py
 !experiments/tensix_stencil_benchmark.py
+!experiments/tensix_persistent_benchmark.py
 !experiments/tensix_stencil/
