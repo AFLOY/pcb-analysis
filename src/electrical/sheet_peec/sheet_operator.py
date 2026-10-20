@@ -32,7 +32,7 @@ boards with few layers, which is what these are.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import scipy.fft
@@ -254,42 +254,67 @@ class SheetInductanceOperator:
         a one-layer mesh still has its two families and all their rows to
         share out.
         """
+        return self.apply_many([(currents_x, currents_y, currents_z)])[0]
+
+    def apply_many(
+        self, currents: Sequence[tuple[np.ndarray, np.ndarray, np.ndarray | None]]
+    ) -> list[tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        """:meth:`apply` to several sets of currents at once.
+
+        Every layer of every set goes through one batched FFT and every
+        product through one batched inverse, so excitations solved side by
+        side share the transforms' threads; each set's result is the one
+        :meth:`apply` gives it alone, to the bit.
+        """
         rows, cols = self.shape
         layers = len(self.stackup)
         expected = (layers, rows, cols)
-        for name, array in (("currents_x", currents_x), ("currents_y", currents_y)):
-            if array.shape != expected:
-                raise ValueError(f"{name} must have shape {expected}, got {array.shape}")
-        levels = 0
-        stacked = [currents_x, currents_y]
-        if currents_z is not None:
-            vertical_expected = (len(self.vertical_levels), rows, cols)
-            if currents_z.shape != vertical_expected:
-                raise ValueError(
-                    f"currents_z must have shape {vertical_expected}, "
-                    f"got {currents_z.shape}"
-                )
-            levels = len(self.vertical_levels)
-            if levels:
+        levels = len(self.vertical_levels)
+        stacked: list[np.ndarray] = []
+        starts: list[int] = []
+        for currents_x, currents_y, currents_z in currents:
+            for name, array in (("currents_x", currents_x), ("currents_y", currents_y)):
+                if array.shape != expected:
+                    raise ValueError(f"{name} must have shape {expected}, got {array.shape}")
+            if currents_z is not None:
+                vertical_expected = (levels, rows, cols)
+                if currents_z.shape != vertical_expected:
+                    raise ValueError(
+                        f"currents_z must have shape {vertical_expected}, "
+                        f"got {currents_z.shape}"
+                    )
+            starts.append(sum(len(array) for array in stacked))
+            stacked.extend([currents_x, currents_y])
+            if currents_z is not None and levels:
                 stacked.append(currents_z)
 
         workers = thread_budget()
         spectra = scipy.fft.rfft2(np.concatenate(stacked, axis=0), s=self.padded, workers=workers)
         accumulated = np.zeros_like(spectra)
-        for target in range(layers):
-            for source in range(layers):
-                accumulated[target] += self._kernel("x", target, source) * spectra[source]
-                accumulated[layers + target] += self._kernel("y", target, source) * spectra[layers + source]
-        for target in range(levels):
-            for source in range(levels):
-                accumulated[2 * layers + target] += self._kernel_z(target, source) * spectra[2 * layers + source]
+        for start, (_, _, currents_z) in zip(starts, currents):
+            for target in range(layers):
+                for source in range(layers):
+                    accumulated[start + target] += self._kernel("x", target, source) * spectra[start + source]
+                    accumulated[start + layers + target] += (
+                        self._kernel("y", target, source) * spectra[start + layers + source]
+                    )
+            if currents_z is not None:
+                for target in range(levels):
+                    for source in range(levels):
+                        accumulated[start + 2 * layers + target] += (
+                            self._kernel_z(target, source) * spectra[start + 2 * layers + source]
+                        )
         flux = scipy.fft.irfft2(accumulated, s=self.padded, workers=workers)[:, :rows, :cols]
-        flux_x, flux_y = flux[:layers], flux[layers : 2 * layers]
-        if currents_z is None:
-            return flux_x, flux_y
-        if not levels:
-            return flux_x, flux_y, np.zeros_like(currents_z)
-        return flux_x, flux_y, flux[2 * layers :]
+        results: list[tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+        for start, (_, _, currents_z) in zip(starts, currents):
+            flux_x, flux_y = flux[start : start + layers], flux[start + layers : start + 2 * layers]
+            if currents_z is None:
+                results.append((flux_x, flux_y))
+            elif not levels:
+                results.append((flux_x, flux_y, np.zeros_like(currents_z)))
+            else:
+                results.append((flux_x, flux_y, flux[start + 2 * layers : start + 2 * layers + levels]))
+        return results
 
     def near_inductance(self, mesh: Any, radius_cells: int = 1) -> Any:
         """Exact partial inductance between branches within ``radius_cells`` of each other, in mesh branch order.
