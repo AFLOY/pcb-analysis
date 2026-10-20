@@ -10,6 +10,7 @@ from electrical.sheet_peec.current_field_contract import (
     CurrentFieldProblem,
     build_current_field_sheet_inputs,
     solve_current_field_problem,
+    solve_current_field_problems,
 )
 from electrical.sheet_peec.sheet_cuda import CudaSheetTelemetry
 
@@ -214,6 +215,26 @@ def test_end_to_end_ac_solution_tracks_terminal_phase() -> None:
             rel=1e-7,
             abs=1e-12,
         )
+
+
+def test_problems_of_one_geometry_are_solved_together_to_the_same_bits() -> None:
+    # Two excitations of one conductor, and a third problem at another
+    # frequency: the batch returns each result as the single solve does.
+    first = _problem(frequency_hz=1000.0)
+    second = _problem(frequency_hz=1000.0)
+    second["name"] = "three_layer_other_way"
+    second["terminals"][0]["cells"] = [{"layer": "In1.Cu", "x": 1, "y": 0}]
+    other = _problem(frequency_hz=2000.0)  # another frequency: another system
+    other["name"] = "three_layer_at_2_khz"
+    problems = [first, other, second]
+    together = solve_current_field_problems(problems)
+    assert [result.metrics["problem_name"] for result in together] == [p["name"] for p in problems]
+    for value, result in zip(problems, together):
+        alone = solve_current_field_problem(value)
+        assert result.metrics["converged"]
+        assert result.voltage_phasor == alone.voltage_phasor
+        assert result.current_density_phasor == alone.current_density_phasor
+        assert result.metrics["solver_iterations"] == alone.metrics["solver_iterations"]
 
 
 def test_contract_rejects_implicit_backend_fallback() -> None:

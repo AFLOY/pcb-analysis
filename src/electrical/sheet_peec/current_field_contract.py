@@ -18,7 +18,7 @@ from electrical.matrix_free_mpir_fem.grid import TensorGrid
 
 from .sheet_pfft import PfftSheetInductanceOperator
 from .sheet_operator import SheetInductanceOperator, SheetStackup
-from .sheet_peec import SheetMesh, Terminal, ViaBranch, solve_sheet_case
+from .sheet_peec import SheetMesh, Terminal, ViaBranch, solve_sheet_cases
 from .sheet_results import cell_current_density_phasor, sheet_fields
 from .skin_filaments import filament_links, graded_filaments, skin_depth_m
 
@@ -348,7 +348,22 @@ def build_current_field_sheet_inputs(
     problem = (
         value if isinstance(value, CurrentFieldProblem) else CurrentFieldProblem.from_mapping(value)
     )
-    settings = dict(settings or {})
+    mesh, operator, geometry = _sheet_geometry(problem, dict(settings or {}))
+    return mesh, operator, _sheet_terminals(problem, geometry), _sheet_context(problem, geometry)
+
+
+@dataclass(frozen=True)
+class _SheetGeometry:
+    """What a problem's terminals and fields are mapped through, shared by problems of one geometry."""
+
+    filament_of: Mapping[str, tuple[int, ...]]
+    layer_by_name: Mapping[str, CurrentFieldLayer]
+
+
+def _sheet_geometry(
+    problem: CurrentFieldProblem, settings: Mapping[str, Any]
+) -> tuple[SheetMesh, Any, _SheetGeometry]:
+    """The mesh and the inductance operator of a problem; its terminals play no part."""
     tensor = problem.grid if problem.grid is not None else TensorGrid.uniform(problem.pitch_mm * 1e-3, (problem.rows, problem.columns))
     pitch_m = problem.pitch_mm * 1e-3 if problem.pitch_mm is not None else None
     sheet_layers = []
@@ -457,6 +472,11 @@ def build_current_field_sheet_inputs(
             vertical_levels=mesh.vertical_levels,
         )
 
+    return mesh, operator, _SheetGeometry(filament_of=filament_of, layer_by_name=layer_by_name)
+
+
+def _sheet_terminals(problem: CurrentFieldProblem, geometry: _SheetGeometry) -> list[Terminal]:
+    filament_of, layer_by_name = geometry.filament_of, geometry.layer_by_name
     terminals: list[Terminal] = []
     for terminal in problem.terminals:
         by_layer: dict[str, list[tuple[int, int]]] = {}
@@ -475,12 +495,17 @@ def build_current_field_sheet_inputs(
                     current_a=share,
                 )
             )
+    return terminals
+
+
+def _sheet_context(problem: CurrentFieldProblem, geometry: _SheetGeometry) -> _SheetContext:
+    filament_of = geometry.filament_of
     name_of_filament = {
         index: name
         for name, indices in filament_of.items()
         for index in indices
     }
-    context = _SheetContext(
+    return _SheetContext(
         problem=problem,
         filament_of=filament_of,
         name_of_filament=name_of_filament,
@@ -492,7 +517,6 @@ def build_current_field_sheet_inputs(
             for layer in problem.layers
         },
     )
-    return mesh, operator, terminals, context
 
 
 def solve_current_field_problem(
@@ -500,6 +524,21 @@ def solve_current_field_problem(
     settings: Mapping[str, Any] | None = None,
 ) -> CurrentFieldSolveResult:
     """Solve schema v1 and return fields keyed by original layer names."""
+    return solve_current_field_problems([value], settings)[0]
+
+
+def solve_current_field_problems(
+    values: Sequence[Mapping[str, Any] | CurrentFieldProblem],
+    settings: Mapping[str, Any] | None = None,
+) -> list[CurrentFieldSolveResult]:
+    """Solve several problems, in the order given, sharing what their geometry shares.
+
+    Problems that differ only in their terminals (and name, role and source)
+    are one conductor driven several ways: its mesh and inductance operator
+    are built once and the excitations solved together
+    (:func:`~electrical.sheet_peec.sheet_peec.solve_sheet_cases`), each to
+    the same bits it gets alone.  On CUDA each problem is solved on its own.
+    """
     settings = dict(settings or {})
     execution_backend = str(settings.get("execution_backend", "cpu"))
     if execution_backend not in {"cpu", "cuda"}:
@@ -510,39 +549,86 @@ def solve_current_field_problem(
         raise ValueError(
             "current-field sheet solves do not allow implicit backend fallback"
         )
-    mesh, operator, terminals, context = build_current_field_sheet_inputs(
-        value, settings
-    )
-    solve_arguments = {
-        "frequency_hz": context.problem.frequency_hz,
-        "tolerance": float(settings.get("relative_tolerance", 1e-9)),
-        "max_iterations": int(settings.get("maximum_iterations", 200)),
-        "restart": int(settings.get("restart", 120)),
-        "preconditioner": str(settings.get("preconditioner", "auto")),
-    }
-    if execution_backend == "cuda":
-        from .sheet_cuda import solve_sheet_case_cuda
-
-        solution, telemetry = solve_sheet_case_cuda(
-            mesh,
-            operator,
-            terminals,
-            device_id=int(settings.get("device_id", 0)),
-            **solve_arguments,
-        )
-        backend_metrics = telemetry.as_metrics()
-    else:
-        solution = solve_sheet_case(
-            mesh,
-            operator,
-            terminals,
-            **solve_arguments,
-        )
-        backend_metrics = {
-            "backend": "sheet_peec",
-            "resolved_backend": "numpy-scipy-sheet-peec",
-            "fallback_used": False,
+    problems = [
+        value if isinstance(value, CurrentFieldProblem) else CurrentFieldProblem.from_mapping(value)
+        for value in values
+    ]
+    groups: list[list[int]] = []
+    for index, problem in enumerate(problems):
+        for members in groups:
+            if _same_geometry(problems[members[0]], problem):
+                members.append(index)
+                break
+        else:
+            groups.append([index])
+    results: list[CurrentFieldSolveResult | None] = [None] * len(problems)
+    for members in groups:
+        first = problems[members[0]]
+        mesh, operator, geometry = _sheet_geometry(first, settings)
+        terminal_sets = [_sheet_terminals(problems[index], geometry) for index in members]
+        solve_arguments = {
+            "frequency_hz": first.frequency_hz,
+            "tolerance": float(settings.get("relative_tolerance", 1e-9)),
+            "max_iterations": int(settings.get("maximum_iterations", 200)),
+            "restart": int(settings.get("restart", 120)),
+            "preconditioner": str(settings.get("preconditioner", "auto")),
         }
+        if execution_backend == "cuda":
+            from .sheet_cuda import solve_sheet_case_cuda
+
+            solved = []
+            for terminals in terminal_sets:
+                solution, telemetry = solve_sheet_case_cuda(
+                    mesh,
+                    operator,
+                    terminals,
+                    device_id=int(settings.get("device_id", 0)),
+                    **solve_arguments,
+                )
+                solved.append((solution, telemetry.as_metrics()))
+        else:
+            backend_metrics = {
+                "backend": "sheet_peec",
+                "resolved_backend": "numpy-scipy-sheet-peec",
+                "fallback_used": False,
+            }
+            solved = [
+                (solution, dict(backend_metrics))
+                for solution in solve_sheet_cases(mesh, operator, terminal_sets, **solve_arguments)
+            ]
+        for index, terminals, (solution, backend_metrics) in zip(members, terminal_sets, solved):
+            results[index] = _field_result(
+                mesh, operator, solution, terminals, _sheet_context(problems[index], geometry), backend_metrics
+            )
+    return [result for result in results if result is not None]
+
+
+def _same_geometry(first: CurrentFieldProblem, second: CurrentFieldProblem) -> bool:
+    """Whether two problems are one conductor: everything but terminals, name, role and source agrees."""
+    if (first.grid is None) != (second.grid is None):
+        return False
+    if first.grid is not None and second.grid is not None and not (
+        np.array_equal(first.grid.x_edges_m, second.grid.x_edges_m)
+        and np.array_equal(first.grid.y_edges_m, second.grid.y_edges_m)
+    ):
+        return False
+    return (
+        first.frequency_hz == second.frequency_hz
+        and (first.rows, first.columns, first.pitch_mm) == (second.rows, second.columns, second.pitch_mm)
+        and first.layers == second.layers
+        and dict(first.copper_by_layer) == dict(second.copper_by_layer)
+        and first.vertical_segments == second.vertical_segments
+    )
+
+
+def _field_result(
+    mesh: SheetMesh,
+    operator: Any,
+    solution: Any,
+    terminals: list[Terminal],
+    context: _SheetContext,
+    backend_metrics: Mapping[str, Any],
+) -> CurrentFieldSolveResult:
     fields = sheet_fields(mesh, solution, terminals)
     phasor = cell_current_density_phasor(mesh, solution)
 
