@@ -1,0 +1,117 @@
+{
+  "benchmark": "sheet_cases_benchmark",
+  "timestamp_utc": "2026-10-20T11:42:11.137015+00:00",
+  "environment": {
+    "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+    "cpu_count": 16,
+    "physical_cores": 8,
+    "thread_budget": 8,
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.17.1"
+  },
+  "settings": {
+    "frequency_hz": 800000.0,
+    "preconditioner": "block",
+    "tolerance": 1e-09,
+    "restart": 120,
+    "max_iterations": 400
+  },
+  "cases": [
+    {
+      "pitch_mm": 0.5,
+      "excitations": 2,
+      "branches": 15890,
+      "one_by_one_s": 3.031,
+      "together_s": 2.201,
+      "speedup": 1.377,
+      "identical_to_the_bit": true,
+      "iterations": [
+        238,
+        241
+      ],
+      "converged": true
+    },
+    {
+      "pitch_mm": 0.5,
+      "excitations": 4,
+      "branches": 15890,
+      "one_by_one_s": 5.923,
+      "together_s": 3.412,
+      "speedup": 1.736,
+      "identical_to_the_bit": true,
+      "iterations": [
+        238,
+        214,
+        241,
+        237
+      ],
+      "converged": true
+    },
+    {
+      "pitch_mm": 0.25,
+      "excitations": 2,
+      "branches": 63422,
+      "one_by_one_s": 19.836,
+      "together_s": 14.062,
+      "speedup": 1.411,
+      "identical_to_the_bit": true,
+      "iterations": [
+        383,
+        405
+      ],
+      "converged": true
+    },
+    {
+      "pitch_mm": 0.25,
+      "excitations": 4,
+      "branches": 63422,
+      "one_by_one_s": 40.382,
+      "together_s": 23.688,
+      "speedup": 1.705,
+      "identical_to_the_bit": true,
+      "iterations": [
+        383,
+        411,
+        405,
+        414
+      ],
+      "converged": true
+    },
+    {
+      "pitch_mm": 0.2,
+      "excitations": 2,
+      "branches": 99721,
+      "one_by_one_s": 35.19,
+      "together_s": 25.658,
+      "speedup": 1.372,
+      "identical_to_the_bit": true,
+      "iterations": [
+        410,
+        473
+      ],
+      "converged": true
+    },
+    {
+      "pitch_mm": 0.2,
+      "excitations": 4,
+      "branches": 99721,
+      "one_by_one_s": 74.48,
+      "together_s": 47.063,
+      "speedup": 1.583,
+      "identical_to_the_bit": true,
+      "iterations": [
+        410,
+        523,
+        473,
+        469
+      ],
+      "converged": true
+    }
+  ],
+  "decision": {
+    "adopted": true,
+    "criteria": "every pitch and count: solutions identical to the bit, converged, and together no slower than one by one"
+  }
+}

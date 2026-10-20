@@ -14,6 +14,13 @@ Versions before 0.7.0 were not tagged; see the Git history.
   threads (docs/SHEET_PEEC.md). `near_tiles=1` is the previous preconditioner.
 - The sheet operator's flux apply runs every layer in one batched SciPy FFT
   on the budget.
+- `solve_sheet_cases(mesh, operator, terminal_sets)` and
+  `solve_current_field_problems(problems)`: excitations of one conductor
+  share the system and the preconditioner, and their GMRES solves run in
+  lockstep, each to the bits it gets alone (0.2 mm plane, 2 / 4
+  excitations: 1.37x / 1.58x; docs/SHEET_PEEC.md).
+  `SheetInductanceOperator.apply_many` applies the operator to several sets
+  of currents in one batched FFT. Additive.
 - `electrical.sheet_peec.dc_network`: the zero-frequency sheet mesh as a bare
   conductance network. `ConductanceNetwork` (numbered nodes, branches in
   siemens), `solve_conductance_network(network, reference, injection,

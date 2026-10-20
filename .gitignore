@@ -43,4 +43,5 @@ experiments/*
 !experiments/sheet_preconditioner_memory.py
 !experiments/sheet_preconditioner_benchmark.py
 !experiments/sheet_near_tiles_benchmark.py
+!experiments/sheet_cases_benchmark.py
 !experiments/port_basis_workers_benchmark.py

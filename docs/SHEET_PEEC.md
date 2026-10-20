@@ -537,6 +537,39 @@ is faster at every pitch and budget; iterations rise by up to 23 % at
 largest budget (candidates [2, 4, 8, 16]); the batched flux FFT adopted
 (batched FFT within 1e-12 of the per-layer NumPy loop at every budget).
 
+### Several excitations of one mesh (measured, `SHEET_CASES_RESULTS.json`)
+
+A board's cases often drive one conductor several ways: the same role in two
+switching states, a port basis. Past the near strips, the time of a block
+solve is the preconditioner's SuperLU solves and GMRES's Gram-Schmidt, both
+reading arrays far larger than the cache and neither running faster on more
+threads. `solve_sheet_cases(mesh, operator, terminal_sets)` therefore solves
+excitations that drive the same components together: one reduced system and
+one preconditioner, and the GMRES solves in lockstep -- each column runs the
+same restarted, left-preconditioned GMRES as `solve_sheet_case` on its own
+Krylov space, while the operator (`apply_many`) and the preconditioner
+(SuperLU with several right-hand sides) are applied to all running columns at
+once and the columns' Gram-Schmidt steps run side by side. Each excitation
+gets the bits and the iteration count it gets alone.
+`solve_current_field_problems` groups current-field problems of one geometry
+the same way.
+
+`experiments/sheet_cases_benchmark.py`, AMD Ryzen 7 9700X 8-Core Processor, thread budget
+8, Python 3.12.14, NumPy 2.3.5, SciPy 1.17.1, the plane of the
+tables above at 800 kHz, `block`, tolerance 1e-09, restart 120; each
+excitation feeds the left edge over a different span of rows:
+
+| Pitch (mm) | Branches | Excitations | GMRES iterations | One by one (s) | Together (s) | Speed-up | Same bits |
+|---:|---:|---:|---|---:|---:|---:|---|
+| 0.5 | 15,890 | 2 | 238, 241 | 3.0 | 2.2 | 1.38x | yes |
+| 0.5 | 15,890 | 4 | 238, 214, 241, 237 | 5.9 | 3.4 | 1.74x | yes |
+| 0.25 | 63,422 | 2 | 383, 405 | 19.8 | 14.1 | 1.41x | yes |
+| 0.25 | 63,422 | 4 | 383, 411, 405, 414 | 40.4 | 23.7 | 1.71x | yes |
+| 0.2 | 99,721 | 2 | 410, 473 | 35.2 | 25.7 | 1.37x | yes |
+| 0.2 | 99,721 | 4 | 410, 523, 473, 469 | 74.5 | 47.1 | 1.58x | yes |
+
+**Decision:** adopted (every pitch and count: solutions identical to the bit, converged, and together no slower than one by one).
+
 ## What is not done
 
 - The barrel's partial self inductance is taken as a given scalar. Nothing
