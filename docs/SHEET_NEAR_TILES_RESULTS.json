@@ -1,0 +1,370 @@
+{
+  "benchmark": "sheet_near_tiles_benchmark",
+  "timestamp_utc": "2026-10-20T11:14:37.862737+00:00",
+  "environment": {
+    "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+    "cpu_count": 16,
+    "physical_cores": 8,
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.17.1",
+    "blas_threads": [
+      1
+    ]
+  },
+  "settings": {
+    "frequency_hz": 800000.0,
+    "pitches_mm": [
+      0.5,
+      0.25,
+      0.2
+    ],
+    "tiles": [
+      1,
+      2,
+      4,
+      8,
+      16
+    ],
+    "threads": [
+      1,
+      8
+    ],
+    "tolerance": 1e-09,
+    "restart": 120,
+    "max_iterations": 400,
+    "flux_repeats": 20
+  },
+  "flux_apply": [
+    {
+      "pitch_mm": 0.5,
+      "per_layer_numpy_s": 0.0011,
+      "batched_threads_1_s": 0.0011,
+      "batched_threads_1_max_relative_difference": 3.890668017848541e-16,
+      "batched_threads_8_s": 0.0004,
+      "batched_threads_8_max_relative_difference": 3.890668017848541e-16
+    },
+    {
+      "pitch_mm": 0.25,
+      "per_layer_numpy_s": 0.0028,
+      "batched_threads_1_s": 0.0025,
+      "batched_threads_1_max_relative_difference": 4.3905913152264614e-16,
+      "batched_threads_8_s": 0.0009,
+      "batched_threads_8_max_relative_difference": 4.3905913152264614e-16
+    },
+    {
+      "pitch_mm": 0.2,
+      "per_layer_numpy_s": 0.0038,
+      "batched_threads_1_s": 0.0042,
+      "batched_threads_1_max_relative_difference": 3.4806875394652915e-16,
+      "batched_threads_8_s": 0.0015,
+      "batched_threads_8_max_relative_difference": 3.4806875394652915e-16
+    }
+  ],
+  "cases": [
+    {
+      "pitch_mm": 0.5,
+      "branches": 15890,
+      "nodes": 8052,
+      "runs": [
+        {
+          "threads": 1,
+          "near_tiles": 1,
+          "wall_s": 2.59,
+          "iterations": 256,
+          "converged": true,
+          "residual": 1.191822267935926e-10,
+          "max_relative_difference_vs_tiles_1": 0.0
+        },
+        {
+          "threads": 1,
+          "near_tiles": 2,
+          "wall_s": 1.812,
+          "iterations": 233,
+          "converged": true,
+          "residual": 2.110142538556874e-10,
+          "max_relative_difference_vs_tiles_1": 1.254677243451603e-10
+        },
+        {
+          "threads": 1,
+          "near_tiles": 4,
+          "wall_s": 1.869,
+          "iterations": 238,
+          "converged": true,
+          "residual": 2.457122770903697e-10,
+          "max_relative_difference_vs_tiles_1": 1.3370432282556602e-10
+        },
+        {
+          "threads": 1,
+          "near_tiles": 8,
+          "wall_s": 1.55,
+          "iterations": 213,
+          "converged": true,
+          "residual": 8.337774862315499e-10,
+          "max_relative_difference_vs_tiles_1": 1.6852146707594664e-10
+        },
+        {
+          "threads": 1,
+          "near_tiles": 16,
+          "wall_s": 1.55,
+          "iterations": 212,
+          "converged": true,
+          "residual": 8.045515823373867e-10,
+          "max_relative_difference_vs_tiles_1": 1.81482647932092e-10
+        },
+        {
+          "threads": 8,
+          "near_tiles": 1,
+          "wall_s": 2.284,
+          "iterations": 256,
+          "converged": true,
+          "residual": 1.191822267935926e-10,
+          "max_relative_difference_vs_tiles_1": 0.0
+        },
+        {
+          "threads": 8,
+          "near_tiles": 2,
+          "wall_s": 1.336,
+          "iterations": 233,
+          "converged": true,
+          "residual": 2.110142538556874e-10,
+          "max_relative_difference_vs_tiles_1": 1.254677243451603e-10
+        },
+        {
+          "threads": 8,
+          "near_tiles": 4,
+          "wall_s": 1.389,
+          "iterations": 238,
+          "converged": true,
+          "residual": 2.457122770903697e-10,
+          "max_relative_difference_vs_tiles_1": 1.3370432282556602e-10
+        },
+        {
+          "threads": 8,
+          "near_tiles": 8,
+          "wall_s": 1.462,
+          "iterations": 213,
+          "converged": true,
+          "residual": 8.337774862315499e-10,
+          "max_relative_difference_vs_tiles_1": 1.6852146707594664e-10
+        },
+        {
+          "threads": 8,
+          "near_tiles": 16,
+          "wall_s": 1.542,
+          "iterations": 212,
+          "converged": true,
+          "residual": 8.045515823373867e-10,
+          "max_relative_difference_vs_tiles_1": 1.81482647932092e-10
+        }
+      ]
+    },
+    {
+      "pitch_mm": 0.25,
+      "branches": 63422,
+      "nodes": 31944,
+      "runs": [
+        {
+          "threads": 1,
+          "near_tiles": 1,
+          "wall_s": 14.969,
+          "iterations": 311,
+          "converged": true,
+          "residual": 2.688164169316185e-10,
+          "max_relative_difference_vs_tiles_1": 0.0
+        },
+        {
+          "threads": 1,
+          "near_tiles": 2,
+          "wall_s": 12.169,
+          "iterations": 388,
+          "converged": true,
+          "residual": 9.960708683597267e-11,
+          "max_relative_difference_vs_tiles_1": 2.8138044158721774e-10
+        },
+        {
+          "threads": 1,
+          "near_tiles": 4,
+          "wall_s": 11.558,
+          "iterations": 383,
+          "converged": true,
+          "residual": 1.1417492266868668e-10,
+          "max_relative_difference_vs_tiles_1": 2.869326432526898e-10
+        },
+        {
+          "threads": 1,
+          "near_tiles": 8,
+          "wall_s": 11.744,
+          "iterations": 390,
+          "converged": true,
+          "residual": 1.3029218791612173e-10,
+          "max_relative_difference_vs_tiles_1": 3.1245737507623913e-10
+        },
+        {
+          "threads": 1,
+          "near_tiles": 16,
+          "wall_s": 10.809,
+          "iterations": 383,
+          "converged": true,
+          "residual": 2.4874425802580935e-10,
+          "max_relative_difference_vs_tiles_1": 3.264876319457432e-10
+        },
+        {
+          "threads": 8,
+          "near_tiles": 1,
+          "wall_s": 13.986,
+          "iterations": 311,
+          "converged": true,
+          "residual": 2.688164169316185e-10,
+          "max_relative_difference_vs_tiles_1": 0.0
+        },
+        {
+          "threads": 8,
+          "near_tiles": 2,
+          "wall_s": 9.843,
+          "iterations": 388,
+          "converged": true,
+          "residual": 9.960708683597267e-11,
+          "max_relative_difference_vs_tiles_1": 2.8138044158721774e-10
+        },
+        {
+          "threads": 8,
+          "near_tiles": 4,
+          "wall_s": 9.404,
+          "iterations": 383,
+          "converged": true,
+          "residual": 1.1417492266868668e-10,
+          "max_relative_difference_vs_tiles_1": 2.869326432526898e-10
+        },
+        {
+          "threads": 8,
+          "near_tiles": 8,
+          "wall_s": 9.96,
+          "iterations": 390,
+          "converged": true,
+          "residual": 1.3029218791612173e-10,
+          "max_relative_difference_vs_tiles_1": 3.1245737507623913e-10
+        },
+        {
+          "threads": 8,
+          "near_tiles": 16,
+          "wall_s": 10.008,
+          "iterations": 383,
+          "converged": true,
+          "residual": 2.4874425802580935e-10,
+          "max_relative_difference_vs_tiles_1": 3.264876319457432e-10
+        }
+      ]
+    },
+    {
+      "pitch_mm": 0.2,
+      "branches": 99721,
+      "nodes": 50160,
+      "runs": [
+        {
+          "threads": 1,
+          "near_tiles": 1,
+          "wall_s": 27.551,
+          "iterations": 356,
+          "converged": true,
+          "residual": 8.389580050394842e-10,
+          "max_relative_difference_vs_tiles_1": 0.0
+        },
+        {
+          "threads": 1,
+          "near_tiles": 2,
+          "wall_s": 20.483,
+          "iterations": 407,
+          "converged": true,
+          "residual": 9.800689577602909e-10,
+          "max_relative_difference_vs_tiles_1": 2.2490478364651423e-10
+        },
+        {
+          "threads": 1,
+          "near_tiles": 4,
+          "wall_s": 20.342,
+          "iterations": 410,
+          "converged": true,
+          "residual": 9.387940783709923e-10,
+          "max_relative_difference_vs_tiles_1": 3.039701256744341e-10
+        },
+        {
+          "threads": 1,
+          "near_tiles": 8,
+          "wall_s": 19.865,
+          "iterations": 416,
+          "converged": true,
+          "residual": 7.866979987474824e-10,
+          "max_relative_difference_vs_tiles_1": 1.4555869170366273e-10
+        },
+        {
+          "threads": 1,
+          "near_tiles": 16,
+          "wall_s": 20.292,
+          "iterations": 435,
+          "converged": true,
+          "residual": 8.481232821457628e-10,
+          "max_relative_difference_vs_tiles_1": 1.2801322526726167e-10
+        },
+        {
+          "threads": 8,
+          "near_tiles": 1,
+          "wall_s": 25.895,
+          "iterations": 356,
+          "converged": true,
+          "residual": 8.389580050394842e-10,
+          "max_relative_difference_vs_tiles_1": 0.0
+        },
+        {
+          "threads": 8,
+          "near_tiles": 2,
+          "wall_s": 16.451,
+          "iterations": 407,
+          "converged": true,
+          "residual": 9.800689577602909e-10,
+          "max_relative_difference_vs_tiles_1": 2.2490478364651423e-10
+        },
+        {
+          "threads": 8,
+          "near_tiles": 4,
+          "wall_s": 15.762,
+          "iterations": 410,
+          "converged": true,
+          "residual": 9.387940783709923e-10,
+          "max_relative_difference_vs_tiles_1": 3.039701256744341e-10
+        },
+        {
+          "threads": 8,
+          "near_tiles": 8,
+          "wall_s": 17.009,
+          "iterations": 416,
+          "converged": true,
+          "residual": 7.866979987474824e-10,
+          "max_relative_difference_vs_tiles_1": 1.4555869170366273e-10
+        },
+        {
+          "threads": 8,
+          "near_tiles": 16,
+          "wall_s": 17.785,
+          "iterations": 435,
+          "converged": true,
+          "residual": 8.481232821457628e-10,
+          "max_relative_difference_vs_tiles_1": 1.2801322526726167e-10
+        }
+      ]
+    }
+  ],
+  "decision": {
+    "default_near_tiles": 4,
+    "near_tiles_candidates": [
+      2,
+      4,
+      8,
+      16
+    ],
+    "near_tiles_criteria": "at every pitch and budget: converged, within 1e-06 of near_tiles=1, no slower than it; then the fastest on the largest pitch at the largest budget",
+    "batched_flux_adopted": true,
+    "batched_flux_criteria": "batched FFT within 1e-12 of the per-layer NumPy loop at every budget"
+  }
+}

@@ -6,6 +6,14 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
+- `solve_sheet_case(near_tiles=)`: the `block` preconditioner factors
+  `R + j omega L_near` in that many strips, side by side on the budget.
+  `DEFAULT_NEAR_TILES` is 4, so `block` (and `auto` above 60,000 unknowns)
+  changes its iterations and its solution within the tolerance: within 4e-10
+  of the whole block on the benchmark plane, 0.2 mm 39.6 s -> 15.8 s at 8
+  threads (docs/SHEET_PEEC.md). `near_tiles=1` is the previous preconditioner.
+- The sheet operator's flux apply runs every layer in one batched SciPy FFT
+  on the budget.
 - `electrical.sheet_peec.dc_network`: the zero-frequency sheet mesh as a bare
   conductance network. `ConductanceNetwork` (numbered nodes, branches in
   siemens), `solve_conductance_network(network, reference, injection,

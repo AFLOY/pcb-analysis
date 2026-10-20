@@ -761,8 +761,10 @@ def _near_impedance(
 AUTO_BLOCK_FROM_UNKNOWNS = 60_000
 
 # Strips the ``block`` preconditioner factors the near-field impedance in;
-# 1 factors it whole.
-DEFAULT_NEAR_TILES = 1
+# 1 factors it whole.  Four is the fastest on the preconditioner benchmark's
+# 0.2 mm plane at 8 threads and no slower than the whole block anywhere
+# (docs/SHEET_NEAR_TILES_RESULTS.json).
+DEFAULT_NEAR_TILES = 4
 
 
 def choose_preconditioner(unknowns: int) -> str:

@@ -274,7 +274,7 @@ class AlternatingCurrentTests(unittest.TestCase):
         # Dropping the couplings between strips weakens the preconditioner,
         # not the system: GMRES reaches the whole-block solution.
         whole = solve_sheet_case(
-            self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="block"
+            self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="block", near_tiles=1
         )
         scale = float(np.abs(whole.branch_current).max())
         for tiles in (2, 3, 7):
@@ -285,10 +285,16 @@ class AlternatingCurrentTests(unittest.TestCase):
             self.assertTrue(strips.converged)
             self.assertLess(float(np.abs(strips.branch_current - whole.branch_current).max()) / scale, 1e-7)
             self.assertLessEqual(strips.iterations, 3 * max(whole.iterations, 1))
-        one = solve_sheet_case(
-            self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="block", near_tiles=1
+        from electrical.sheet_peec.sheet_peec import DEFAULT_NEAR_TILES
+
+        default = solve_sheet_case(
+            self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="block"
         )
-        self.assertEqual(one.branch_current.tobytes(), whole.branch_current.tobytes())
+        stated = solve_sheet_case(
+            self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="block",
+            near_tiles=DEFAULT_NEAR_TILES,
+        )
+        self.assertEqual(default.branch_current.tobytes(), stated.branch_current.tobytes())
         with self.assertRaises(ValueError):
             solve_sheet_case(self.mesh, self.operator, self.terminals, frequency_hz=3e5, near_tiles=0)
 

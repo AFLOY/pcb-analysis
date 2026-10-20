@@ -465,6 +465,78 @@ each solved with and without an adjoint objective, matched bit for bit.
 against a dense solve of `L λ = c`, the sensitivity closure and
 reproducibility.
 
+### Near block in strips (measured, `SHEET_NEAR_TILES_RESULTS.json`)
+
+The block preconditioner spends its time in SuperLU: factoring `Z_near` and
+solving it twice per GMRES step, all on one thread. `near_tiles=k` cuts the
+active branches into `k` strips of equal size in the order of their left
+node (the raster order, so bands of rows), drops the couplings of `Z_near`
+between strips, and factors and solves the strips side by side on a thread
+pool as wide as the thread budget. It is a weaker preconditioner of the same
+system, so GMRES still reaches the whole block's solution; the strips factor
+with less fill than the whole, which is why one thread gains too, and each
+strip is independent, so the result does not depend on the budget. The
+operator's flux apply is batched the same way: every layer of every family
+in one `scipy.fft.rfft2` and every product in one `irfft2`, with
+`workers` the budget, and the mesh scatters and gathers branch currents by
+index arrays.
+
+`experiments/sheet_near_tiles_benchmark.py`, AMD Ryzen 7 9700X 8-Core Processor,
+8 physical cores, Python 3.12.14, NumPy 2.3.5, SciPy 1.17.1,
+BLAS on one thread, the plane of the table above at 800 kHz,
+`block`, tolerance 1e-09, restart 120; differences against `near_tiles=1` at
+the same budget:
+
+| Pitch (mm) | Threads | `near_tiles` | GMRES iterations | Wall (s) | Max relative difference |
+|---:|---:|---:|---:|---:|---|
+| 0.5 | 1 | 1 | 256 | 2.59 | 0.0e+00 |
+| 0.5 | 1 | 2 | 233 | 1.81 | 1.3e-10 |
+| 0.5 | 1 | 4 | 238 | 1.87 | 1.3e-10 |
+| 0.5 | 1 | 8 | 213 | 1.55 | 1.7e-10 |
+| 0.5 | 1 | 16 | 212 | 1.55 | 1.8e-10 |
+| 0.5 | 8 | 1 | 256 | 2.28 | 0.0e+00 |
+| 0.5 | 8 | 2 | 233 | 1.34 | 1.3e-10 |
+| 0.5 | 8 | 4 | 238 | 1.39 | 1.3e-10 |
+| 0.5 | 8 | 8 | 213 | 1.46 | 1.7e-10 |
+| 0.5 | 8 | 16 | 212 | 1.54 | 1.8e-10 |
+| 0.25 | 1 | 1 | 311 | 14.97 | 0.0e+00 |
+| 0.25 | 1 | 2 | 388 | 12.17 | 2.8e-10 |
+| 0.25 | 1 | 4 | 383 | 11.56 | 2.9e-10 |
+| 0.25 | 1 | 8 | 390 | 11.74 | 3.1e-10 |
+| 0.25 | 1 | 16 | 383 | 10.81 | 3.3e-10 |
+| 0.25 | 8 | 1 | 311 | 13.99 | 0.0e+00 |
+| 0.25 | 8 | 2 | 388 | 9.84 | 2.8e-10 |
+| 0.25 | 8 | 4 | 383 | 9.40 | 2.9e-10 |
+| 0.25 | 8 | 8 | 390 | 9.96 | 3.1e-10 |
+| 0.25 | 8 | 16 | 383 | 10.01 | 3.3e-10 |
+| 0.2 | 1 | 1 | 356 | 27.55 | 0.0e+00 |
+| 0.2 | 1 | 2 | 407 | 20.48 | 2.2e-10 |
+| 0.2 | 1 | 4 | 410 | 20.34 | 3.0e-10 |
+| 0.2 | 1 | 8 | 416 | 19.86 | 1.5e-10 |
+| 0.2 | 1 | 16 | 435 | 20.29 | 1.3e-10 |
+| 0.2 | 8 | 1 | 356 | 25.89 | 0.0e+00 |
+| 0.2 | 8 | 2 | 407 | 16.45 | 2.2e-10 |
+| 0.2 | 8 | 4 | 410 | 15.76 | 3.0e-10 |
+| 0.2 | 8 | 8 | 416 | 17.01 | 1.5e-10 |
+| 0.2 | 8 | 16 | 435 | 17.79 | 1.3e-10 |
+
+Flux apply, ms per call, against the per-layer NumPy loop it replaced:
+
+| Pitch (mm) | Per-layer NumPy | Batched, 1 thread | Batched, 8 threads | Max relative difference |
+|---:|---:|---:|---:|---|
+| 0.5 | 1.1 | 1.1 | 0.4 | 3.9e-16 |
+| 0.25 | 2.8 | 2.5 | 0.9 | 4.4e-16 |
+| 0.2 | 3.8 | 4.2 | 1.5 | 3.5e-16 |
+
+With the batched FFT and the index scatter alone, the 0.2 mm block solve
+takes 25.9 s at 8 threads against 39.6 s in the table above; four strips take
+it to 15.8 s. Every strip count converges within 4e-10 of the whole block and
+is faster at every pitch and budget; iterations rise by up to 23 % at
+0.25 mm, where the fill saved still pays for them. **Decision:**
+`DEFAULT_NEAR_TILES = 4`, the fastest count on the largest pitch at the
+largest budget (candidates [2, 4, 8, 16]); the batched flux FFT adopted
+(batched FFT within 1e-12 of the per-layer NumPy loop at every budget).
+
 ## What is not done
 
 - The barrel's partial self inductance is taken as a given scalar. Nothing
