@@ -35,6 +35,9 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+import scipy.fft
+
+from electrical.threads import thread_budget
 
 from .sheet_inductance import (
     NEAR_RADIUS_CELLS,
@@ -234,28 +237,6 @@ class SheetInductanceOperator:
             table.nbytes for table in self._kernels_z.values()
         )
 
-    def _convolve(self, spectra: list[np.ndarray], axis: str) -> np.ndarray:
-        rows, cols = self.shape
-        out = np.zeros((len(self.stackup), rows, cols), dtype=np.float64)
-        for target in range(len(self.stackup)):
-            accumulated = np.zeros_like(spectra[0])
-            for source in range(len(self.stackup)):
-                accumulated += self._kernel(axis, target, source) * spectra[source]
-            product = np.fft.irfft2(accumulated, s=self.padded)
-            out[target] = product[:rows, :cols]
-        return out
-
-    def _convolve_z(self, spectra: list[np.ndarray]) -> np.ndarray:
-        rows, cols = self.shape
-        out = np.zeros((len(self.vertical_levels), rows, cols), dtype=np.float64)
-        for target in range(len(self.vertical_levels)):
-            accumulated = np.zeros_like(spectra[0])
-            for source in range(len(self.vertical_levels)):
-                accumulated += self._kernel_z(target, source) * spectra[source]
-            product = np.fft.irfft2(accumulated, s=self.padded)
-            out[target] = product[:rows, :cols]
-        return out
-
     def apply(
         self,
         currents_x: np.ndarray,
@@ -267,39 +248,48 @@ class SheetInductanceOperator:
         Passing ``currents_z`` adds the vertical operator and returns three
         arrays instead of two.  Omitting it returns the two in-plane arrays, as
         it always has; that is correct only where no vertical current flows.
+
+        Every layer of every family is transformed in one batched FFT, and
+        every target's product in one batched inverse, on the thread budget:
+        a one-layer mesh still has its two families and all their rows to
+        share out.
         """
         rows, cols = self.shape
-        expected = (len(self.stackup), rows, cols)
+        layers = len(self.stackup)
+        expected = (layers, rows, cols)
         for name, array in (("currents_x", currents_x), ("currents_y", currents_y)):
             if array.shape != expected:
                 raise ValueError(f"{name} must have shape {expected}, got {array.shape}")
+        levels = 0
+        stacked = [currents_x, currents_y]
+        if currents_z is not None:
+            vertical_expected = (len(self.vertical_levels), rows, cols)
+            if currents_z.shape != vertical_expected:
+                raise ValueError(
+                    f"currents_z must have shape {vertical_expected}, "
+                    f"got {currents_z.shape}"
+                )
+            levels = len(self.vertical_levels)
+            if levels:
+                stacked.append(currents_z)
 
-        padded_x = [
-            np.fft.rfft2(currents_x[layer], s=self.padded)
-            for layer in range(len(self.stackup))
-        ]
-        padded_y = [
-            np.fft.rfft2(currents_y[layer], s=self.padded)
-            for layer in range(len(self.stackup))
-        ]
-        flux_x = self._convolve(padded_x, "x")
-        flux_y = self._convolve(padded_y, "y")
+        workers = thread_budget()
+        spectra = scipy.fft.rfft2(np.concatenate(stacked, axis=0), s=self.padded, workers=workers)
+        accumulated = np.zeros_like(spectra)
+        for target in range(layers):
+            for source in range(layers):
+                accumulated[target] += self._kernel("x", target, source) * spectra[source]
+                accumulated[layers + target] += self._kernel("y", target, source) * spectra[layers + source]
+        for target in range(levels):
+            for source in range(levels):
+                accumulated[2 * layers + target] += self._kernel_z(target, source) * spectra[2 * layers + source]
+        flux = scipy.fft.irfft2(accumulated, s=self.padded, workers=workers)[:, :rows, :cols]
+        flux_x, flux_y = flux[:layers], flux[layers : 2 * layers]
         if currents_z is None:
             return flux_x, flux_y
-
-        vertical_expected = (len(self.vertical_levels), rows, cols)
-        if currents_z.shape != vertical_expected:
-            raise ValueError(
-                f"currents_z must have shape {vertical_expected}, "
-                f"got {currents_z.shape}"
-            )
-        if not self.vertical_levels:
+        if not levels:
             return flux_x, flux_y, np.zeros_like(currents_z)
-        padded_z = [
-            np.fft.rfft2(currents_z[level], s=self.padded)
-            for level in range(len(self.vertical_levels))
-        ]
-        return flux_x, flux_y, self._convolve_z(padded_z)
+        return flux_x, flux_y, flux[2 * layers :]
 
     def near_inductance(self, mesh: Any, radius_cells: int = 1) -> Any:
         """Exact partial inductance between branches within ``radius_cells`` of each other, in mesh branch order.
