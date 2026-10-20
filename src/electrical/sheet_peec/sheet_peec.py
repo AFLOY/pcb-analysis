@@ -891,7 +891,7 @@ def _solve_ac(
                     frequency_hz=frequency_hz,
                     iterations=iterations[column],
                     residual=float(residuals[column]),
-                    converged=infos[column] == 0 and residuals[column] < 1e-6,
+                    converged=bool(infos[column] == 0 and residuals[column] < 1e-6),
                     grounded_node=grounded,
                     undriven_nodes=dropped,
                 )

@@ -334,7 +334,7 @@ class AlternatingCurrentTests(unittest.TestCase):
                             self.mesh, self.operator, terminals, frequency_hz=frequency,
                             preconditioner=preconditioner, restart=7,
                         )
-                        self.assertTrue(solution.converged)
+                        self.assertIs(solution.converged, True)  # a Python bool: results go to JSON
                         self.assertEqual(solution.iterations, alone.iterations)
                         self.assertEqual(solution.branch_current.tobytes(), alone.branch_current.tobytes())
                         self.assertEqual(solution.node_voltage.tobytes(), alone.node_voltage.tobytes())
