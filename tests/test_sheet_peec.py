@@ -270,6 +270,41 @@ class AlternatingCurrentTests(unittest.TestCase):
         self.assertEqual(choose_preconditioner(AUTO_BLOCK_FROM_UNKNOWNS - 1), "near")
         self.assertEqual(choose_preconditioner(AUTO_BLOCK_FROM_UNKNOWNS), "block")
 
+    def test_the_near_block_in_strips_reaches_the_same_solution(self):
+        # Dropping the couplings between strips weakens the preconditioner,
+        # not the system: GMRES reaches the whole-block solution.
+        whole = solve_sheet_case(
+            self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="block"
+        )
+        scale = float(np.abs(whole.branch_current).max())
+        for tiles in (2, 3, 7):
+            strips = solve_sheet_case(
+                self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="block",
+                near_tiles=tiles,
+            )
+            self.assertTrue(strips.converged)
+            self.assertLess(float(np.abs(strips.branch_current - whole.branch_current).max()) / scale, 1e-7)
+            self.assertLessEqual(strips.iterations, 3 * max(whole.iterations, 1))
+        one = solve_sheet_case(
+            self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="block", near_tiles=1
+        )
+        self.assertEqual(one.branch_current.tobytes(), whole.branch_current.tobytes())
+        with self.assertRaises(ValueError):
+            solve_sheet_case(self.mesh, self.operator, self.terminals, frequency_hz=3e5, near_tiles=0)
+
+    def test_the_near_strips_give_the_same_bits_at_every_thread_budget(self):
+        from electrical.threads import thread_budget_scope
+
+        results = []
+        for threads in (1, 2, 4):
+            with thread_budget_scope(threads):
+                solution = solve_sheet_case(
+                    self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="block",
+                    near_tiles=3,
+                )
+            results.append(solution.branch_current.tobytes() + solution.node_voltage.tobytes())
+        self.assertTrue(all(result == results[0] for result in results))
+
     def test_the_two_span_definitions_are_named(self):
         direct = solve_sheet_case(
             self.mesh, self.operator, self.terminals, frequency_hz=0.0

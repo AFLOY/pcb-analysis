@@ -31,12 +31,14 @@ from any question about the inductance.
 from __future__ import annotations
 
 import math
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
+from electrical.threads import thread_budget
 import scipy.sparse as sp
 import scipy.sparse.csgraph as csgraph
 import scipy.sparse.linalg as spla
@@ -505,6 +507,7 @@ def solve_sheet_case(
     max_iterations: int = 400,
     restart: int = 60,
     preconditioner: str = "auto",
+    near_tiles: int | None = None,
 ) -> SheetSolution:
     """Solve one excitation of the mesh.
 
@@ -526,9 +529,18 @@ def solve_sheet_case(
     ``"diagonal"`` keeps only the self terms, which is exactly solvable
     through a Schur complement but leaves every mutual term to the Krylov
     iterations.
+
+    ``near_tiles`` (``block`` only) factors ``R + j omega L_near`` in that many
+    strips of the node order, dropping the couplings between strips: a weaker
+    preconditioner of the same system, whose strips factor with less fill and
+    are factored and solved side by side on the thread budget.  ``None`` takes
+    :data:`DEFAULT_NEAR_TILES`; ``1`` is the whole near block.
     """
     if preconditioner not in ("auto", "near", "block", "diagonal"):
         raise ValueError("preconditioner must be 'auto', 'near', 'block' or 'diagonal'")
+    near_tiles = DEFAULT_NEAR_TILES if near_tiles is None else int(near_tiles)
+    if near_tiles < 1:
+        raise ValueError("near_tiles must be at least 1")
     if operator.shape != mesh.shape:
         raise ValueError("the operator and the mesh must share a shape")
     if len(operator.stackup) != len(mesh.stackup):
@@ -673,50 +685,60 @@ def solve_sheet_case(
 
     if preconditioner == "auto":
         preconditioner = choose_preconditioner(size)
-    precondition = _build_preconditioner(
-        mesh, operator, preconditioner, omega, resistance, active_branches, reduced, branches
-    )
+    # The near block's strips are factored and solved on this pool; it lives
+    # for the solve and its width is the budget, capped by the strips.
+    width = min(thread_budget(), near_tiles) if preconditioner == "block" else 1
+    pool = ThreadPoolExecutor(max_workers=width) if width > 1 else None
+    try:
+        precondition = _build_preconditioner(
+            mesh, operator, preconditioner, omega, resistance, active_branches, reduced, branches,
+            near_strips=_near_strips(active_incidence, near_tiles) if preconditioner == "block" else None,
+            pool=pool,
+        )
 
-    right_hand_side = np.concatenate(
-        [np.zeros(branches, dtype=np.complex128), injected[keep]]
-    )
-    system = spla.LinearOperator((size, size), matvec=saddle, dtype=np.complex128)
-    preconditioner = spla.LinearOperator(
-        (size, size), matvec=precondition, dtype=np.complex128
-    )
-    counter = {"iterations": 0}
+        right_hand_side = np.concatenate(
+            [np.zeros(branches, dtype=np.complex128), injected[keep]]
+        )
+        system = spla.LinearOperator((size, size), matvec=saddle, dtype=np.complex128)
+        preconditioner = spla.LinearOperator(
+            (size, size), matvec=precondition, dtype=np.complex128
+        )
+        counter = {"iterations": 0}
 
-    def count(_value: np.ndarray) -> None:
-        counter["iterations"] += 1
+        def count(_value: np.ndarray) -> None:
+            counter["iterations"] += 1
 
-    result, info = spla.gmres(
-        system,
-        right_hand_side,
-        M=preconditioner,
-        rtol=tolerance,
-        restart=restart,
-        maxiter=max_iterations,
-        callback=count,
-        callback_type="pr_norm",
-    )
-    current = np.zeros(mesh.branch_count, dtype=np.complex128)
-    current[active_branches] = result[:branches]
-    voltage = np.zeros(mesh.node_count, dtype=np.complex128)
-    voltage[keep] = result[branches:]
-    residual = float(
-        np.linalg.norm(saddle(result) - right_hand_side)
-        / max(np.linalg.norm(right_hand_side), 1e-30)
-    )
-    return SheetSolution(
-        node_voltage=voltage,
-        branch_current=current,
-        frequency_hz=frequency_hz,
-        iterations=counter["iterations"],
-        residual=residual,
-        converged=info == 0 and residual < 1e-6,
-        grounded_node=grounded,
-        undriven_nodes=dropped,
-    )
+        result, info = spla.gmres(
+            system,
+            right_hand_side,
+            M=preconditioner,
+            rtol=tolerance,
+            restart=restart,
+            maxiter=max_iterations,
+            callback=count,
+            callback_type="pr_norm",
+        )
+        current = np.zeros(mesh.branch_count, dtype=np.complex128)
+        current[active_branches] = result[:branches]
+        voltage = np.zeros(mesh.node_count, dtype=np.complex128)
+        voltage[keep] = result[branches:]
+        residual = float(
+            np.linalg.norm(saddle(result) - right_hand_side)
+            / max(np.linalg.norm(right_hand_side), 1e-30)
+        )
+        return SheetSolution(
+            node_voltage=voltage,
+            branch_current=current,
+            frequency_hz=frequency_hz,
+            iterations=counter["iterations"],
+            residual=residual,
+            converged=info == 0 and residual < 1e-6,
+            grounded_node=grounded,
+            undriven_nodes=dropped,
+        )
+    finally:
+        if pool is not None:
+            pool.shutdown()
 
 
 def _near_impedance(
@@ -738,11 +760,68 @@ def _near_impedance(
 # 0.3 GB (docs/SHEET_PRECONDITIONER_RESULTS.json).
 AUTO_BLOCK_FROM_UNKNOWNS = 60_000
 
+# Strips the ``block`` preconditioner factors the near-field impedance in;
+# 1 factors it whole.
+DEFAULT_NEAR_TILES = 1
+
 
 def choose_preconditioner(unknowns: int) -> str:
     """``near`` for a small saddle-point system, ``block`` for a large one."""
 
     return "block" if unknowns >= AUTO_BLOCK_FROM_UNKNOWNS else "near"
+
+
+def _near_strips(active_incidence: sp.csr_matrix, tiles: int) -> list[np.ndarray] | None:
+    """The active branches in ``tiles`` strips of equal size, in the order of their left node.
+
+    The mesh numbers its nodes in raster order (layer, row, column), so a strip
+    is a band of rows.  ``None`` for one strip: the whole near block.
+    """
+
+    branches = active_incidence.shape[0]
+    if tiles <= 1 or branches == 0:
+        return None
+    entries = active_incidence.tocoo()
+    left = np.empty(branches, dtype=np.int64)
+    leaves = entries.data > 0
+    left[entries.row[leaves]] = entries.col[leaves]
+    order = np.argsort(left, kind="stable")
+    tiles = min(tiles, branches)
+    bounds = (np.arange(tiles + 1) * branches) // tiles
+    return [order[bounds[k] : bounds[k + 1]] for k in range(tiles)]
+
+
+def _factor_near_strips(
+    impedance: sp.csr_matrix, strips: list[np.ndarray], pool: ThreadPoolExecutor | None
+) -> Callable[[np.ndarray], np.ndarray]:
+    """``Z_near`` with the couplings between strips dropped, factored strip by strip.
+
+    A weaker preconditioner than the whole near block, but the strips factor
+    with far less fill than the whole and are independent, so they are
+    factored and solved side by side on ``pool``; the result does not depend
+    on the pool's width.
+    """
+
+    def factor(members: np.ndarray) -> Any:
+        return spla.splu(impedance[members][:, members].tocsc(), permc_spec="MMD_AT_PLUS_A")
+
+    factors = list(pool.map(factor, strips)) if pool is not None else [factor(m) for m in strips]
+
+    def solve(vector: np.ndarray) -> np.ndarray:
+        out = np.empty_like(vector)
+
+        def strip(index: int) -> None:
+            members = strips[index]
+            out[members] = factors[index].solve(vector[members])
+
+        if pool is not None:
+            list(pool.map(strip, range(len(strips))))
+        else:
+            for index in range(len(strips)):
+                strip(index)
+        return out
+
+    return solve
 
 
 def _build_preconditioner(
@@ -754,6 +833,8 @@ def _build_preconditioner(
     active_branches: np.ndarray,
     reduced: sp.csr_matrix,
     branches: int,
+    near_strips: list[np.ndarray] | None = None,
+    pool: ThreadPoolExecutor | None = None,
 ) -> Callable[[np.ndarray], np.ndarray]:
     """The approximate inverse of the saddle-point matrix used by the inner GMRES."""
 
@@ -770,8 +851,11 @@ def _build_preconditioner(
         # A^T diag(Z)^-1 A, the nodal admittance of the diagonal variant.
         # The saddle LU needs about 13x the memory of these two factors and
         # is what runs a board at the acceptance grid out of memory.
-        impedance = _near_impedance(mesh, operator, omega, resistance, active_branches).tocsc()
-        factored_z = spla.splu(impedance, permc_spec="MMD_AT_PLUS_A")
+        impedance = _near_impedance(mesh, operator, omega, resistance, active_branches)
+        if near_strips is None:
+            solve_z = spla.splu(impedance.tocsc(), permc_spec="MMD_AT_PLUS_A").solve
+        else:
+            solve_z = _factor_near_strips(impedance, near_strips, pool)
         full_diagonal = resistance + 1j * omega * np.concatenate(
             [_inline_self_inductance(mesh, operator), _vertical_self_inductance(mesh, operator)]
         )
@@ -784,9 +868,9 @@ def _build_preconditioner(
             rhs_node = vector[branches:]
             # [[Z, -A], [A^T, 0]] [x; y] = [r1; r2]:
             # x = Z^-1 (r1 + A y),  A^T Z^-1 A y = r2 - A^T Z^-1 r1.
-            z = factored_z.solve(rhs_current)
+            z = solve_z(rhs_current)
             node = factored_s.solve(rhs_node - reduced.T @ z)
-            current = factored_z.solve(rhs_current + reduced @ node)
+            current = solve_z(rhs_current + reduced @ node)
             return np.concatenate([current, node])
 
         return precondition_block
