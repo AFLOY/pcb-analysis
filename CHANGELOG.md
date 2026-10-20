@@ -19,10 +19,12 @@ Versions before 0.7.0 were not tagged; see the Git history.
   control. `available_threads()` (the physical cores of the process's
   affinity mask; hyper-threads are not counted), `thread_budget()` (default
   `available_threads()`), `set_thread_budget(n | None)` (also limits the
-  BLAS/OpenMP pools of NumPy and SciPy to the budget through `threadpoolctl`,
-  a new dependency; `None` sets the default budget and limits the pools to
-  it) and `thread_budget_scope(n)`; all four
-  are exported from `electrical`. Every fused C++ kernel (layered DC and
+  OpenMP pools of NumPy and SciPy to the budget through `threadpoolctl`, a
+  new dependency; `None` sets the default budget) and
+  `thread_budget_scope(n)`; all four are exported from `electrical`. BLAS
+  runs on one thread, always: importing `electrical` sets
+  `OPENBLAS_NUM_THREADS` and its MKL, BLIS and Accelerate counterparts to 1
+  and limits the BLAS libraries already loaded. Every fused C++ kernel (layered DC and
   scalar Maxwell Q1, thermal hexahedral Q1, dipole fields, point-in-solid
   tests, sheet pFFT near-field products) runs an OpenMP team of the budget,
   passed explicitly, so `OMP_NUM_THREADS` no longer sets the pFFT kernel's

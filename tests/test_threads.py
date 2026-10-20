@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -46,13 +48,37 @@ def test_default_budget_is_the_physical_cores() -> None:
     assert thread_budget() == available_threads()
 
 
-def test_the_default_budget_also_limits_the_blas_pools() -> None:
+def _openmp_threads() -> list[int]:
+    return [pool["num_threads"] for pool in threadpool_info() if pool["user_api"] == "openmp"]
+
+
+def test_blas_stays_on_one_thread_at_every_budget() -> None:
     np.dot(np.ones((4, 4)), np.ones((4, 4)))
     pools = _blas_threads()
     if not pools:
         pytest.skip("no BLAS library visible to threadpoolctl")
+    assert pools == [1] * len(pools)
+    for budget in (1, 3, available_threads()):
+        set_thread_budget(budget)
+        assert _blas_threads() == [1] * len(pools)
+        assert all(threads == budget for threads in _openmp_threads())
+    with thread_budget_scope(2):
+        assert _blas_threads() == [1] * len(pools)
     set_thread_budget(None)
-    assert _blas_threads() == [available_threads()] * len(pools)
+    assert _blas_threads() == [1] * len(pools)
+
+
+def test_a_blas_library_loaded_later_and_a_child_process_start_on_one_thread() -> None:
+    # The environment pins what loads after electrical, and what a spawned
+    # worker loads; the parent's setting of these variables is overridden.
+    code = (
+        "import electrical, scipy.linalg, numpy as np; np.dot(np.ones((4,4)), np.ones((4,4)));"
+        "from threadpoolctl import threadpool_info;"
+        "print(sorted({p['num_threads'] for p in threadpool_info() if p['user_api'] == 'blas'}))"
+    )
+    env = {**os.environ, "OPENBLAS_NUM_THREADS": "8"}
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
+    assert out.stdout.strip() in ("[1]", "[]")
 
 
 def test_the_package_exports_the_budget_and_no_other_thread_control() -> None:
@@ -107,22 +133,6 @@ def test_non_integer_budgets_are_rejected(value: object) -> None:
     with pytest.raises(TypeError):
         set_thread_budget(value)  # type: ignore[arg-type]
     assert thread_budget() == available_threads()
-
-
-def test_budget_limits_the_blas_pools_and_restores_them() -> None:
-    np.dot(np.ones((4, 4)), np.ones((4, 4)))  # make sure NumPy's BLAS is loaded
-    original = _blas_threads()
-    if not original:
-        pytest.skip("no BLAS library visible to threadpoolctl")
-    set_thread_budget(1)
-    assert _blas_threads() == [1] * len(original)
-    set_thread_budget(2)  # a new call replaces the limit
-    assert _blas_threads() == [2] * len(original)
-    set_thread_budget(None)
-    assert _blas_threads() == original
-    with thread_budget_scope(1):
-        assert _blas_threads() == [1] * len(original)
-    assert _blas_threads() == original
 
 
 def test_pypeec_fft_workers_follow_the_budget() -> None:

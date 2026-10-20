@@ -8,8 +8,16 @@ with :func:`set_thread_budget` (or for a block with
   Q1, thermal hexahedral Q1, dipole fields, point-in-solid tests, sheet pFFT
   near-field corrections) is the budget when the kernel runs alone;
 * PyPEEC's SciPy FFT workers are the budget;
-* the BLAS and OpenMP pools of NumPy and SciPy are limited to the budget
-  (through :mod:`threadpoolctl`) while an explicit budget is set.
+* the OpenMP pools of NumPy and SciPy are limited to the budget (through
+  :mod:`threadpoolctl`).
+
+BLAS is not one of those paths.  The BLAS pools of NumPy and SciPy run on one
+thread, always: importing :mod:`electrical` sets ``OPENBLAS_NUM_THREADS`` and
+its MKL, BLIS and Accelerate counterparts to 1 for the libraries loaded later
+(and for the processes this one spawns), and limits the BLAS libraries already
+loaded to one thread.  The solves here call BLAS for vector work too small to
+share, and threaded BLAS kept every core spinning for no gain -- at a budget
+of 8 it froze the host.
 
 Where pcb-analysis nests parallelism (the thread pool over the unit solves
 of an N-port basis, each solve running an OpenMP team) it splits the budget
@@ -39,6 +47,15 @@ __all__ = [
     "thread_budget",
     "thread_budget_scope",
 ]
+
+# Read by a BLAS library when it loads; a library loaded before this module is
+# limited through threadpoolctl.
+_SINGLE_THREAD_BLAS_ENVIRONMENT = (
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "BLIS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+)
 
 _lock = threading.RLock()
 _budget: int | None = None
@@ -98,26 +115,31 @@ def set_thread_budget(threads: int | None) -> None:
     """Set the total thread count of pcb-analysis for the whole process.
 
     ``threads`` must be at least 1; ``None`` sets the default
-    (:func:`available_threads`, the physical cores).  Either way the BLAS and
-    OpenMP pools of the NumPy and SciPy libraries loaded so far are limited
-    to the budget, so the application's total is the budget whatever library
-    a solve happens to use; a later call replaces the limit.  An application
-    that never calls this leaves those pools at their own defaults (usually
-    every logical CPU), so call it once at start-up.
+    (:func:`available_threads`, the physical cores).  Either way the OpenMP
+    pools of the NumPy and SciPy libraries loaded so far are limited to the
+    budget and their BLAS pools stay at one thread; a later call replaces the
+    limit.
     """
 
-    global _budget, _pool_limit
+    global _budget
     value = _validated(threads)
+    with _lock:
+        _budget = value
+        _apply_pool_limits()
+
+
+def _apply_pool_limits() -> None:
+    """BLAS pools to one thread, OpenMP pools to the budget, for the libraries loaded now."""
+
+    global _pool_limit
     with _lock:
         if _pool_limit is not None:
             _pool_limit.restore_original_limits()
             _pool_limit = None
-        _budget = value
         from threadpoolctl import threadpool_limits
 
-        _pool_limit = threadpool_limits(
-            limits=value if value is not None else available_threads()
-        )
+        budget = _budget if _budget is not None else available_threads()
+        _pool_limit = threadpool_limits(limits={"blas": 1, "openmp": budget})
 
 
 @contextmanager
@@ -139,3 +161,12 @@ def thread_budget_scope(threads: int) -> Iterator[int]:
         yield value
     finally:
         set_thread_budget(previous)
+
+
+def _pin_blas() -> None:
+    for name in _SINGLE_THREAD_BLAS_ENVIRONMENT:
+        os.environ[name] = "1"
+    _apply_pool_limits()
+
+
+_pin_blas()

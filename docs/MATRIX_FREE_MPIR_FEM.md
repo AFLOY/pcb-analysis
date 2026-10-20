@@ -259,9 +259,12 @@ The only threading control is the process-wide thread budget of
 a block; `None` restores the default, `available_threads()`, the CPUs of the
 process's affinity mask). No solver takes a thread argument and no environment
 variable sets a thread count. Every fused C++ kernel (`native_q1`,
-`native_dc`) runs an OpenMP team of the budget when it runs alone; an
-explicit budget also limits the BLAS/OpenMP pools of NumPy and SciPy through
-`threadpoolctl`. Where pcb-analysis nests parallelism, in `dc_port_basis`, it
+`native_dc`) runs an OpenMP team of the budget when it runs alone; the
+budget also limits the OpenMP pools of NumPy and SciPy through
+`threadpoolctl`. BLAS is held at one thread whatever the budget: importing
+`electrical` sets `OPENBLAS_NUM_THREADS` (and the MKL, BLIS and Accelerate
+equivalents) to 1 and limits the BLAS libraries already loaded, because
+threaded BLAS made these solves no faster and kept every core spinning. Where pcb-analysis nests parallelism, in `dc_port_basis`, it
 splits the budget itself so that pool width × team stays inside it. CUDA
 paths do not read the budget.
 
