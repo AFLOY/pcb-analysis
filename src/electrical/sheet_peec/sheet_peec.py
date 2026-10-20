@@ -1131,15 +1131,17 @@ def _factor_near_strips(
     """``Z_near`` with the couplings between strips dropped, factored strip by strip.
 
     A weaker preconditioner than the whole near block, but the strips factor
-    with far less fill than the whole and are independent, so they are
-    factored and solved side by side on ``pool``; the result does not depend
-    on the pool's width.
+    with far less fill than the whole and are independent, so they are solved
+    side by side on ``pool``; the result does not depend on the pool's width.
+
+    The strips are factored on the calling thread.  A SciPy ``splu`` run on a
+    worker thread left its memory behind when its factors were freed: the
+    preconditioner benchmark's strips grew a process by 0.46 GB per two solves
+    at a budget of 8 and not at all when factored here, and the factorisation
+    is a small part of a solve.
     """
 
-    def factor(members: np.ndarray) -> Any:
-        return spla.splu(impedance[members][:, members].tocsc(), permc_spec="MMD_AT_PLUS_A")
-
-    factors = list(pool.map(factor, strips)) if pool is not None else [factor(m) for m in strips]
+    factors = [spla.splu(impedance[m][:, m].tocsc(), permc_spec="MMD_AT_PLUS_A") for m in strips]
 
     def solve(vector: np.ndarray) -> np.ndarray:
         out = np.empty_like(vector)

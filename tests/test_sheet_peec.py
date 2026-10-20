@@ -299,6 +299,31 @@ class AlternatingCurrentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             solve_sheet_case(self.mesh, self.operator, self.terminals, frequency_hz=3e5, near_tiles=0)
 
+    def test_the_near_strips_are_factored_on_the_calling_thread(self):
+        # SciPy's splu run on a worker thread kept its memory after its factors
+        # were freed; the strips are factored where the solve was called.
+        import threading
+        import unittest.mock
+
+        import scipy.sparse.linalg as spla
+
+        from electrical.threads import thread_budget_scope
+
+        calling = threading.get_ident()
+        seen = []
+        original = spla.splu
+
+        def recording(*args, **kwargs):
+            seen.append(threading.get_ident())
+            return original(*args, **kwargs)
+
+        with thread_budget_scope(4), unittest.mock.patch.object(spla, "splu", recording):
+            solve_sheet_case(
+                self.mesh, self.operator, self.terminals, frequency_hz=3e5, preconditioner="block", near_tiles=3
+            )
+        self.assertTrue(seen)
+        self.assertEqual(set(seen), {calling})
+
     def test_the_near_strips_give_the_same_bits_at_every_thread_budget(self):
         from electrical.threads import thread_budget_scope
 
