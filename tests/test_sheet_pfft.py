@@ -295,3 +295,28 @@ def test_near_field_preconditioner_cuts_iterations_and_keeps_the_solution(kind) 
     np.testing.assert_allclose(near_solution.branch_current, diagonal.branch_current, atol=1e-7 * scale)
     with pytest.raises(ValueError, match="preconditioner"):
         solve_sheet_case(mesh, operator, terminals, frequency_hz=frequency, preconditioner="ilu")
+
+
+def test_excitations_on_the_pfft_operator_solve_together_to_the_same_bits() -> None:
+    # The pFFT operator has no batched apply; solve_sheet_cases applies it
+    # one excitation at a time inside the lockstep and still gets the bits
+    # each excitation gets alone.
+    from electrical.sheet_peec.sheet_peec import solve_sheet_cases
+
+    xe = graded_edges(0.0, 3e-3, coarse_pitch_m=0.5e-3, fine_pitch_m=0.1e-3, refine_m=[(1.0e-3, 1.4e-3)], margin_m=0.2e-3)
+    ye = graded_edges(0.0, 2e-3, coarse_pitch_m=0.4e-3, fine_pitch_m=0.1e-3, refine_m=[(0.8e-3, 1.1e-3)], margin_m=0.2e-3)
+    grid = TensorGrid(xe, ye)
+    rows, cols = grid.shape
+    vias = (ViaBranch(1, 2, 0, 1, 1e-3), ViaBranch(rows - 2, cols - 3, 0, 1, 1e-3))
+    mesh = SheetMesh((rows, cols), None, STACKUP, np.ones((2, rows, cols), bool), vias=vias, grid=grid)
+    operator = PfftSheetInductanceOperator(mesh, order=3, near_radius_cells=4)
+    sets = [
+        [Terminal("in", 0, tuple((r, 0) for r in range(rows)), 1.0),
+         Terminal("out", 0, tuple((r, cols - 1) for r in range(rows)), -1.0)],
+        [Terminal("in", 0, ((0, 0),), 0.5), Terminal("out", 1, ((rows - 1, cols - 1),), -0.5)],
+    ]
+    together = solve_sheet_cases(mesh, operator, sets, frequency_hz=1e6, tolerance=1e-9, preconditioner="near")
+    for terminals, solution in zip(sets, together):
+        alone = solve_sheet_case(mesh, operator, terminals, frequency_hz=1e6, tolerance=1e-9, preconditioner="near")
+        assert solution.converged and solution.iterations == alone.iterations
+        assert solution.node_voltage.tobytes() == alone.node_voltage.tobytes()

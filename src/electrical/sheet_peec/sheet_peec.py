@@ -42,6 +42,7 @@ from electrical.threads import thread_budget
 import scipy.sparse as sp
 import scipy.sparse.csgraph as csgraph
 import scipy.sparse.linalg as spla
+from scipy.linalg import get_lapack_funcs
 
 from .sheet_operator import (
     COPPER_RESISTIVITY_OHM_M,
@@ -536,6 +537,36 @@ def solve_sheet_case(
     are factored and solved side by side on the thread budget.  ``None`` takes
     :data:`DEFAULT_NEAR_TILES`; ``1`` is the whole near block.
     """
+    return solve_sheet_cases(
+        mesh, operator, [terminals], frequency_hz=frequency_hz, tolerance=tolerance,
+        max_iterations=max_iterations, restart=restart, preconditioner=preconditioner, near_tiles=near_tiles,
+    )[0]
+
+
+def solve_sheet_cases(
+    mesh: SheetMesh,
+    operator: SheetInductanceOperator,
+    terminal_sets: Sequence[Sequence[Terminal]],
+    *,
+    frequency_hz: float = 0.0,
+    tolerance: float = 1e-10,
+    max_iterations: int = 400,
+    restart: int = 60,
+    preconditioner: str = "auto",
+    near_tiles: int | None = None,
+) -> list[SheetSolution]:
+    """Solve several excitations of one mesh, in the order given.
+
+    Each set of terminals is the excitation :func:`solve_sheet_case` takes,
+    with the same options.  Excitations that drive the same components of the
+    conductor share the reduced saddle-point system and its preconditioner,
+    and their Krylov solves run in lockstep: every step applies the operator
+    and the preconditioner to all of them at once, so the factors and the
+    transforms are read once per step for the whole group instead of once
+    per excitation.  Each lockstep solve is the restarted GMRES that
+    :func:`solve_sheet_case` runs, step for step; an excitation alone in its
+    group is solved exactly as :func:`solve_sheet_case` solves it.
+    """
     if preconditioner not in ("auto", "near", "block", "diagonal"):
         raise ValueError("preconditioner must be 'auto', 'near', 'block' or 'diagonal'")
     near_tiles = DEFAULT_NEAR_TILES if near_tiles is None else int(near_tiles)
@@ -551,10 +582,43 @@ def solve_sheet_case(
 
     incidence = mesh.incidence()
     resistance = mesh.resistances()
-    injected = _source_vector(mesh, terminals)
-    if frequency_hz == 0.0 and float(np.max(np.abs(injected.imag))) > 1e-15:
-        raise ValueError("DC terminal currents must be real")
+    cases = []
+    for terminals in terminal_sets:
+        injected = _source_vector(mesh, terminals)
+        if frequency_hz == 0.0 and float(np.max(np.abs(injected.imag))) > 1e-15:
+            raise ValueError("DC terminal currents must be real")
+        cases.append((injected, _reduce(mesh, incidence, injected)))
+    if frequency_hz == 0.0:
+        return [_solve_dc(mesh, resistance, reduction, injected) for injected, reduction in cases]
 
+    groups: dict[tuple[int, ...], list[int]] = {}
+    for index, (_, reduction) in enumerate(cases):
+        groups.setdefault(reduction.carried, []).append(index)
+    solutions: list[SheetSolution | None] = [None] * len(cases)
+    for members in groups.values():
+        solved = _solve_ac(
+            mesh, operator, resistance, cases[members[0]][1], [cases[k][0] for k in members],
+            frequency_hz, tolerance, max_iterations, restart, preconditioner, near_tiles,
+        )
+        for index, solution in zip(members, solved):
+            solutions[index] = solution
+    return [solution for solution in solutions if solution is not None]
+
+
+@dataclass(frozen=True)
+class _Reduction:
+    """The driven part of the conductor for one excitation: what the solve keeps."""
+
+    carried: tuple[int, ...]
+    keep: np.ndarray
+    grounded: int
+    dropped: int
+    active_branches: np.ndarray
+    active_incidence: sp.csr_matrix
+    reduced: sp.csr_matrix
+
+
+def _reduce(mesh: SheetMesh, incidence: sp.csr_matrix, injected: np.ndarray) -> _Reduction:
     # Potential is defined up to a constant per connected component, so each
     # component needs its own gauge.  Grounding one node and hoping the
     # conductor is one piece made the system exactly singular the moment it was
@@ -598,35 +662,67 @@ def solve_sheet_case(
     ).reshape(-1)
     active_branches = driven_endpoint_count == 2
     active_incidence = incidence[active_branches]
-    active_resistance = resistance[active_branches]
     reduced = active_incidence[:, keep]
 
-    if frequency_hz == 0.0:
-        admittance = sp.diags(1.0 / active_resistance)
-        system = (reduced.T @ admittance @ reduced).tocsc()
-        solution = spla.spsolve(system, injected[keep].real)
-        voltage = np.zeros(mesh.node_count, dtype=np.complex128)
-        voltage[keep] = solution
-        active_current = admittance @ (reduced @ solution)
-        current = np.zeros(mesh.branch_count, dtype=np.complex128)
-        current[active_branches] = active_current
-        residual = float(
-            np.linalg.norm(
-                reduced.T @ active_current - injected[keep].real
-            )
-            / max(np.linalg.norm(injected[keep].real), 1e-30)
-        )
-        return SheetSolution(
-            node_voltage=voltage,
-            branch_current=current,
-            frequency_hz=0.0,
-            iterations=1,
-            residual=residual,
-            converged=residual < 1e-8,
-            grounded_node=grounded,
-            undriven_nodes=dropped,
-        )
+    return _Reduction(
+        carried=tuple(sorted(carried)),
+        keep=keep,
+        grounded=grounded,
+        dropped=dropped,
+        active_branches=active_branches,
+        active_incidence=active_incidence,
+        reduced=reduced,
+    )
 
+
+def _solve_dc(mesh: SheetMesh, resistance: np.ndarray, reduction: _Reduction, injected: np.ndarray) -> SheetSolution:
+    keep, grounded, dropped = reduction.keep, reduction.grounded, reduction.dropped
+    active_branches, reduced = reduction.active_branches, reduction.reduced
+    active_resistance = resistance[active_branches]
+    admittance = sp.diags(1.0 / active_resistance)
+    system = (reduced.T @ admittance @ reduced).tocsc()
+    solution = spla.spsolve(system, injected[keep].real)
+    voltage = np.zeros(mesh.node_count, dtype=np.complex128)
+    voltage[keep] = solution
+    active_current = admittance @ (reduced @ solution)
+    current = np.zeros(mesh.branch_count, dtype=np.complex128)
+    current[active_branches] = active_current
+    residual = float(
+        np.linalg.norm(
+            reduced.T @ active_current - injected[keep].real
+        )
+        / max(np.linalg.norm(injected[keep].real), 1e-30)
+    )
+    return SheetSolution(
+        node_voltage=voltage,
+        branch_current=current,
+        frequency_hz=0.0,
+        iterations=1,
+        residual=residual,
+        converged=residual < 1e-8,
+        grounded_node=grounded,
+        undriven_nodes=dropped,
+    )
+
+
+def _solve_ac(
+    mesh: SheetMesh,
+    operator: Any,
+    resistance: np.ndarray,
+    reduction: _Reduction,
+    injected_list: list[np.ndarray],
+    frequency_hz: float,
+    tolerance: float,
+    max_iterations: int,
+    restart: int,
+    preconditioner: str,
+    near_tiles: int,
+) -> list[SheetSolution]:
+    keep, grounded, dropped = reduction.keep, reduction.grounded, reduction.dropped
+    active_branches, active_incidence, reduced = (
+        reduction.active_branches, reduction.active_incidence, reduction.reduced,
+    )
+    active_resistance = resistance[active_branches]
     omega = 2.0 * math.pi * frequency_hz
     # The vertical branches' own inductance is an operator, not a per-branch
     # scalar.  They are parallel to one another so they couple, and their mutual
@@ -667,6 +763,31 @@ def solve_sheet_case(
             flux = flux + 1j * _flux(currents.imag)
         return active_resistance * currents + 1j * omega * flux
 
+    def impedance_block(currents: np.ndarray) -> np.ndarray:
+        """:func:`impedance` of every column, the real and imaginary parts of all in one operator call."""
+        parts = [currents.real[:, k] for k in range(currents.shape[1])] + [
+            currents.imag[:, k] for k in range(currents.shape[1])
+        ]
+        grids = []
+        for part in parts:
+            full_currents = np.zeros(mesh.branch_count, dtype=np.float64)
+            full_currents[active_branches] = part
+            grid_x, grid_y = mesh.scatter(full_currents)
+            grids.append((grid_x, grid_y, mesh.scatter_vertical(full_currents) if has_vertical else None))
+        if hasattr(operator, "apply_many"):
+            applied = operator.apply_many(grids)
+        else:
+            applied = [operator.apply(*grid) if grid[2] is not None else operator.apply(grid[0], grid[1]) for grid in grids]
+        fluxes = []
+        for result in applied:
+            flux = mesh.gather(result[0], result[1])
+            if len(result) == 3:
+                mesh.gather_vertical(result[2], flux)
+            fluxes.append(flux[active_branches])
+        count = currents.shape[1]
+        flux = np.stack(fluxes[:count], axis=1).astype(np.complex128) + 1j * np.stack(fluxes[count:], axis=1)
+        return active_resistance[:, None] * currents + 1j * omega * flux
+
     # The whole system is solved at once rather than by eliminating the branch
     # currents first.  Eliminating them needs Z^{-1}, and with Z dense that is
     # an inner Krylov solve inside every outer product -- the cost multiplies,
@@ -696,49 +817,260 @@ def solve_sheet_case(
             pool=pool,
         )
 
-        right_hand_side = np.concatenate(
-            [np.zeros(branches, dtype=np.complex128), injected[keep]]
-        )
-        system = spla.LinearOperator((size, size), matvec=saddle, dtype=np.complex128)
-        preconditioner = spla.LinearOperator(
-            (size, size), matvec=precondition, dtype=np.complex128
-        )
-        counter = {"iterations": 0}
+        if len(injected_list) == 1:
+            injected = injected_list[0]
+            right_hand_side = np.concatenate(
+                [np.zeros(branches, dtype=np.complex128), injected[keep]]
+            )
+            system = spla.LinearOperator((size, size), matvec=saddle, dtype=np.complex128)
+            preconditioner = spla.LinearOperator(
+                (size, size), matvec=precondition, dtype=np.complex128
+            )
+            counter = {"iterations": 0}
 
-        def count(_value: np.ndarray) -> None:
-            counter["iterations"] += 1
+            def count(_value: np.ndarray) -> None:
+                counter["iterations"] += 1
 
-        result, info = spla.gmres(
-            system,
-            right_hand_side,
-            M=preconditioner,
-            rtol=tolerance,
-            restart=restart,
-            maxiter=max_iterations,
-            callback=count,
-            callback_type="pr_norm",
+            result, info = spla.gmres(
+                system,
+                right_hand_side,
+                M=preconditioner,
+                rtol=tolerance,
+                restart=restart,
+                maxiter=max_iterations,
+                callback=count,
+                callback_type="pr_norm",
+            )
+            current = np.zeros(mesh.branch_count, dtype=np.complex128)
+            current[active_branches] = result[:branches]
+            voltage = np.zeros(mesh.node_count, dtype=np.complex128)
+            voltage[keep] = result[branches:]
+            residual = float(
+                np.linalg.norm(saddle(result) - right_hand_side)
+                / max(np.linalg.norm(right_hand_side), 1e-30)
+            )
+            return [SheetSolution(
+                node_voltage=voltage,
+                branch_current=current,
+                frequency_hz=frequency_hz,
+                iterations=counter["iterations"],
+                residual=residual,
+                converged=info == 0 and residual < 1e-6,
+                grounded_node=grounded,
+                undriven_nodes=dropped,
+            )]
+
+        right_hand_sides = np.stack(
+            [np.concatenate([np.zeros(branches, dtype=np.complex128), injected[keep]]) for injected in injected_list],
+            axis=1,
         )
-        current = np.zeros(mesh.branch_count, dtype=np.complex128)
-        current[active_branches] = result[:branches]
-        voltage = np.zeros(mesh.node_count, dtype=np.complex128)
-        voltage[keep] = result[branches:]
-        residual = float(
-            np.linalg.norm(saddle(result) - right_hand_side)
-            / max(np.linalg.norm(right_hand_side), 1e-30)
+
+        def saddle_block(block: np.ndarray) -> np.ndarray:
+            currents = block[:branches]
+            voltages = block[branches:]
+            return np.concatenate(
+                [impedance_block(currents) - reduced @ voltages, reduced.T @ currents]
+            )
+
+        results, infos, iterations = _gmres_lockstep(
+            saddle_block, precondition, right_hand_sides, tolerance, restart, max_iterations
         )
-        return SheetSolution(
-            node_voltage=voltage,
-            branch_current=current,
-            frequency_hz=frequency_hz,
-            iterations=counter["iterations"],
-            residual=residual,
-            converged=info == 0 and residual < 1e-6,
-            grounded_node=grounded,
-            undriven_nodes=dropped,
+        residuals = np.linalg.norm(saddle_block(results) - right_hand_sides, axis=0) / np.maximum(
+            np.linalg.norm(right_hand_sides, axis=0), 1e-30
+        )
+        solutions = []
+        for column in range(results.shape[1]):
+            current = np.zeros(mesh.branch_count, dtype=np.complex128)
+            current[active_branches] = results[:branches, column]
+            voltage = np.zeros(mesh.node_count, dtype=np.complex128)
+            voltage[keep] = results[branches:, column]
+            solutions.append(
+                SheetSolution(
+                    node_voltage=voltage,
+                    branch_current=current,
+                    frequency_hz=frequency_hz,
+                    iterations=iterations[column],
+                    residual=float(residuals[column]),
+                    converged=infos[column] == 0 and residuals[column] < 1e-6,
+                    grounded_node=grounded,
+                    undriven_nodes=dropped,
+                )
+            )
+        return solutions
+    finally:
+        if pool is not None:
+            pool.shutdown()
+
+
+
+
+def _gmres_lockstep(
+    matvec: Callable[[np.ndarray], np.ndarray],
+    psolve: Callable[[np.ndarray], np.ndarray],
+    right_hand_sides: np.ndarray,
+    rtol: float,
+    restart: int,
+    maxiter: int,
+) -> tuple[np.ndarray, list[int], list[int]]:
+    """Restarted, left-preconditioned GMRES on each column of ``right_hand_sides``, in lockstep.
+
+    Every column runs the algorithm of :func:`scipy.sparse.linalg.gmres`
+    (SciPy 1.17: modified Gram-Schmidt, Givens rotations, the inner tolerance
+    of gh-8400) on its own Krylov space; only ``matvec`` and ``psolve`` are
+    called on the block of columns still iterating, which is what lets a
+    group of excitations read the preconditioner's factors once per step.
+    A column whose inner loop has stopped waits for the others before the
+    restart.  Returns the solutions, each column's ``info`` (0: converged,
+    else ``maxiter``) and its inner iteration count.
+    """
+
+    size, count = right_hand_sides.shape
+    dtype = right_hand_sides.dtype
+    eps = np.finfo(dtype).eps
+    restart = min(restart, size)
+    lartg = get_lapack_funcs("lartg", dtype=dtype)
+    x = np.zeros((size, count), dtype=dtype)
+    bnrm2 = [float(np.linalg.norm(right_hand_sides[:, j])) for j in range(count)]
+    atol = [max(0.0, float(rtol) * value) for value in bnrm2]
+    done = [value == 0.0 for value in bnrm2]
+    info = [0] * count
+    iterations = [0] * count
+    preconditioned = psolve(right_hand_sides)
+    ptol_max_factor = [1.0] * count
+    ptol = [
+        float(np.linalg.norm(preconditioned[:, j])) * min(1.0, atol[j] / bnrm2[j]) if bnrm2[j] else 0.0
+        for j in range(count)
+    ]
+    presid = [0.0] * count
+    rnorm = [0.0] * count
+    r = right_hand_sides.copy()
+    width = min(thread_budget(), count)
+    pool = ThreadPoolExecutor(max_workers=width) if width > 1 else None
+    try:
+        return _lockstep_cycles(
+            matvec, psolve, right_hand_sides, x, r, atol, bnrm2, done, info, iterations, ptol, ptol_max_factor,
+            presid, rnorm, restart, maxiter, eps, lartg, pool,
         )
     finally:
         if pool is not None:
             pool.shutdown()
+
+
+def _lockstep_cycles(
+    matvec: Callable[[np.ndarray], np.ndarray],
+    psolve: Callable[[np.ndarray], np.ndarray],
+    right_hand_sides: np.ndarray,
+    x: np.ndarray,
+    r: np.ndarray,
+    atol: list[float],
+    bnrm2: list[float],
+    done: list[bool],
+    info: list[int],
+    iterations: list[int],
+    ptol: list[float],
+    ptol_max_factor: list[float],
+    presid: list[float],
+    rnorm: list[float],
+    restart: int,
+    maxiter: int,
+    eps: float,
+    lartg: Any,
+    pool: ThreadPoolExecutor | None,
+) -> tuple[np.ndarray, list[int], list[int]]:
+    """The restart cycles of :func:`_gmres_lockstep` (its state passed in)."""
+
+    size, count = right_hand_sides.shape
+    dtype = right_hand_sides.dtype
+    for _ in range(maxiter):
+        cycle = [j for j in range(count) if not done[j]]
+        if not cycle:
+            break
+        v = {j: np.empty((restart + 1, size), dtype=dtype) for j in cycle}
+        h = {j: np.zeros((restart, restart + 1), dtype=dtype) for j in cycle}
+        givens = {j: np.zeros((restart, 2), dtype=dtype) for j in cycle}
+        rhs = {j: np.zeros(restart + 1, dtype=dtype) for j in cycle}
+        last = {j: 0 for j in cycle}
+        breakdown = {j: False for j in cycle}
+        start = psolve(r[:, cycle])
+        for position, j in enumerate(cycle):
+            v[j][0, :] = start[:, position]
+            norm = np.linalg.norm(v[j][0, :])
+            v[j][0, :] *= 1 / norm
+            rhs[j][0] = norm
+        running = list(cycle)
+        for col in range(restart):
+            if not running:
+                break
+            block = np.stack([v[j][col, :] for j in running], axis=1)
+            w_block = psolve(matvec(block))
+
+            def orthogonalize(position: int, j: int, col: int = col, w_block: np.ndarray = w_block) -> bool:
+                """One Arnoldi step of column ``j``; True while its inner loop goes on."""
+                w = np.array(w_block[:, position])
+                h0 = np.linalg.norm(w)
+                for k in range(col + 1):
+                    tmp = np.vdot(v[j][k, :], w)
+                    h[j][col, k] = tmp
+                    w -= tmp * v[j][k, :]
+                h1 = np.linalg.norm(w)
+                h[j][col, col + 1] = h1
+                v[j][col + 1, :] = w[:]
+                if h1 <= eps * h0:
+                    h[j][col, col + 1] = 0
+                    breakdown[j] = True
+                else:
+                    v[j][col + 1, :] *= 1 / h1
+                for k in range(col):
+                    c, s_ = givens[j][k, 0], givens[j][k, 1]
+                    n0, n1 = h[j][col, [k, k + 1]]
+                    h[j][col, [k, k + 1]] = [c * n0 + s_ * n1, -s_.conj() * n0 + c * n1]
+                c, s_, mag = lartg(h[j][col, col], h[j][col, col + 1])
+                givens[j][col, :] = [c, s_]
+                h[j][col, [col, col + 1]] = mag, 0
+                tmp = -np.conjugate(s_) * rhs[j][col]
+                rhs[j][[col, col + 1]] = [c * rhs[j][col], tmp]
+                presid[j] = np.abs(tmp)
+                iterations[j] += 1
+                last[j] = col
+                return not (presid[j] <= ptol[j] or breakdown[j])
+
+            # The columns' Krylov bases are independent and NumPy's vector
+            # kernels release the GIL, so their Gram-Schmidt steps run side by
+            # side; each is the same arithmetic as alone.
+            if pool is not None and len(running) > 1:
+                going = list(pool.map(orthogonalize, range(len(running)), running))
+            else:
+                going = [orthogonalize(position, j) for position, j in enumerate(running)]
+            running = [j for j, keep_going in zip(running, going) if keep_going]
+        for j in cycle:
+            col = last[j]
+            if h[j][col, col] == 0:
+                rhs[j][col] = 0
+            y = np.zeros([col + 1], dtype=dtype)
+            y[:] = rhs[j][: col + 1]
+            for k in range(col, 0, -1):
+                if y[k] != 0:
+                    y[k] /= h[j][k, k]
+                    tmp = y[k]
+                    y[:k] -= tmp * h[j][k, :k]
+            if y[0] != 0:
+                y[0] /= h[j][0, 0]
+            x[:, j] += y @ v[j][: col + 1, :]
+        residual_block = right_hand_sides[:, cycle] - matvec(x[:, cycle])
+        for position, j in enumerate(cycle):
+            r[:, j] = residual_block[:, position]
+            rnorm[j] = float(np.linalg.norm(r[:, j]))
+            if rnorm[j] <= atol[j] or breakdown[j]:
+                done[j] = True
+                continue
+            if presid[j] <= ptol[j]:
+                ptol_max_factor[j] = max(eps, 0.25 * ptol_max_factor[j])
+            else:
+                ptol_max_factor[j] = min(1.0, 1.5 * ptol_max_factor[j])
+            ptol[j] = presid[j] * min(ptol_max_factor[j], atol[j] / rnorm[j])
+    for j in range(count):
+        info[j] = 0 if (bnrm2[j] == 0.0 or rnorm[j] <= atol[j]) else maxiter
+    return x, info, iterations
 
 
 def _near_impedance(
@@ -890,8 +1222,9 @@ def _build_preconditioner(
         rhs_current = vector[:branches]
         rhs_node = vector[branches:]
         # Block factorisation of [[D, -A], [A^T, 0]].
-        node = factored.solve(rhs_node + reduced.T @ (rhs_current / diagonal))
-        current = (rhs_current + reduced @ node) / diagonal
+        scale = diagonal if vector.ndim == 1 else diagonal[:, None]
+        node = factored.solve(rhs_node + reduced.T @ (rhs_current / scale))
+        current = (rhs_current + reduced @ node) / scale
         return np.concatenate([current, node])
 
     return precondition

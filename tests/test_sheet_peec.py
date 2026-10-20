@@ -16,6 +16,7 @@ from electrical.sheet_peec.sheet_peec import (
     Terminal,
     ViaBranch,
     solve_sheet_case,
+    solve_sheet_cases,
     via_resistance,
 )
 
@@ -310,6 +311,46 @@ class AlternatingCurrentTests(unittest.TestCase):
                 )
             results.append(solution.branch_current.tobytes() + solution.node_voltage.tobytes())
         self.assertTrue(all(result == results[0] for result in results))
+
+    def _excitations(self):
+        cols = self.cols
+        return [
+            self.terminals,
+            [Terminal("in", 0, ((1, 0), (3, 0)), 1.5), Terminal("out", 1, ((2, cols - 1),), -1.5)],
+            [Terminal("in", 1, ((0, 2),), 0.7), Terminal("out", 0, ((4, 3),), -0.7)],
+        ]
+
+    def test_excitations_solved_together_give_the_bits_they_give_alone(self):
+        for preconditioner in ("near", "block", "diagonal"):
+            for frequency in (0.0, 3e5):
+                with self.subTest(preconditioner=preconditioner, frequency=frequency):
+                    sets = self._excitations()
+                    together = solve_sheet_cases(
+                        self.mesh, self.operator, sets, frequency_hz=frequency, preconditioner=preconditioner,
+                        restart=7,
+                    )
+                    for terminals, solution in zip(sets, together):
+                        alone = solve_sheet_case(
+                            self.mesh, self.operator, terminals, frequency_hz=frequency,
+                            preconditioner=preconditioner, restart=7,
+                        )
+                        self.assertTrue(solution.converged)
+                        self.assertEqual(solution.iterations, alone.iterations)
+                        self.assertEqual(solution.branch_current.tobytes(), alone.branch_current.tobytes())
+                        self.assertEqual(solution.node_voltage.tobytes(), alone.node_voltage.tobytes())
+
+    def test_excitations_driving_different_components_are_solved_apart(self):
+        occupancy = np.ones((2, self.rows, self.cols), dtype=bool)
+        occupancy[:, :, 3] = False  # two halves, joined only through no copper
+        mesh = SheetMesh((self.rows, self.cols), PITCH_M, self.stackup, occupancy)
+        operator = SheetInductanceOperator((self.rows, self.cols), PITCH_M, self.stackup)
+        left = [Terminal("in", 0, ((1, 0),), 1.0), Terminal("out", 0, ((3, 2),), -1.0)]
+        right = [Terminal("in", 0, ((1, 4),), 1.0), Terminal("out", 0, ((3, 5),), -1.0)]
+        together = solve_sheet_cases(mesh, operator, [left, right, left], frequency_hz=3e5)
+        for terminals, solution in zip([left, right, left], together):
+            alone = solve_sheet_case(mesh, operator, terminals, frequency_hz=3e5)
+            self.assertEqual(solution.node_voltage.tobytes(), alone.node_voltage.tobytes())
+        self.assertNotEqual(together[0].grounded_node, together[1].grounded_node)
 
     def test_the_two_span_definitions_are_named(self):
         direct = solve_sheet_case(
