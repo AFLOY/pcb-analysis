@@ -21,6 +21,10 @@ Versions before 0.7.0 were not tagged; see the Git history.
   excitations: 1.37x / 1.58x; docs/SHEET_PEEC.md).
   `SheetInductanceOperator.apply_many` applies the operator to several sets
   of currents in one batched FFT. Additive.
+- `SheetInductanceOperator.near_inductance` assembles with array lookups
+  instead of a per-branch walk, to the same bits (0.2 mm plane: 0.53 s ->
+  0.06 s). The block triangular preconditioner forms were measured and not
+  adopted (tag `work/sheet-block-triangular`).
 - `electrical.sheet_peec.dc_network`: the zero-frequency sheet mesh as a bare
   conductance network. `ConductanceNetwork` (numbered nodes, branches in
   siemens), `solve_conductance_network(network, reference, injection,
