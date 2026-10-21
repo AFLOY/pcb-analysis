@@ -1,0 +1,125 @@
+{
+  "benchmark": "sheet_lockstep_memory_benchmark",
+  "timestamp_utc": "2026-10-21T05:59:03.474874+00:00",
+  "environment": {
+    "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+    "cpu_count": 16,
+    "physical_cores": 8,
+    "thread_budget": 8,
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "scipy": "1.17.1"
+  },
+  "settings": {
+    "restart": 120,
+    "tolerance": 1e-14,
+    "max_iterations": 1,
+    "preconditioner": "block",
+    "frequency_hz": 216000.0,
+    "LOCKSTEP_WORK_VECTORS": 8,
+    "LOCKSTEP_FFT_BYTES_PER_CELL": 192,
+    "LOCKSTEP_MEMORY_FRACTION": 0.5
+  },
+  "cases": [
+    {
+      "fixture": "plane",
+      "pitch_mm": 0.5,
+      "frequency_hz": 216000.0,
+      "unknowns": 23942,
+      "grid": [
+        61,
+        66
+      ],
+      "layers": 2,
+      "vertical_levels": 1,
+      "peak_rss_bytes": {
+        "2": 223039488,
+        "4": 345677824
+      },
+      "measured_column_bytes": 61319168,
+      "estimated_column_bytes": 62860828,
+      "estimate_over_measured": 1.025
+    },
+    {
+      "fixture": "plane",
+      "pitch_mm": 0.25,
+      "frequency_hz": 216000.0,
+      "unknowns": 95366,
+      "grid": [
+        121,
+        132
+      ],
+      "layers": 2,
+      "vertical_levels": 1,
+      "peak_rss_bytes": {
+        "2": 672722944,
+        "4": 1142099968
+      },
+      "measured_column_bytes": 234688512,
+      "estimated_column_bytes": 250251830,
+      "estimate_over_measured": 1.066
+    },
+    {
+      "fixture": "plane",
+      "pitch_mm": 0.2,
+      "frequency_hz": 216000.0,
+      "unknowns": 149881,
+      "grid": [
+        152,
+        165
+      ],
+      "layers": 2,
+      "vertical_levels": 1,
+      "peak_rss_bytes": {
+        "2": 1055002624,
+        "4": 1803243520
+      },
+      "measured_column_bytes": 374120448,
+      "estimated_column_bytes": 393258782,
+      "estimate_over_measured": 1.051
+    },
+    {
+      "fixture": "four_layer",
+      "pitch_mm": 0.25,
+      "frequency_hz": 216000.0,
+      "unknowns": 181962,
+      "grid": [
+        121,
+        132
+      ],
+      "layers": 4,
+      "vertical_levels": 4,
+      "peak_rss_bytes": {
+        "2": 1323507712,
+        "4": 2222710784
+      },
+      "measured_column_bytes": 449601536,
+      "estimated_column_bytes": 494085398,
+      "estimate_over_measured": 1.099
+    },
+    {
+      "fixture": "four_layer",
+      "pitch_mm": 0.2,
+      "frequency_hz": 216000.0,
+      "unknowns": 286154,
+      "grid": [
+        152,
+        165
+      ],
+      "layers": 4,
+      "vertical_levels": 4,
+      "peak_rss_bytes": {
+        "2": 2034114560,
+        "4": 3469504512
+      },
+      "measured_column_bytes": 717694976,
+      "estimated_column_bytes": 776809545,
+      "estimate_over_measured": 1.082
+    }
+  ],
+  "decision": {
+    "adopted": true,
+    "criteria": "on every case the estimate is at least the measured column and at most 2.5x it"
+  }
+}

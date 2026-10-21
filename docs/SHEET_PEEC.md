@@ -570,6 +570,42 @@ excitation feeds the left edge over a different span of rows:
 
 **Decision:** adopted (every pitch and count: solutions identical to the bit, converged, and together no slower than one by one).
 
+### Lockstep width by memory (measured, `SHEET_LOCKSTEP_MEMORY_RESULTS.json`)
+
+Every excitation in a lockstep group holds its own Krylov basis -- restart + 1
+vectors of the saddle-point size -- and its share of the batched transforms,
+so a group's memory grows with its width.  On a four-layer board at 0.1 mm
+six excitations of one mesh held 3.5 GB of bases alone (584 MB each) and a
+plane_opt run went out of memory.  `solve_sheet_cases` therefore cuts a group
+into lockstep columns that fit in `LOCKSTEP_MEMORY_FRACTION` (0.5) of
+`MemAvailable` when the Krylov solve starts, after the factors are built.  A
+column is reckoned by `lockstep_column_bytes`: `16 · size · (restart + 1 + 8)`
+for the basis and work vectors, plus `2 · (2 · layers + levels)` transform
+planes of `4 · 48` bytes per grid cell (zero-padded input, spectra,
+accumulated products and inverse over a 2 × 2 padding), taken 1.1 times.  A
+cut of one is solved alone; the cut changes the time, never the bits, and
+each solution reports the width it shared as `lockstep_columns` (the contract
+copies it into the metrics).  Off Linux, where `MemAvailable` is unknown, the
+group is not cut.
+
+The benchmark runs a group of 2 and of 4 excitations through one full
+restart cycle (restart 120, every basis vector written) in separate
+processes and takes the peak-RSS difference over the two extra columns:
+
+| mesh | unknowns | measured / column | estimate | estimate / measured |
+| --- | ---: | ---: | ---: | ---: |
+| plane 0.5 mm | 23,942 | 61 MB | 63 MB | 1.03 |
+| plane 0.25 mm | 95,366 | 235 MB | 250 MB | 1.07 |
+| plane 0.2 mm | 149,881 | 374 MB | 393 MB | 1.05 |
+| four layers 0.25 mm | 181,962 | 450 MB | 494 MB | 1.10 |
+| four layers 0.2 mm | 286,154 | 718 MB | 777 MB | 1.08 |
+
+Without the margin the count was within 5 % of the measurement on either
+side; repeated measurements move by about 3 %.
+
+**Decision:** adopted (on every case the estimate is at least the measured
+column and at most 2.5 times it).
+
 ## What is not done
 
 - The barrel's partial self inductance is taken as a given scalar. Nothing

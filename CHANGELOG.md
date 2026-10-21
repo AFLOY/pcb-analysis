@@ -25,6 +25,11 @@ Versions before 0.7.0 were not tagged; see the Git history.
   instead of a per-branch walk, to the same bits (0.2 mm plane: 0.53 s ->
   0.06 s). The block triangular preconditioner forms were measured and not
   adopted (tag `work/sheet-block-triangular`).
+- `solve_sheet_cases` cuts a group of excitations into lockstep columns
+  that fit in half the memory available (`lockstep_column_bytes`, within
+  10 % above the measured peak; docs/SHEET_PEEC.md). The bits do not
+  change; `SheetSolution.lockstep_columns` and the contract's metrics say
+  how many columns shared a solve.
 - `electrical.sheet_peec.dc_network`: the zero-frequency sheet mesh as a bare
   conductance network. `ConductanceNetwork` (numbered nodes, branches in
   siemens), `solve_conductance_network(network, reference, injection,
