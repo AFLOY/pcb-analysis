@@ -336,46 +336,63 @@ class SheetInductanceOperator:
         tables_z = {key: np.fft.irfft2(spectrum, s=self.padded) for key, spectrum in self._kernels_z.items()}
         padded_rows, padded_cols = self.padded
         count = mesh.branch_count
-        entries_i: list[int] = []
-        entries_j: list[int] = []
-        values: list[float] = []
-        offset = 0
         span = range(-radius_cells, radius_cells + 1)
+        parts_i: list[np.ndarray] = []
+        parts_j: list[np.ndarray] = []
+        parts_v: list[np.ndarray] = []
+        parts_slot: list[np.ndarray] = []
+
+        def couple(sources: np.ndarray, first: int, levels_count: int, table_of: Any) -> None:
+            # sources: (n, 3) of (layer or level, row, col); branch k is first + k.
+            lookup = np.full((levels_count, rows, cols), -1, dtype=np.int64)
+            lookup[sources[:, 0], sources[:, 1], sources[:, 2]] = np.arange(first, first + len(sources))
+            # A branch repeated at one place couples once, as its last copy.
+            keep = np.flatnonzero(lookup[sources[:, 0], sources[:, 1], sources[:, 2]] == np.arange(first, first + len(sources)))
+            sources = sources[keep]
+            source_index = first + keep
+            # Each source's entries in the order (other layer, dr, dc), the
+            # order a branch-by-branch walk emits them in, so the matrix is the
+            # same to the bit whichever way it is built.
+            slots = [(other, dr, dc) for other in range(levels_count) for dr in span for dc in span]
+            for slot, (other, dr, dc) in enumerate(slots):
+                row, col = sources[:, 1] + dr, sources[:, 2] + dc
+                inside = np.flatnonzero((row >= 0) & (row < rows) & (col >= 0) & (col < cols))
+                target = lookup[other, row[inside], col[inside]]
+                hit = target >= 0
+                chosen = inside[hit]
+                per_level = np.array(
+                    [table_of(level, other)[dr % padded_rows, dc % padded_cols] for level in range(levels_count)]
+                )
+                parts_i.append(source_index[chosen])
+                parts_j.append(target[hit])
+                parts_v.append(per_level[sources[chosen, 0]])
+                parts_slot.append(np.full(len(chosen), slot, dtype=np.int64))
+
+        offset = 0
         for axis, group in (("x", mesh.branch_x), ("y", mesh.branch_y)):
-            index = {branch: position + offset for position, branch in enumerate(group)}
-            for layer, row, col in group:
-                source = index[(layer, row, col)]
-                for other in range(layer_count):
-                    key = (axis, min(layer, other), max(layer, other))
-                    table = tables[key]
-                    for dr in span:
-                        for dc in span:
-                            target = index.get((other, row + dr, col + dc))
-                            if target is None:
-                                continue
-                            entries_i.append(source)
-                            entries_j.append(target)
-                            values.append(float(table[dr % padded_rows, dc % padded_cols]))
+            if group:
+                couple(
+                    np.asarray(group, dtype=np.int64).reshape(-1, 3),
+                    offset,
+                    layer_count,
+                    lambda layer, other, axis=axis: tables[(axis, min(layer, other), max(layer, other))],
+                )
             offset += len(group)
         levels = list(self.vertical_levels)
         if mesh.via_branches and levels:
             index_of = {key: position for position, key in enumerate(levels)}
-            index = {
-                (index_of[(via.lower_layer, via.upper_layer)], via.row, via.col): position + offset
-                for position, via in enumerate(mesh.via_branches)
-            }
-            for (level, row, col), source in index.items():
-                for other in range(len(levels)):
-                    table = tables_z[(min(level, other), max(level, other))]
-                    for dr in span:
-                        for dc in span:
-                            target = index.get((other, row + dr, col + dc))
-                            if target is None:
-                                continue
-                            entries_i.append(source)
-                            entries_j.append(target)
-                            values.append(float(table[dr % padded_rows, dc % padded_cols]))
-        return sp.csr_matrix((values, (entries_i, entries_j)), shape=(count, count))
+            sources = np.array(
+                [(index_of[(via.lower_layer, via.upper_layer)], via.row, via.col) for via in mesh.via_branches],
+                dtype=np.int64,
+            )
+            couple(sources, offset, len(levels), lambda level, other: tables_z[(min(level, other), max(level, other))])
+        if not parts_i:
+            return sp.csr_matrix((count, count))
+        entries_i = np.concatenate(parts_i)
+        order = np.lexsort((np.concatenate(parts_slot), entries_i))
+        return sp.csr_matrix(
+            (np.concatenate(parts_v)[order], (entries_i[order], np.concatenate(parts_j)[order])), shape=(count, count)
+        )
 
     def dense_matrix(self, axis: str = "x") -> np.ndarray:
         """Assemble the same operator as a dense matrix, for checking.

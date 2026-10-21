@@ -44,6 +44,45 @@ def full_mesh(stackup, rows, cols, vias=()):
     return SheetMesh((rows, cols), PITCH_M, stackup, occupancy, vias=vias)
 
 
+def branch_by_branch_near_inductance(operator, mesh, radius_cells=1):
+    """The near-field inductance read off the tables one branch at a time."""
+    import scipy.sparse as sp
+
+    rows, cols = operator.shape
+    padded_rows, padded_cols = operator.padded
+    tables = {key: np.fft.irfft2(spectrum, s=operator.padded) for key, spectrum in operator._kernels.items()}
+    tables_z = {key: np.fft.irfft2(spectrum, s=operator.padded) for key, spectrum in operator._kernels_z.items()}
+    entries_i, entries_j, values = [], [], []
+    span = range(-radius_cells, radius_cells + 1)
+
+    def walk(index, levels_count, table_of):
+        for (level, row, col), source in index.items():
+            for other in range(levels_count):
+                table = table_of(level, other)
+                for dr in span:
+                    for dc in span:
+                        target = index.get((other, row + dr, col + dc))
+                        if target is not None:
+                            entries_i.append(source)
+                            entries_j.append(target)
+                            values.append(float(table[dr % padded_rows, dc % padded_cols]))
+
+    offset = 0
+    for axis, group in (("x", mesh.branch_x), ("y", mesh.branch_y)):
+        index = {branch: position + offset for position, branch in enumerate(group)}
+        walk(index, len(operator.stackup), lambda a, b, axis=axis: tables[(axis, min(a, b), max(a, b))])
+        offset += len(group)
+    levels = list(operator.vertical_levels)
+    index_of = {key: position for position, key in enumerate(levels)}
+    index = {
+        (index_of[(via.lower_layer, via.upper_layer)], via.row, via.col): position + offset
+        for position, via in enumerate(mesh.via_branches)
+    }
+    walk(index, len(levels), lambda a, b: tables_z[(min(a, b), max(a, b))])
+    count = mesh.branch_count
+    return sp.csr_matrix((values, (entries_i, entries_j)), shape=(count, count))
+
+
 def resistor_network_voltages(rows, cols, source, sink):
     """Solve the same grid as a plain resistor network, independently.
 
@@ -662,6 +701,36 @@ class VerticalOperatorTests(unittest.TestCase):
         ratio = flux[0, 4, 5] / flux[0, 4, 4]
         self.assertGreater(ratio, 0.3)
         self.assertLess(ratio, 0.8)
+
+    def test_the_near_inductance_is_the_entry_by_entry_table_lookup(self):
+        # Four layers, holes, vias over more level pairs than there are
+        # layers and one via listed twice: the matrix must be what reading the tables branch by branch
+        # gives, to the bit and in the same order within each row.
+        stackup = SheetStackup(
+            tuple(
+                SheetLayer(name, z, COPPER_M, RESISTIVITY)
+                for name, z in (("F.Cu", 0.0), ("In1.Cu", -2e-4), ("In2.Cu", -1.3e-3), ("B.Cu", -CORE_GAP_M))
+            )
+        )
+        rows, cols = 9, 11
+        occupancy = np.random.default_rng(3).random((4, rows, cols)) > 0.25
+        vias = [
+            ViaBranch(2, 3, 1, 0, 1e-3),
+            ViaBranch(2, 4, 2, 1, 1e-3),
+            ViaBranch(6, 7, 3, 0, 1e-3),
+            ViaBranch(6, 8, 3, 0, 1e-3),
+            ViaBranch(4, 5, 3, 2, 1e-3),
+            ViaBranch(5, 5, 2, 0, 1e-3),
+        ]
+        for via in vias:
+            occupancy[:, via.row, via.col] = True
+        vias.append(vias[0])
+        mesh = SheetMesh((rows, cols), PITCH_M, stackup, occupancy, vias=tuple(vias))
+        operator = SheetInductanceOperator((rows, cols), PITCH_M, stackup, vertical_levels=mesh.vertical_levels)
+        near = operator.near_inductance(mesh)
+        expected = branch_by_branch_near_inductance(operator, mesh)
+        for name in ("data", "indices", "indptr"):
+            np.testing.assert_array_equal(getattr(near, name), getattr(expected, name))
 
     def test_a_mesh_joining_layers_the_operator_does_not_know_is_refused(self):
         stackup = two_layers()
