@@ -45,3 +45,4 @@ experiments/*
 !experiments/sheet_near_tiles_benchmark.py
 !experiments/sheet_cases_benchmark.py
 !experiments/port_basis_workers_benchmark.py
+!experiments/sheet_lockstep_memory_benchmark.py
