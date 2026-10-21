@@ -593,7 +593,7 @@ def solve_current_field_problems(
                 "fallback_used": False,
             }
             solved = [
-                (solution, dict(backend_metrics))
+                (solution, dict(backend_metrics, lockstep_columns=solution.lockstep_columns))
                 for solution in solve_sheet_cases(mesh, operator, terminal_sets, **solve_arguments)
             ]
         for index, terminals, (solution, backend_metrics) in zip(members, terminal_sets, solved):

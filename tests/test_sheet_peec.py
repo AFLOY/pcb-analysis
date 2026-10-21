@@ -403,6 +403,49 @@ class AlternatingCurrentTests(unittest.TestCase):
                         self.assertEqual(solution.branch_current.tobytes(), alone.branch_current.tobytes())
                         self.assertEqual(solution.node_voltage.tobytes(), alone.node_voltage.tobytes())
 
+    def test_a_group_cut_to_fit_the_memory_gives_the_same_bits_in_order(self):
+        # With room for one or two columns the group is solved in cuts of
+        # that width (a cut of one alone); every excitation keeps its bits
+        # and its place, and reports the width it shared.
+        import electrical.sheet_peec.sheet_peec as sheet
+
+        sets = self._excitations() + self._excitations()[:2]
+        whole = solve_sheet_cases(self.mesh, self.operator, sets, frequency_hz=3e5, preconditioner="block", restart=7)
+        self.assertEqual([s.lockstep_columns for s in whole], [len(sets)] * len(sets))
+        size = self.mesh.branch_count + self.mesh.node_count
+        column = sheet.lockstep_column_bytes(size, 7, self.operator)
+        original = sheet._available_memory_bytes
+        try:
+            for room, widths in ((1, [1, 1, 1, 1, 1]), (2, [2, 2, 2, 2, 1])):
+                sheet._available_memory_bytes = lambda room=room: int(room * column / sheet.LOCKSTEP_MEMORY_FRACTION)
+                cut = solve_sheet_cases(self.mesh, self.operator, sets, frequency_hz=3e5, preconditioner="block", restart=7)
+                self.assertEqual([s.lockstep_columns for s in cut], widths)
+                for a, b in zip(whole, cut):
+                    self.assertEqual(a.branch_current.tobytes(), b.branch_current.tobytes())
+                    self.assertEqual(a.node_voltage.tobytes(), b.node_voltage.tobytes())
+                    self.assertEqual(a.iterations, b.iterations)
+            sheet._available_memory_bytes = lambda: None
+            self.assertEqual(sheet.lockstep_width(5, column), 5)
+            sheet._available_memory_bytes = lambda: 0
+            self.assertEqual(sheet.lockstep_width(5, column), 1)
+        finally:
+            sheet._available_memory_bytes = original
+
+    def test_a_lockstep_column_counts_its_basis_and_its_transforms(self):
+        import electrical.sheet_peec.sheet_peec as sheet
+
+        size = 1000
+        rows, cols = self.operator.shape
+        layers, levels = len(self.operator.stackup), len(self.operator.vertical_levels)
+        counted = 16 * size * (60 + 1 + sheet.LOCKSTEP_WORK_VECTORS) + 2 * (2 * layers + levels) * (
+            sheet.LOCKSTEP_FFT_BYTES_PER_CELL * rows * cols
+        )
+        margin = sheet.LOCKSTEP_ESTIMATE_MARGIN
+        self.assertEqual(sheet.lockstep_column_bytes(size, 60, self.operator), int(margin * counted))
+        self.assertEqual(
+            sheet.lockstep_column_bytes(size, 60, object()), int(margin * 16 * size * (61 + sheet.LOCKSTEP_WORK_VECTORS))
+        )
+
     def test_excitations_driving_different_components_are_solved_apart(self):
         occupancy = np.ones((2, self.rows, self.cols), dtype=bool)
         occupancy[:, :, 3] = False  # two halves, joined only through no copper

@@ -419,6 +419,8 @@ class SheetSolution:
     # Nodes on components no terminal drives.  Their potential is not solved for
     # and is left at zero, which is a placeholder and not an answer.
     undriven_nodes: int = 0
+    # How many excitations shared this one's Krylov steps (1: solved alone).
+    lockstep_columns: int = 1
 
     def voltage_span_v(self) -> float:
         """Give the potential spread the gate reads, in volts.
@@ -817,8 +819,7 @@ def _solve_ac(
             pool=pool,
         )
 
-        if len(injected_list) == 1:
-            injected = injected_list[0]
+        def solve_alone(injected: np.ndarray) -> SheetSolution:
             right_hand_side = np.concatenate(
                 [np.zeros(branches, dtype=np.complex128), injected[keep]]
             )
@@ -849,7 +850,7 @@ def _solve_ac(
                 np.linalg.norm(saddle(result) - right_hand_side)
                 / max(np.linalg.norm(right_hand_side), 1e-30)
             )
-            return [SheetSolution(
+            return SheetSolution(
                 node_voltage=voltage,
                 branch_current=current,
                 frequency_hz=frequency_hz,
@@ -858,44 +859,56 @@ def _solve_ac(
                 converged=info == 0 and residual < 1e-6,
                 grounded_node=grounded,
                 undriven_nodes=dropped,
-            )]
-
-        right_hand_sides = np.stack(
-            [np.concatenate([np.zeros(branches, dtype=np.complex128), injected[keep]]) for injected in injected_list],
-            axis=1,
-        )
-
-        def saddle_block(block: np.ndarray) -> np.ndarray:
-            currents = block[:branches]
-            voltages = block[branches:]
-            return np.concatenate(
-                [impedance_block(currents) - reduced @ voltages, reduced.T @ currents]
             )
 
-        results, infos, iterations = _gmres_lockstep(
-            saddle_block, precondition, right_hand_sides, tolerance, restart, max_iterations
-        )
-        residuals = np.linalg.norm(saddle_block(results) - right_hand_sides, axis=0) / np.maximum(
-            np.linalg.norm(right_hand_sides, axis=0), 1e-30
-        )
-        solutions = []
-        for column in range(results.shape[1]):
-            current = np.zeros(mesh.branch_count, dtype=np.complex128)
-            current[active_branches] = results[:branches, column]
-            voltage = np.zeros(mesh.node_count, dtype=np.complex128)
-            voltage[keep] = results[branches:, column]
-            solutions.append(
-                SheetSolution(
-                    node_voltage=voltage,
-                    branch_current=current,
-                    frequency_hz=frequency_hz,
-                    iterations=iterations[column],
-                    residual=float(residuals[column]),
-                    converged=bool(infos[column] == 0 and residuals[column] < 1e-6),
-                    grounded_node=grounded,
-                    undriven_nodes=dropped,
+        def solve_together(chunk: list[np.ndarray]) -> list[SheetSolution]:
+            right_hand_sides = np.stack(
+                [np.concatenate([np.zeros(branches, dtype=np.complex128), injected[keep]]) for injected in chunk],
+                axis=1,
+            )
+
+            def saddle_block(block: np.ndarray) -> np.ndarray:
+                currents = block[:branches]
+                voltages = block[branches:]
+                return np.concatenate(
+                    [impedance_block(currents) - reduced @ voltages, reduced.T @ currents]
                 )
+
+            results, infos, iterations = _gmres_lockstep(
+                saddle_block, precondition, right_hand_sides, tolerance, restart, max_iterations
             )
+            residuals = np.linalg.norm(saddle_block(results) - right_hand_sides, axis=0) / np.maximum(
+                np.linalg.norm(right_hand_sides, axis=0), 1e-30
+            )
+            solutions = []
+            for column in range(results.shape[1]):
+                current = np.zeros(mesh.branch_count, dtype=np.complex128)
+                current[active_branches] = results[:branches, column]
+                voltage = np.zeros(mesh.node_count, dtype=np.complex128)
+                voltage[keep] = results[branches:, column]
+                solutions.append(
+                    SheetSolution(
+                        node_voltage=voltage,
+                        branch_current=current,
+                        frequency_hz=frequency_hz,
+                        iterations=iterations[column],
+                        residual=float(residuals[column]),
+                        converged=bool(infos[column] == 0 and residuals[column] < 1e-6),
+                        grounded_node=grounded,
+                        undriven_nodes=dropped,
+                        lockstep_columns=len(chunk),
+                    )
+                )
+            return solutions
+
+        if len(injected_list) == 1:
+            return [solve_alone(injected_list[0])]
+        # Measured once the factors exist, so the memory they took is not counted twice.
+        width = lockstep_width(len(injected_list), lockstep_column_bytes(size, restart, operator))
+        solutions: list[SheetSolution] = []
+        for first in range(0, len(injected_list), width):
+            chunk = injected_list[first : first + width]
+            solutions.extend([solve_alone(chunk[0])] if len(chunk) == 1 else solve_together(chunk))
         return solutions
     finally:
         if pool is not None:
@@ -1097,6 +1110,71 @@ AUTO_BLOCK_FROM_UNKNOWNS = 60_000
 # 0.2 mm plane at 8 threads and no slower than the whole block anywhere
 # (docs/SHEET_NEAR_TILES_RESULTS.json).
 DEFAULT_NEAR_TILES = 4
+
+# Excitations solved in lockstep each hold a Krylov basis of restart + 1
+# vectors of the saddle-point system and their own share of the operator's
+# transforms, so a group's memory grows with its width: on a four-layer board
+# at 0.1 mm six excitations of one mesh took 3.5 GB of bases alone.  A group
+# is therefore cut into lockstep columns that fit in this fraction of the
+# memory available when its Krylov solve starts (the factors are built by
+# then).  The cut changes nothing but the time: every column gets the bits
+# it gets alone.
+LOCKSTEP_MEMORY_FRACTION = 0.5
+# Work vectors of the saddle-point size a lockstep column holds besides its
+# basis: the solution, residual, matvec and preconditioner blocks.
+LOCKSTEP_WORK_VECTORS = 8
+# Bytes per padded spectral plane element, per grid cell, live at the peak
+# of one transform pass: the zero-padded input, the spectra, the accumulated
+# products and the inverse's output (8 + 16 + 16 + 8 over a 2 x 2 padding,
+# which the operator's padding to twice the grid makes 4 cells per cell).
+LOCKSTEP_FFT_BYTES_PER_CELL = 4 * (8 + 16 + 16 + 8)
+# The count above is within 5% of the peak RSS a column adds on the
+# benchmark's two- and four-layer meshes, on either side of it; a column is
+# reckoned this much larger so that a cut sized by it fits
+# (docs/SHEET_LOCKSTEP_MEMORY_RESULTS.json).
+LOCKSTEP_ESTIMATE_MARGIN = 1.1
+
+
+def lockstep_column_bytes(size: int, restart: int, operator: Any) -> int:
+    """Memory one excitation adds to a lockstep group of saddle-point ``size``.
+
+    Its Krylov basis and work vectors in complex128, and its part of the
+    batched transforms: every column is applied as a real and an imaginary
+    set of currents, each a plane per layer and axis plus one per vertical
+    level.  An operator without a uniform transform (the pFFT operator) is
+    counted by its basis and work vectors only.  The count is taken
+    :data:`LOCKSTEP_ESTIMATE_MARGIN` times.
+    """
+    counted = 16 * int(size) * (int(restart) + 1 + LOCKSTEP_WORK_VECTORS)
+    shape = getattr(operator, "shape", None)
+    stackup = getattr(operator, "stackup", None)
+    if shape is not None and stackup is not None and hasattr(operator, "apply_many"):
+        planes = 2 * (2 * len(stackup) + len(getattr(operator, "vertical_levels", ())))
+        counted += planes * LOCKSTEP_FFT_BYTES_PER_CELL * int(shape[0]) * int(shape[1])
+    return int(LOCKSTEP_ESTIMATE_MARGIN * counted)
+
+
+def _available_memory_bytes() -> int | None:
+    """``MemAvailable`` of ``/proc/meminfo``: what can be allocated without swapping. None off Linux."""
+    try:
+        with open("/proc/meminfo", encoding="ascii") as meminfo:
+            for line in meminfo:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        return None
+    return None
+
+
+def lockstep_width(count: int, column_bytes: int) -> int:
+    """How many of ``count`` excitations to solve in one lockstep group, at least one.
+
+    All of them when the memory available is unknown.
+    """
+    available = _available_memory_bytes()
+    if available is None or column_bytes <= 0:
+        return count
+    return max(1, min(count, int(LOCKSTEP_MEMORY_FRACTION * available) // int(column_bytes)))
 
 
 def choose_preconditioner(unknowns: int) -> str:
