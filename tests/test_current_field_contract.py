@@ -267,3 +267,19 @@ def test_cuda_telemetry_records_explicit_device_backend() -> None:
     assert metrics["backend"] == "cuda_sheet_peec"
     assert metrics["resolved_backend"] == "cupy-sheet-peec:0"
     assert not metrics["fallback_used"]
+
+
+def test_cell_regions_keep_two_adjacent_nets_apart() -> None:
+    value = _problem()
+    value["cell_regions"] = {"F.Cu": [{"x": 0, "y": 0, "region": 1}, {"x": 1, "y": 0, "region": 2}]}
+    problem = CurrentFieldProblem.from_mapping(value)
+    assert problem.cell_regions == {"F.Cu": {(0, 0): 1, (1, 0): 2}}
+    from electrical.sheet_peec.current_field_contract import _sheet_geometry
+
+    mesh, _operator, geometry = _sheet_geometry(problem, {"maximum_filaments": 1})
+    front = geometry.filament_of["F.Cu"][0]
+    assert (front, 0, 0) not in mesh.branch_x  # cells 0 and 1 of F.Cu are not joined
+    assert (front, 0, 1) in mesh.branch_x      # cell 2 is region 0 and joins cell 1
+    value["cell_regions"] = {"F.Cu": [{"x": 0, "y": 1, "region": 1}]}
+    with pytest.raises(ValueError, match="off the conductor"):
+        CurrentFieldProblem.from_mapping(value)

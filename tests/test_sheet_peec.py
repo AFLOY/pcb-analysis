@@ -501,6 +501,19 @@ class MeshTests(unittest.TestCase):
         self.assertEqual(len(mesh.branch_x), 2)
         self.assertEqual(len(mesh.branch_y), 0)
 
+    def test_adjacent_cells_of_two_regions_are_not_joined(self):
+        # two nets a clearance narrower than a cell apart sit in adjacent cells
+        stackup = one_layer()
+        occupancy = np.ones((1, 1, 4), dtype=bool)
+        region = np.array([[[1, 1, 2, 2]]])
+        mesh = SheetMesh((1, 4), PITCH_M, stackup, occupancy, region=region)
+        self.assertEqual(mesh.branch_x, [(0, 0, 0), (0, 0, 2)])
+        # a region of 0 (a bridge over a part) joins either side
+        bridged = SheetMesh((1, 4), PITCH_M, stackup, occupancy, region=np.array([[[1, 0, 2, 2]]]))
+        self.assertEqual(len(bridged.branch_x), 3)
+        with self.assertRaises(ValueError):
+            SheetMesh((1, 4), PITCH_M, stackup, occupancy, region=np.zeros((1, 1, 3), dtype=int))
+
     def test_a_via_whose_end_was_cut_away_is_not_a_branch(self):
         stackup = two_layers()
         occupancy = np.ones((2, 3, 3), dtype=bool)

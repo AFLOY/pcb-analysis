@@ -130,6 +130,12 @@ class SheetMesh:
     heights, in which case ``pitch_m`` may be ``None``.  A branch along x from
     cell ``(r, c)`` to ``(r, c + 1)`` is a bar centred on the shared edge, as
     long as the two half-cells and as wide as row ``r``; the y branch likewise.
+
+    ``region`` (optional, integers shaped like ``occupancy``) keeps conductors
+    apart that the grid sets side by side: two adjacent copper cells of
+    different non-zero regions are not joined, so two nets a clearance
+    narrower than a cell separates do not short.  A region of 0 joins any
+    neighbour (a bridge over a part that joins two nets).
     """
 
     shape: tuple[int, int]
@@ -138,6 +144,7 @@ class SheetMesh:
     occupancy: np.ndarray
     vias: tuple[ViaBranch, ...] = ()
     grid: TensorGrid | None = None
+    region: np.ndarray | None = None
 
     node_index: dict[Node, int] = field(init=False, repr=False)
     branch_x: list[tuple[int, int, int]] = field(init=False, repr=False)
@@ -171,20 +178,37 @@ class SheetMesh:
         if not self.node_index:
             raise ValueError("the conductor is empty")
 
-        # A branch exists where both of the cells it would join are copper.
+        if self.region is not None:
+            region = np.asarray(self.region)
+            if region.shape != expected:
+                raise ValueError(f"region must have shape {expected}")
+            if not np.issubdtype(region.dtype, np.integer):
+                raise ValueError("region must hold integers")
+            self.region = region
+
+        def joined(a: tuple[int, int, int], b: tuple[int, int, int]) -> bool:
+            if not (occupancy[a] and occupancy[b]):
+                return False
+            if self.region is None:
+                return True
+            ra, rb = int(self.region[a]), int(self.region[b])
+            return ra == rb or ra == 0 or rb == 0
+
+        # A branch exists where both of the cells it would join are copper (of
+        # one region, when regions are given).
         self.branch_x = [
             (layer, row, col)
             for layer in range(len(self.stackup))
             for row in range(rows)
             for col in range(cols - 1)
-            if occupancy[layer, row, col] and occupancy[layer, row, col + 1]
+            if joined((layer, row, col), (layer, row, col + 1))
         ]
         self.branch_y = [
             (layer, row, col)
             for layer in range(len(self.stackup))
             for row in range(rows - 1)
             for col in range(cols)
-            if occupancy[layer, row, col] and occupancy[layer, row + 1, col]
+            if joined((layer, row, col), (layer, row + 1, col))
         ]
         self.via_branches = tuple(
             via

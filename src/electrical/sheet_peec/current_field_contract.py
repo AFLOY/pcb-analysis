@@ -111,6 +111,10 @@ class CurrentFieldProblem:
     terminals: tuple[CurrentFieldTerminal, ...]
     source_board_sha256: str | None
     grid: TensorGrid | None = None
+    # Optional region per conductor cell, by layer: two adjacent cells of
+    # different non-zero regions are not joined (two nets closer than a cell);
+    # region 0, the default for an unlisted cell, joins any neighbour.
+    cell_regions: Mapping[str, Mapping[tuple[int, int], int]] | None = None
 
     @property
     def is_uniform(self) -> bool:
@@ -284,6 +288,16 @@ class CurrentFieldProblem:
                     )
                 )
 
+        regions: dict[str, dict[tuple[int, int], int]] | None = None
+        if value.get("cell_regions"):
+            regions = {}
+            for name, items in (value.get("cell_regions") or {}).items():
+                if name not in names_set:
+                    raise ValueError(f"cell_regions names an unknown layer {name!r}")
+                regions[name] = {(int(item["x"]), int(item["y"])): int(item["region"]) for item in items}
+                if any(cell not in copper[name] for cell in regions[name]):
+                    raise ValueError(f"{name}: a cell region lies off the conductor")
+
         problem = cls(
             name=str(value.get("name") or ""),
             role=str(value.get("role") or ""),
@@ -296,6 +310,7 @@ class CurrentFieldProblem:
             copper_by_layer=copper,
             vertical_segments=tuple(vertical),
             terminals=tuple(terminals),
+            cell_regions=regions,
             source_board_sha256=(
                 None
                 if value.get("source_board_sha256") is None
@@ -398,6 +413,13 @@ def _sheet_geometry(
                 )
             for index in filament_of[layer_name]:
                 occupancy[index, y, x] = True
+    region = None
+    if problem.cell_regions:
+        region = np.zeros(occupancy.shape, dtype=np.int64)
+        for layer_name, cells in problem.cell_regions.items():
+            for (x, y), value in cells.items():
+                for index in filament_of[layer_name]:
+                    region[index, y, x] = int(value)
 
     vias: list[ViaBranch] = []
     for layer in problem.layers:
@@ -449,6 +471,7 @@ def _sheet_geometry(
         occupancy,
         vias=tuple(vias),
         grid=tensor,
+        region=region,
     )
     # The convolution operator needs a uniform grid; a graded one takes the
     # precorrected FFT.  ``operator`` in the settings forces either.
@@ -618,7 +641,12 @@ def _same_geometry(first: CurrentFieldProblem, second: CurrentFieldProblem) -> b
         and first.layers == second.layers
         and dict(first.copper_by_layer) == dict(second.copper_by_layer)
         and first.vertical_segments == second.vertical_segments
+        and _regions(first) == _regions(second)
     )
+
+
+def _regions(problem: CurrentFieldProblem) -> dict[str, dict[tuple[int, int], int]]:
+    return {name: dict(cells) for name, cells in (problem.cell_regions or {}).items()}
 
 
 def _field_result(
