@@ -411,8 +411,12 @@ def solve_sheet_case_cuda(
         raise ValueError("the operator and the mesh must share a shape")
     if len(operator.stackup) != len(mesh.stackup):
         raise ValueError("the operator and the mesh must share a stackup")
+    if preconditioner == "auto":
+        # The contract's default.  The CUDA path has no block form, so the
+        # choice auto makes on the CPU by size does not arise: it is near.
+        preconditioner = "near"
     if preconditioner not in ("near", "diagonal"):
-        raise ValueError("preconditioner must be 'near' or 'diagonal'")
+        raise ValueError("preconditioner must be 'auto', 'near' or 'diagonal'")
     frequency_hz = float(frequency_hz)
     if not math.isfinite(frequency_hz) or frequency_hz < 0.0:
         raise ValueError("frequency must be finite and non-negative")
