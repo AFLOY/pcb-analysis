@@ -404,6 +404,66 @@ The reference at tolerance 1e-9 is 3.054796. The other near and block tables in
 this document predate the change; `block` factors the same `Z_near` and has
 not been measured again.
 
+### Hot-loop preconditioner experiments that did not pay
+
+Measured before the same-layer near field, on the same hot loop as the table
+above (`pk_g00_i29`, 0.2 mm, 183,440 saddle-point unknowns, seven
+capacitors in lockstep, `preconditioner="near"` with every layer pair in
+`L_near`, restart 120, Flow2, budget 48, `OPENBLAS_NUM_THREADS=1`). "C3" is
+one capacitor's GMRES iteration count; the solve time is the seven meshes'.
+None was adopted. The scripts and logs are not kept in the repository.
+
+Diagnosis first. A step's time went to the near LU, not to the operator:
+231 s of GMRES at tolerance 1e-6 split into 195.5 s of preconditioner
+solves, 30.4 s of operator applications and 5.4 s of the rest. The
+residual of one capacitor's mesh (C5, preconditioned norm) stayed above
+1e-1 for 75 iterations, reached 1e-2 at 105 and then fell a decade every
+30 or so (1e-4 at 168, 1e-6 at 236, 1e-9 at 323); after 25 to 50
+iterations 80% of the remaining current error was on the top layer, around
+the parts.
+
+| Change | Setting | C3 iterations | Solve (s) | Peak RSS (GB) | Outcome |
+|---|---|---:|---:|---:|---|
+| baseline | radius 1, tolerance 1e-9 | 328 | 416 | 6.4 | — |
+| near radius | 2 cells | 320 | 856 | 9.6 | same iterations, twice the time; 3 and 4 not run |
+| GMRES restart | 200 | 308 | 399 | 8.0 | iterations barely move: no restart stagnation |
+| GMRES restart | 400 | 307 | 372 | 9.5 | as above |
+| two-level (aggregation) | 8 x 8-cell aggregates, Galerkin coarse system of 2,240 branches + 1,298 nodes, dense LU, multiplicative | 308 | 626 | 6.7 | coarse system built in 25 s; each step applies the operator twice |
+| two-level (aggregation) | as above, tolerance 1e-6 (baseline 211 / 264 s) | 232 | 483 | 6.6 | slower than near alone |
+| block GMRES | the seven right-hand sides in one block Krylov space, right preconditioned, tolerance 1e-6 (baseline 211 / 264 s) | 164 steps | 380 | 10.4 | 22% fewer steps, Gram-Schmidt over 7 x 120 vectors costs them back |
+| block GMRES | as above, Gram-Schmidt on row chunks over threads, least squares every 8 steps | 168 steps | 256 | 9.7 | break-even with lockstep |
+| block GMRES | tolerance 1e-9 (unthreaded Gram-Schmidt) | 240 steps | 569 | 10.5 | 27% fewer steps, slower |
+| block preconditioner | what `auto` picks at this size, tolerance 1e-9 | — | > 2,400 | — | stopped after 40 min unfinished |
+
+On C5's mesh the two-level correction reached a preconditioned residual of
+1e-6 in 209 iterations against 236 and 1e-9 in 293 against 323: it removes
+some of the slow start, not the decade-per-30-iterations tail. An additive
+form (no second operator application) was worse than near alone on a small
+synthetic four-layer mesh (44 iterations against 36) and was not run on the
+board.
+
+The near saddle matrix of C5 (2,510,957 entries) factored under other
+column orderings, each in its own process, a 7-column solve timed:
+
+| Ordering | Factor (s) | 7-column solve (s) | L + U entries | Note |
+|---|---:|---:|---:|---|
+| COLAMD (SuperLU default, used) | 34.8 | 1.00 | 104.4M | — |
+| MMD_ATA | 43.1 | 0.97 | 103.6M | no gain |
+| MMD_AT_PLUS_A | — | — | — | not done in 20 min |
+| METIS nested dissection, pivot threshold 1.0 | 39.2 | 1.23 | 162.5M | more fill |
+| METIS nested dissection, pivot threshold 0.1 | 38.9 | 1.13 | 162.5M | more fill |
+| METIS nested dissection, pivot threshold 0.01 | 52.3 | 1.26 | 198.6M | more fill |
+| COLAMD, factors in complex64 | 27.8 | 1.11 | 104.1M | no faster; preconditioner residual 6e-4 |
+
+The solve is not limited by the bytes of the factors (single precision did
+not help) but by one thread walking them; solving the columns on threads
+did help (0.37 s on four threads in pairs), and is adopted.
+
+GMRES tolerance trades iterations for nothing the loop inductance shows,
+but was not changed: 1e-6, 1e-7, 1e-8 and 1e-9 took 211, 282, 289 and 328
+iterations and 264, 332, 365 and 416 s, the copper loop inductance
+3.0547951, 3.0547963, 3.0547963 and 3.0547964 nH.
+
 ### Block preconditioner (measured, `SHEET_PRECONDITIONER_RESULTS.json`)
 
 The near preconditioner factors the whole saddle-point matrix
