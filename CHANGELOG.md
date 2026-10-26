@@ -58,6 +58,24 @@ Versions before 0.7.0 were not tagged; see the Git history.
   to be replaced by a measured rule); `DCPortBasis.workers` still reports the
   pool width used. CUDA paths are unchanged.
 
+- `SheetMesh(region=)` and the contract's `cell_regions`
+  (`CurrentFieldProblem.cell_regions`, `{"cell_regions": {layer: [{x, y,
+  region}]}}`): adjacent copper cells of two different non-zero regions are
+  not joined, so two nets a clearance narrower than a cell separates do not
+  short on the grid; region 0 joins any neighbour. Additive.
+- The `near` and `block` preconditioners keep a branch's near-field
+  couplings on its own layer only (and the vertical branches' among
+  themselves), leaving the layers above and below to GMRES. Their
+  iterations and their solutions change within the tolerance. On a
+  four-layer 30 MHz hot loop (183k unknowns, seven excitations, tolerance
+  1e-6) `near` went from 211 to 135 iterations and 264 s to 73 s, the loop
+  inductance unchanged to 1e-6 of itself (docs/SHEET_PEEC.md, which also
+  records the preconditioner changes measured and not adopted). `block`
+  and the CUDA path were not measured again.
+- The `near` preconditioner solves a lockstep group's columns in pairs on the
+  thread budget (`NEAR_SOLVE_COLUMNS`), to the same bits: seven columns on
+  that hot loop 0.91 s -> 0.37 s per application.
+
 ### Breaking
 
 The default thread count of the native kernels changes from one to the
