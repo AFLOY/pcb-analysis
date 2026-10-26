@@ -396,6 +396,21 @@ class AlternatingCurrentTests(unittest.TestCase):
             results.append(solution.branch_current.tobytes() + solution.node_voltage.tobytes())
         self.assertTrue(all(result == results[0] for result in results))
 
+    def test_the_near_column_pairs_give_the_same_bits_at_every_thread_budget(self):
+        # A lockstep group's near-LU solves run in pairs of columns on the
+        # pool; which pairs, and how many threads, must not change a bit.
+        from electrical.threads import thread_budget_scope
+
+        sets = self._excitations() + self._excitations()[:2]
+        results = []
+        for threads in (1, 2, 4):
+            with thread_budget_scope(threads):
+                together = solve_sheet_cases(
+                    self.mesh, self.operator, sets, frequency_hz=3e5, preconditioner="near", restart=7
+                )
+            results.append(b"".join(s.branch_current.tobytes() + s.node_voltage.tobytes() for s in together))
+        self.assertTrue(all(result == results[0] for result in results))
+
     def _excitations(self):
         cols = self.cols
         return [

@@ -834,8 +834,14 @@ def _solve_ac(
     if preconditioner == "auto":
         preconditioner = choose_preconditioner(size)
     # The near block's strips are factored and solved on this pool; it lives
-    # for the solve and its width is the budget, capped by the strips.
-    width = min(thread_budget(), near_tiles) if preconditioner == "block" else 1
+    # for the solve and its width is the budget, capped by the strips.  The
+    # near LU solves a lockstep group's columns on it, a pair at a time.
+    if preconditioner == "block":
+        width = min(thread_budget(), near_tiles)
+    elif preconditioner == "near" and len(injected_list) > 1:
+        width = min(thread_budget(), -(-len(injected_list) // NEAR_SOLVE_COLUMNS))
+    else:
+        width = 1
     pool = ThreadPoolExecutor(max_workers=width) if width > 1 else None
     try:
         precondition = _build_preconditioner(
@@ -1145,6 +1151,12 @@ def _near_impedance(
     return (sp.diags(resistance[active_branches]) + 1j * omega * near).tocsr()
 
 
+# Columns of a lockstep group the near LU solves together on one thread.
+# Measured on a hot-loop mesh (183k unknowns, 104M LU entries, 7 columns):
+# 0.91 s as one solve, 0.56 s on 2 threads, 0.37 s on 4 (pairs), 0.42 s on 7.
+NEAR_SOLVE_COLUMNS = 2
+
+
 # Above this many saddle-point unknowns (branches + nodes) the whole-matrix LU
 # of the near preconditioner costs more memory than the block elimination
 # saves in iterations: on a 33 x 30 mm two-layer plane at 800 kHz the near
@@ -1304,7 +1316,23 @@ def _build_preconditioner(
         impedance = _near_impedance(mesh, operator, omega, resistance, active_branches)
         saddle = sp.bmat([[impedance, -reduced], [reduced.T, None]], format="csc")
         factored = spla.splu(saddle)
-        return factored.solve
+        if pool is None:
+            return factored.solve
+
+        def precondition_columns(vector: np.ndarray) -> np.ndarray:
+            # SuperLU's solve releases the GIL, and one solve of a few columns
+            # does not keep a core busy: pairs of columns on the pool.  A
+            # column's bits do not depend on the columns solved beside it.
+            if vector.ndim == 1 or vector.shape[1] <= NEAR_SOLVE_COLUMNS:
+                return factored.solve(vector)
+            starts = range(0, vector.shape[1], NEAR_SOLVE_COLUMNS)
+            parts = pool.map(
+                lambda start: factored.solve(np.ascontiguousarray(vector[:, start:start + NEAR_SOLVE_COLUMNS])),
+                starts,
+            )
+            return np.concatenate(list(parts), axis=1)
+
+        return precondition_columns
     if kind == "block" and hasattr(operator, "near_inductance"):
         # The same near-field impedance, applied by block elimination instead
         # of one LU of the whole saddle-point matrix.  Z_near is factored on
