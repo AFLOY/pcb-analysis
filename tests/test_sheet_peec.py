@@ -279,6 +279,26 @@ class AlternatingCurrentTests(unittest.TestCase):
         for smaller, larger in zip(departures, departures[1:]):
             self.assertAlmostEqual(larger / smaller, 10.0, places=3)
 
+    def test_the_near_impedance_keeps_the_couplings_on_a_branch_s_own_layer(self):
+        # The layers above and below are left to the Krylov iterations; within
+        # a layer (and among the vertical branches) the entries are the
+        # operator's near inductance unchanged.
+        from electrical.sheet_peec.sheet_peec import _branch_layers, _near_impedance
+
+        omega = 2e6
+        resistance = self.mesh.resistances()
+        active = np.ones(self.mesh.branch_count, dtype=bool)
+        near = _near_impedance(self.mesh, self.operator, omega, resistance, active).tocoo()
+        layer = _branch_layers(self.mesh)
+        self.assertTrue(np.all(layer[near.row] == layer[near.col]))
+        full = self.operator.near_inductance(self.mesh).toarray()
+        self.assertTrue(np.any(full[layer[:, None] != layer[None, :]] != 0.0))  # there was something to drop
+        expected = np.where(layer[:, None] == layer[None, :], full, 0.0)
+        np.testing.assert_array_equal(
+            _near_impedance(self.mesh, self.operator, omega, resistance, active).toarray(),
+            np.diag(resistance) + 1j * omega * expected,
+        )
+
     def test_the_block_preconditioner_reaches_the_near_preconditioner_solution(self):
         # Block elimination with Z_near factored alone and the Schur complement
         # approximated by the diagonal variant's nodal admittance: the same

@@ -379,6 +379,31 @@ see `GEOMETRY_CAD_IMPORT.md` for the trace-aware grading that was measured
 and not adopted. The uniform convolution operator stays the choice for
 uniform grids: it is exact to its 24-cell seam and cheaper to build.
 
+### Same-layer near field (measured on a hot loop)
+
+`L_near` as the operators report it couples a branch to its neighbours on
+every layer. The preconditioner now keeps only the couplings on the branch's
+own layer (and the vertical branches' among themselves) and leaves the
+layers above and below to the Krylov iterations. Two layers a tenth of a
+millimetre apart couple almost as strongly a few cells away as next door, so
+cutting that coupling at the near radius is a worse approximation than
+dropping it, and its fill dominated the LU.
+
+Kicad_PowerOpt's hot loop of `pk_g00_i29` (four layers, 30 MHz, 0.2 mm grid,
+121,383 branches, 183,440 saddle-point unknowns, the seven capacitors' meshes
+solved in lockstep), `preconditioner="near"`, tolerance 1e-6, restart 120,
+Flow2 compute node, thread budget 48, `OPENBLAS_NUM_THREADS=1`:
+
+| `L_near` kept | GMRES iterations (C3) | Preconditioner solves (s) | Operator (s) | Solve (s) | Copper loop inductance (nH) |
+|---|---:|---:|---:|---:|---:|
+| all layer pairs (before) | 211 | 195.5 | 30.4 | 264 | 3.054795 |
+| own layer + the cells straight above and below | 176 | 105.6 | 22.0 | 156 | 3.054796 |
+| own layer (adopted) | 135 | 42.6 | 18.4 | 73 | 3.054797 |
+
+The reference at tolerance 1e-9 is 3.054796. The other near and block tables in
+this document predate the change; `block` factors the same `Z_near` and has
+not been measured again.
+
 ### Block preconditioner (measured, `SHEET_PRECONDITIONER_RESULTS.json`)
 
 The near preconditioner factors the whole saddle-point matrix
