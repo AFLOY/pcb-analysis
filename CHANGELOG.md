@@ -4,7 +4,12 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
-## Unreleased
+## 0.10.0
+
+One process-wide thread budget replaces every thread knob (breaking: see
+below), excitations of one conductor are solved together, and the sheet-PEEC
+near-field preconditioner keeps each branch's couplings on its own layer.
+`electrical.sheet_peec.dc_network` is new.
 
 - `solve_sheet_case(near_tiles=)`: the `block` preconditioner factors
   `R + j omega L_near` in that many strips, side by side on the budget.
@@ -75,6 +80,11 @@ Versions before 0.7.0 were not tagged; see the Git history.
 - The `near` preconditioner solves a lockstep group's columns in pairs on the
   thread budget (`NEAR_SOLVE_COLUMNS`), to the same bits: seven columns on
   that hot loop 0.91 s -> 0.37 s per application.
+
+- Fixed: `solve_sheet_case_cuda` accepts `preconditioner="auto"` (as `near`;
+  the CUDA path has no block form). Since 0.9.3 the current-field contract
+  passed `auto` by default, so every CUDA current-field solve with default
+  settings raised `ValueError`.
 
 ### Breaking
 
