@@ -4,6 +4,22 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
+## Unreleased
+
+- The native builders take another compiler from `PCB_NATIVE_CXX` (the
+  command and any arguments it needs; `g++` when unset), and CMake adds
+  `-fcx-limited-range` only where the compiler accepts it. AMD AOCC 5.2
+  (clang 17) builds every kernel and passes the suite with
+  `PCB_NATIVE_CXX="<aocc>/bin/clang++ --gcc-install-dir=<gcc 12 dir>
+  -Wl,-rpath,<aocc>/lib"`. Measured on one host (Zen 5, 1 / 8 threads),
+  against g++ 12: layered DC solve 148 -> 44 ms / 20 -> 7.3 ms, thermal
+  2726 -> 1240 ms / 387 -> 188 ms, scalar Maxwell MPIR (256x256) 2.7 -> 4.4 s
+  / 0.51 -> 0.77 s, dipole near field (8000 x 4096) 756 -> 791 ms /
+  98 -> 110 ms. g++ stays the default.
+- `layered_dc_q1.cpp` keeps FMA contraction off in its gathers under clang
+  too (`#pragma clang fp contract(off)`; clang ignores the `optimize`
+  attribute).
+
 ## 0.10.0
 
 One process-wide thread budget replaces every thread knob (breaking: see

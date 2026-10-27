@@ -100,6 +100,9 @@ struct LayeredOperatorT {
     // two gather functions.
     __attribute__((optimize("-ffp-contract=off")))
     T gather(const T* x, int l, int y, int xi) const {
+#if defined(__clang__)
+#pragma clang fp contract(off)  // clang ignores the optimize attribute above
+#endif
         const int nr = node_rows(), nc = node_cols();
         const py::ssize_t node = (static_cast<py::ssize_t>(l) * nr + y) * nc + xi;
         if (!free_nodes[node]) return x[node];
@@ -131,6 +134,9 @@ struct LayeredOperatorT {
     // use the generic gather.
     __attribute__((optimize("-ffp-contract=off")))
     void apply_lines(const T* x, T* out, int line_begin, int line_end) const {
+#if defined(__clang__)
+#pragma clang fp contract(off)  // clang ignores the optimize attribute above
+#endif
         const int nr = node_rows(), nc = node_cols();
         for (int line = line_begin; line < line_end; ++line) {
             const int l = line / nr, y = line - l * nr;

@@ -10,6 +10,8 @@ modules pass their own source file and module name.
 from __future__ import annotations
 
 import argparse
+import os
+import shlex
 import subprocess
 import sys
 import sysconfig
@@ -30,12 +32,18 @@ def compile_extension(
 
     suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
     output = Path(output_dir) / f"{module_name}{suffix}"
+    # ``PCB_NATIVE_CXX`` names another compiler, with any arguments it needs
+    # (AOCC: its clang++, ``--gcc-install-dir`` and an rpath to its lib/).
+    compiler = shlex.split(os.environ.get("PCB_NATIVE_CXX", "g++"))
+    clang = "clang" in subprocess.run([*compiler, "--version"], capture_output=True, text=True).stdout
     command = [
-        "g++",
+        *compiler,
         "-O3",
         "-march=native",
         "-mprefer-vector-width=512",
-        "-fcx-limited-range",
+        # clang 17 has no -fcx-limited-range: complex products and quotients
+        # keep their full-range (NaN-checked) form there
+        *(() if clang else ("-fcx-limited-range",)),
         "-fno-math-errno",
         "-std=c++17",
         "-shared",

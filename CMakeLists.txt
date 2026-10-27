@@ -44,11 +44,18 @@ endif()
 
 # One native module: ``name`` is the importable module, ``package_dir`` the
 # package directory the module is written into (relative to src/).
+# clang 17 (AOCC 5) has no -fcx-limited-range; complex products and quotients
+# keep their full-range form there.
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag(-fcx-limited-range PCB_HAVE_CX_LIMITED_RANGE)
+
 function(pcb_native_module name package_dir)
   set(sources ${ARGN})
   pybind11_add_module(${name} MODULE ${sources})
-  target_compile_options(${name} PRIVATE
-    -O3 -fcx-limited-range -fno-math-errno -DNDEBUG)
+  target_compile_options(${name} PRIVATE -O3 -fno-math-errno -DNDEBUG)
+  if(PCB_HAVE_CX_LIMITED_RANGE)
+    target_compile_options(${name} PRIVATE -fcx-limited-range)
+  endif()
   if(PCB_NATIVE_MARCH)
     target_compile_options(${name} PRIVATE
       "-march=${PCB_NATIVE_MARCH}" -mprefer-vector-width=512)
