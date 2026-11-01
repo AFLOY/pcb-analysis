@@ -73,3 +73,23 @@ def test_multilayer_nonuniform_contract_matches_cpu_on_cuda() -> None:
     )
     assert voltage_difference < 1e-9
     assert density_difference < 1e-6
+
+
+def test_barrel_vias_solve_on_cuda_as_on_the_cpu() -> None:
+    _require_cuda_device()
+    problem = _problem(frequency_hz=1.0e6)
+    for connection in problem["vertical_connections"]:
+        connection["barrel"] = {"outer_diameter_mm": 0.3, "drill_diameter_mm": 0.25, "solid_pin": False}
+    common = {"relative_tolerance": 1e-10, "maximum_iterations": 240, "restart": 60, "maximum_filaments": 1}
+    results = {}
+    for model in ("barrel", "column"):
+        cpu = solve_current_field_problem(problem, {**common, "via_self_inductance": model, "execution_backend": "cpu"})
+        cuda = solve_current_field_problem(
+            problem, {**common, "via_self_inductance": model, "execution_backend": "cuda", "device_id": 0}
+        )
+        assert cuda.metrics["converged"] and cpu.metrics["converged"]
+        scale = max(abs(v) for v in cpu.voltage_phasor.values())
+        assert max(abs(cpu.voltage_phasor[n] - cuda.voltage_phasor[n]) for n in cpu.voltage_phasor) < 1e-7 * scale
+        results[model] = cuda
+    # the barrels move the field on the device as they do on the host
+    assert results["barrel"].voltage_phasor != results["column"].voltage_phasor

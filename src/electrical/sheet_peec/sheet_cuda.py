@@ -28,6 +28,8 @@ from .sheet_peec import (
     _self_inductance,
     _source_vector,
     _vertical_self_inductance,
+    _BarrelSelf,
+    _with_barrels,
 )
 
 
@@ -281,6 +283,23 @@ class CudaPfftSheetInductanceOperator:
         return flux_x, flux_y, flux_z.reshape(currents_z.shape)
 
 
+class _CudaBarrelSelf:
+    """A device operator whose barrel vias carry ``L_barrel - L_column`` on their own diagonal."""
+
+    def __init__(self, base: Any, delta_grid: Any) -> None:
+        self._base = base
+        self._delta_grid = delta_grid
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._base, name)
+
+    def apply(self, currents_x: Any, currents_y: Any, currents_z: Any | None = None) -> Any:
+        if currents_z is None:
+            return self._base.apply(currents_x, currents_y)
+        flux_x, flux_y, flux_z = self._base.apply(currents_x, currents_y, currents_z)
+        return flux_x, flux_y, flux_z + self._delta_grid * currents_z
+
+
 def cuda_inductance_operator(operator: Any, cp: Any) -> Any:
     """Device counterpart of either sheet inductance operator."""
 
@@ -411,11 +430,11 @@ def solve_sheet_case_cuda(
         raise ValueError("the operator and the mesh must share a shape")
     if len(operator.stackup) != len(mesh.stackup):
         raise ValueError("the operator and the mesh must share a stackup")
-    if any(via.barrel_radius_m is not None for via in mesh.via_branches):
-        raise ValueError(
-            "the CUDA sheet solve does not take barrel vias yet (ViaBranch.barrel_radius_m); "
-            "solve on the CPU or leave the barrels out"
-        )
+    levels_stated = mesh.vertical_levels
+    if not levels_stated or tuple(levels_stated) == tuple(operator.vertical_levels):
+        # Barrel vias: the host operator's near matrix and self terms (the
+        # preconditioner) and the device products both carry L_barrel - L_column.
+        operator = _with_barrels(mesh, operator)
     if preconditioner == "auto":
         # The contract's default.  The CUDA path has no block form, so the
         # choice auto makes on the CPU by size does not arise: it is near.
@@ -487,7 +506,12 @@ def solve_sheet_case_cuda(
                 injected_device = cp.asarray(injected)
                 resistance_device = cp.asarray(active_resistance)
                 active_branches_device = cp.asarray(active_branches)
-                cuda_operator = cuda_inductance_operator(operator, cp)
+                if isinstance(operator, _BarrelSelf):
+                    cuda_operator = _CudaBarrelSelf(
+                        cuda_inductance_operator(operator._base, cp), cp.asarray(operator._delta_grid)
+                    )
+                else:
+                    cuda_operator = cuda_inductance_operator(operator, cp)
                 indices = _branch_indices(mesh, cp)
                 cp.cuda.get_current_stream().synchronize()
                 prepare_ms = (

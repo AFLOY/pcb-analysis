@@ -197,8 +197,8 @@ couplings themselves were there.
   the cross-section.  The solve applies `L_barrel - L_column` on each barrel
   branch's diagonal by wrapping the operator, so the products, the near
   matrix and the preconditioners' self terms all see it, on the convolution
-  and the pFFT operator alike.  Overlapping barrels are refused; the CUDA
-  solve refuses barrels for now.  The contracts read each vertical
+  and the pFFT operator alike, and on the CUDA solve (the device products
+  add the same diagonal).  Overlapping barrels are refused.  The contracts read each vertical
   connection's `barrel` (`geometry.cad_import` writes it from the STEP solid)
   and use it unless `via_self_inductance` is `"column"`.
 - **Far apart, a via was a point.**  Past `NEAR_RADIUS_CELLS` (24) pitches
@@ -254,8 +254,9 @@ impedance by rounding-level amounts.  The
 barrels lower the loop's R by 5.6 % at 30 MHz: lighter vias draw more of the
 current through them.  The C++ kernels do not change the solve time here --
 the near-field LU dominates it.  Decision: adopted (every check in the JSON).
-Not measured: CUDA (no device), a graded board through the contract, and
-barrels covering several cells.
+Not measured here: CUDA timings (the CUDA solve with barrels is checked
+against the CPU in `tests/test_sheet_cuda_device.py`), a graded board
+through the contract, and barrels covering several cells.
 
 ## Thick copper: the inlay
 

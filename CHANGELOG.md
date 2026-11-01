@@ -85,7 +85,7 @@ length.
   STEP solid) and use it by default; the setting
   `via_self_inductance: "column"` keeps the previous model. **This moves the
   solved field of every mapping that carries barrels.** The CUDA sheet solve
-  refuses barrel vias.
+  takes barrel vias as the CPU solve does.
 - The CUDA sheet solve works with the C++ core built: the device
   convolution operator takes its spectra from the host operator's real-space
   tables when the core holds the spectra (it raised `KeyError` before).
