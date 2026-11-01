@@ -4,7 +4,13 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
-## Unreleased
+## 0.11.0
+
+`electrical.dice_peec` is gone (breaking: see below). The C++ core joins the
+Python solvers as a hybrid; copper becomes a network of pad ports closed by
+the parts that join its nets (`electrical.port_network`,
+`port-impedance-problem/v1`); and vias get their plated barrels and their
+length.
 
 - `electrical.port_network` is new: copper as a network of pad ports, closed
   by lumped parts (`docs/PORT_NETWORK.md`).
@@ -82,6 +88,60 @@ Versions before 0.7.0 were not tagged; see the Git history.
   refuses barrel vias.
 - `CudaPeecConfig`'s precision error no longer names a consumer's
   configuration key.
+- `electrical._pcbcore`: the C++ solver core (`cpp/`), one extension module
+  built by the root `CMakeLists.txt`
+  (`cmake -S . -B build/native && cmake --build build/native`). It bundles
+  SuperLU 7.0.1 with its own CBLAS (fetched, SHA-256 pinned), so sparse
+  factorisations never run on the system's BLAS, and fetches Eigen when none
+  is installed. The kernels that were separate modules (`_layered_dc_native`,
+  `_scalar_maxwell_native`, `_thermal_native`, `_dipole_native`,
+  `_voxelize_native`, `_sheet_pfft_native`) are its submodules. It builds
+  with GCC, Clang and MSVC on x86-64 and aarch64 Linux, macOS and Windows.
+  `electrical.backend.native_available()` says whether it is built; without
+  it the NumPy references answer. **The wheel is pure Python:** the core is
+  built from a source checkout.
+- The native kernels are the default CPU path whenever the core is built:
+  layered DC and scalar Maxwell Q1, thermal hexahedral Q1 and the dipole
+  direct summation; `native=False` keeps the NumPy path. The native MPIR runs
+  the whole refinement in C++ (FP64 outer residual, FP32 inner PCG, two-level
+  coarse space with Eigen); its answers agree with NumPy's to the solver
+  tolerance, not bit for bit, and are bit-identical across thread budgets.
+- `dc_network.solve_conductance_network` and `split_branch_sensitivity` run in
+  the core when it is built (one SuperLU factorisation for the forward and
+  every adjoint right-hand side); they agree with the NumPy references
+  (`_dc_network_reference.py`) to roundoff. A singular network now gives
+  non-finite potentials on both paths.
+- `electrical._pcbcore_cuda` (built with `-DPCB_NATIVE_CUDA=ON`): the FP32
+  inner PCG of the layered DC and thermal hex solves on a CUDA device, the
+  FP64 refinement on the host. Opt-in through `operator.device_system()` and
+  `solver.solve_mpir_device`; compiled in CI, not yet run on a GPU
+  (`docs/CUDA_HANDOFF.md`).
+
+### Breaking
+
+- Removed `electrical.dice_peec` (the DICE delta scorer, its runtime
+  controller and CUDA calibration) and the `pcb-analysis-calibrate` console
+  script. Its scalar interaction kernel was a ranking proxy that no consumer
+  used. Migration: `geometry.cad_import.board_vias` returns
+  `geometry.cad_import.BoardVias` of `BoardVia` (same `row`, `col`,
+  `layer_from`, `layer_to`, `resistance_ohm`, `inductance_h` fields as the
+  old `ViaSpec`; duplicate vias still merge or are refused); `board_stackup`
+  is gone (the raster's `layers` carry names and centre z); `voxel_peec`
+  keeps `HardwareTelemetry` and `ExecutionReport` in
+  `electrical.voxel_peec.telemetry`.
+- The environment variables `PCB_NATIVE_Q1`, `PCB_NATIVE_THERMAL`,
+  `PCB_NATIVE_EMC`, `PCB_NATIVE_ORTHO`, `PCB_NATIVE_DOT` and
+  `PCB_GEOMETRY_CLASSIFY` are gone: the native kernels answer whenever the
+  core is built, the Maxwell inner GMRES keeps modified Gram-Schmidt with
+  float64 dots, and a point classification method is chosen per call with
+  `method=`.
+- The per-package `native/build.py` scripts (and their `PCB_NATIVE_CXX`) are
+  gone; CMake is the one build.
+- Barrel vias move solved fields: a current-field or port-impedance mapping
+  whose vertical connections carry `barrel` (as `geometry.cad_import` writes
+  them) is solved with the barrels' own inductance. Pass
+  `via_self_inductance: "column"` to solve as 0.10.0 did (up to the far-field
+  via coupling, which changed too).
 
 ## 0.10.0
 
@@ -114,27 +174,6 @@ near-field preconditioner keeps each branch's couplings on its own layer.
   10 % above the measured peak; docs/SHEET_PEEC.md). The bits do not
   change; `SheetSolution.lockstep_columns` and the contract's metrics say
   how many columns shared a solve.
-- `electrical._pcbcore_cuda` (built with `-DPCB_NATIVE_CUDA=ON`): the FP32
-  inner PCG of the layered DC and thermal hex solves on a CUDA device, the
-  FP64 refinement on the host. Opt-in through `operator.device_system()` and
-  `solver.solve_mpir_device`; compiled in CI, not yet run on a GPU (see
-  `docs/CUDA_HANDOFF.md`). Additive.
-- The C++ core builds with GCC, Clang and MSVC, on x86-64 and aarch64 Linux,
-  macOS and Windows (subnormal flush per ISA, flags per compiler, Eigen
-  fetched when not installed). The per-package `native/build.py` scripts are
-  gone; `cmake -S . -B build/native && cmake --build build/native` is the one
-  build. `electrical.backend` (public) replaces the private `_backend`.
-- Removed `electrical.dice_peec` (the DICE delta scorer, its runtime
-  controller and CUDA calibration) and the `pcb-analysis-calibrate` console
-  script. Its scalar interaction kernel was a ranking proxy that no consumer
-  used. Migration: `geometry.cad_import.board_vias` returns
-  `geometry.cad_import.BoardVias` of `BoardVia` (same `row`, `col`,
-  `layer_from`, `layer_to`, `resistance_ohm`, `inductance_h` fields as the
-  old `ViaSpec`; duplicate vias still merge or are refused);
-  `board_stackup` is gone (the raster's `layers` carry names and centre z);
-  `voxel_peec` keeps `HardwareTelemetry` and `ExecutionReport` in
-  `electrical.voxel_peec.telemetry`. Breaking: the next release is a minor
-  version.
 - `electrical.sheet_peec.dc_network`: the zero-frequency sheet mesh as a bare
   conductance network. `ConductanceNetwork` (numbered nodes, branches in
   siemens), `solve_conductance_network(network, reference, injection,
@@ -186,41 +225,6 @@ near-field preconditioner keeps each branch's couplings on its own layer.
   passed `auto` by default, so every CUDA current-field solve with default
   settings raised `ValueError`.
 
-- The native extensions are the default CPU path whenever they are built:
-  the layered DC and scalar Maxwell Q1 kernels, the thermal hexahedral Q1
-  kernel and the dipole direct summation (CPU, complex128) no longer wait for
-  `PCB_NATIVE_Q1`, `PCB_NATIVE_THERMAL` or `PCB_NATIVE_EMC`. `native=False` on
-  the operators and solves keeps the NumPy path. The native MPIR runs the
-  whole refinement in C++ (FP64 outer residual, FP32 inner PCG, two-level
-  coarse space assembled and inverted with Eigen); its answers agree with the
-  NumPy path to the solver tolerance, not bit for bit, and are bit-identical
-  across thread budgets.
-
-- `electrical._pcbcore`: the C++ solver core (`cpp/`), one extension module
-  built by the root `CMakeLists.txt`. It bundles SuperLU 7.0.1, fetched from
-  its release archive (SHA-256 pinned) and built with its own CBLAS, so sparse
-  factorisations never run on the system's (possibly multithreaded) BLAS.
-  `electrical._backend` says whether it is built; tests compare it with the
-  NumPy references through `use_reference()`.
-- `dc_network.solve_conductance_network` and `split_branch_sensitivity` run in
-  the core when it is built: one SuperLU factorisation (COLAMD) for the
-  forward and every adjoint right-hand side, assembly and sums in branch
-  order, bit-identical across calls and thread budgets. The NumPy versions
-  moved to `_dc_network_reference.py` and answer without the build. Results
-  agree with them to roundoff, not bit for bit. A singular network now gives
-  non-finite potentials on both paths (with objectives, `splu` used to raise
-  `RuntimeError`).
-
-- One extension module: the kernels built as `_layered_dc_native`,
-  `_scalar_maxwell_native`, `_thermal_native`, `_dipole_native`,
-  `_voxelize_native` and `_sheet_pfft_native` are submodules of
-  `electrical._pcbcore` (`layered_dc`, `scalar_maxwell`, `thermal_hex`,
-  `dipole`, `voxelize`, `sheet_pfft_near`), compiled with the flags they had,
-  so one OpenMP runtime and one copy of Eigen are linked and the solver core
-  can call them directly. The per-package `native/build.py` scripts still
-  build each one as its own module where CMake is not available, and the
-  Python wrappers fall back to those.
-
 ### Breaking
 
 The default thread count of the native kernels changes from one to the
@@ -237,15 +241,11 @@ around a block). Removed:
   the exported `electrical.matrix_free_mpir_fem.port_basis_workers()`;
 - `geometry.cad_import.StepSolid.contains(threads=)` and
   `TriangleMesh.contains(threads=)` / `TriangleMesh.winding_numbers(threads=)`;
-- the environment variables `PCB_NATIVE_THREADS`, `PCB_PORT_BASIS_WORKERS`,
-  `PCB_NATIVE_Q1`, `PCB_NATIVE_THERMAL`, `PCB_NATIVE_EMC`, `PCB_NATIVE_ORTHO`,
-  `PCB_NATIVE_DOT` and `PCB_GEOMETRY_CLASSIFY` (the Maxwell inner GMRES keeps
-  modified Gram-Schmidt with float64 dots; a classification method is chosen
-  per call with `method=`)
+- the environment variables `PCB_NATIVE_THREADS` and `PCB_PORT_BASIS_WORKERS`
   and the `native_threads()` helpers of the native modules
   (`geometry.cad_import.mesh.native_threads` was in that module's `__all__`).
-  `PCB_NATIVE_Q1`, `PCB_NATIVE_THERMAL` and `PCB_NATIVE_EMC` went with them
-  (see below);
+  `PCB_NATIVE_Q1`, `PCB_NATIVE_THERMAL` and `PCB_NATIVE_EMC`, which select a
+  path rather than a thread count, stay;
 - `electrical.voxel_peec.default_tolerance` no longer reads
   `settings["scipy_workers"]` and raises `ValueError` when it is given.
 
