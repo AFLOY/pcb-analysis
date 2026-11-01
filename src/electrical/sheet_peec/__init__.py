@@ -7,7 +7,8 @@ reproduces a resistor network to machine precision and above it the transform
 path matches a dense assembly of the same operator.  The thickness of each
 sheet is cut into graded filaments for the skin effect, and
 ``current_field_contract`` is the serialised problem/result schema a router
-speaks.  A CUDA path (``sheet_cuda``) mirrors the CPU solve.
+speaks; ``port_impedance_contract`` states routed copper's pads as ports.
+A CUDA path (``sheet_cuda``) mirrors the CPU solve.
 """
 
 from .current_field_contract import (
@@ -36,6 +37,14 @@ from .sheet_inductance import (
     mutual_partial_inductance,
     self_partial_inductance,
 )
+from .port_impedance_contract import (
+    PORT_IMPEDANCE_PROBLEM_SCHEMA,
+    PORT_IMPEDANCE_RESULT_SCHEMA,
+    PortImpedanceProblem,
+    PortImpedanceResult,
+    ProblemPad,
+    solve_port_impedance_problem,
+)
 from .sheet_operator import SheetInductanceOperator, SheetLayer, SheetStackup
 from .sheet_peec import (
     SheetMesh,
@@ -57,6 +66,12 @@ from .skin_filaments import skin_depth_m
 from .skin_screen import LayerSkin, classify_layer_thickness
 
 __all__ = [
+    "PORT_IMPEDANCE_PROBLEM_SCHEMA",
+    "PORT_IMPEDANCE_RESULT_SCHEMA",
+    "PortImpedanceProblem",
+    "PortImpedanceResult",
+    "ProblemPad",
+    "solve_port_impedance_problem",
     "PortPad",
     "SheetPortImpedance",
     "merge_pads",

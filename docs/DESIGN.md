@@ -264,6 +264,7 @@ edits feed.
 | Dynamic memory controller `layers` | `controller.py` | already parameterized |
 | Full PEEC-MNA / adjoint / residual gates | — | not yet |
 | Current-field schema mapping | `current_field_contract.py` | implemented |
+| Port-impedance schema mapping | `port_impedance_contract.py` | implemented; CPU only |
 | Sheet PEEC CUDA execution | `sheet_cuda.py` | implemented; no CPU fallback |
 | Physical CUDA PyPEEC path | `cuda_pypeec.py` | layer-agnostic executor; mapping-dependent |
 
@@ -275,6 +276,12 @@ The full current-field solve consumes
 layer's own thickness and center Z, conductor cells, complex terminals,
 scenario frequency, and explicit vertical segments; this package does not
 import `plane_opt`.
+
+Routed copper whose pads are ports goes through `port-impedance-problem/v1`
+and `port_impedance_contract.solve_port_impedance_problem()`: the same
+conductor statement, pads with their part and net, each port's reference pad,
+and the frequencies.  It returns one pad-port impedance matrix per frequency
+for `electrical.port_network.BoardNetwork` (docs/SHEET_PEEC.md).
 
 The sparse candidate-scoring path remains:
 

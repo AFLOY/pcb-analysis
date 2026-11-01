@@ -28,6 +28,14 @@ Versions before 0.7.0 were not tagged; see the Git history.
   - `keep_solutions=True` keeps each port's solve, and
     `SheetPortImpedance.superpose(port_currents)` returns the copper's
     `SheetSolution` for any port currents.
+- `port-impedance-problem/v1` (`electrical.sheet_peec.port_impedance_contract`)
+  states routed copper as a serialisable mapping: the conductor as in
+  `current-field-problem/v2`, pads with their part and net, each port's
+  reference pad, the frequencies, and `merge_pins`.
+  `solve_port_impedance_problem` returns a `PortImpedanceResult` with one
+  matrix per frequency for `BoardNetwork`, serialisable as
+  `port-impedance-result/v1`. Frequencies that cut the copper alike share one
+  mesh and operator. CPU only.
 - `BoardNetwork` solves copper (`Z(f)` per frequency) with every part that
   joins its nets, by modified nodal analysis. Each part keeps its own current
   spectrum.

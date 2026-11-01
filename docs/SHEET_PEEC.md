@@ -817,5 +817,47 @@ another field solve.  It agrees with a direct solve of the same terminal
 currents within 1e-7 of the largest branch current at the 1e-10 solve
 tolerance.  The kept solves cost one node and one branch vector per port.
 
+### Routed copper as a port problem (`port_impedance_contract`)
+
+`port-impedance-problem/v1` states routed copper (traces, vias, pads, zones)
+the way `current-field-problem/v2` does, and replaces the one excitation by
+pads, ports and frequencies, so a caller never builds a `SheetMesh`:
+
+| key | meaning |
+|---|---|
+| `grid`, `layers`, `copper_by_layer`, `cell_regions`, `vertical_connections` | as in `current-field-problem/v2` (shared parser) |
+| `frequencies_hz` | positive, distinct; solved in ascending order (DC is `dc_network`'s) |
+| `pads` | `name`, `cells` (`layer`, `x`, `y`), optional `part` and `net` |
+| `ports` | `pad` and `reference`, the reference on the port's own conductor |
+| `merge_pins` | the pads of one part on one net become one pad `<part>:<net>` (default off) |
+
+`solve_port_impedance_problem(mapping, settings)` builds the mesh and runs
+`solve_port_impedance` at every frequency.  It answers
+`PortImpedanceResult`: one `SheetPortImpedance` per frequency, which
+`BoardNetwork` takes as its copper, and `to_mapping()` /
+`from_mapping()` for `port-impedance-result/v1` (`z_ohm` as `real` and `imag`
+rows; JSON round-trips the bits).  Settings are the current-field contract's
+keys and defaults (`relative_tolerance` 1e-9, `maximum_iterations` 200,
+`restart` 120, `preconditioner`, `near_tiles`, `maximum_filaments`,
+`cells_per_skin_depth`, `operator`, `pfft_*`).  The solve runs on the CPU;
+`execution_backend="cuda"` is refused.
+
+- A pad on several layers is a `PortPad` over those layers: its current is
+  spread evenly over all its cells.  A current-field terminal instead divides
+  its current equally between its layers.
+- Every pad listed is a terminal, port or not.  A conductor a pad touches is
+  solved with no net current, so its eddy current enters the matrix; copper
+  no pad touches is left out, as an undriven island is.
+- The thickness is cut into filaments per frequency.  Frequencies that cut
+  alike share one mesh and one inductance operator (`metrics["meshes_built"]`,
+  and per frequency `mesh_reused`, `build_seconds`, `solve_seconds`).
+- `keep_solutions=True` keeps each port's solve and its mesh
+  (`PortImpedanceResult.meshes`) for `SheetPortImpedance.superpose`.
+
+Acceptance (`tests/test_port_impedance_contract.py`): on the two 5 x 40 cell
+strips, at 1 and 10 MHz, with vertical connections and a pad over two
+layers, and with merged pins, the contract's matrix is bit-identical to
+`solve_port_impedance` on the same copper built as a `SheetMesh` by hand.
+
 Measured device acceptance and CPU comparisons are in
 `docs/SHEET_CUDA_RESULTS.md`.
