@@ -40,6 +40,14 @@ struct PfftFamilyParts {
 // grid, zero at r = 0.
 [[nodiscard]] std::vector<double> pfft_kernel_table(const ProjectionGridSpec& grid, double separation);
 
+// Two vertical lines of lengths ``span_a``/``span_b``, mid-points
+// ``axial_offset`` apart along z, between grid points at every wrapped
+// in-plane offset, per unit length of each (the parallel-filament mutual
+// inductance over span_a span_b; zero where the two would be one line).  The
+// vertical family projects ``I span`` and couples through this table.
+[[nodiscard]] std::vector<double> pfft_line_kernel_table(const ProjectionGridSpec& grid, double span_a, double span_b,
+                                                         double axial_offset);
+
 // The in-plane family of one axis: ``n_rows x n_cols`` possible branches
 // (row-major) with centres, lengths along the current and widths; ``layer_z``,
 // ``layer_thickness`` per layer and ``separation`` (layers x layers, rounded
@@ -52,12 +60,12 @@ struct PfftFamilyParts {
                                                   int threads);
 
 // The vertical family: one bar per cell (``rows x cols``) standing ``span``
-// tall at each level, centred at the level's mid-plane ``z_mid``;
-// ``separation`` is levels x levels.
+// tall at each level, centred at the level's mid-plane ``z_mid``; levels
+// couple on the grid through :func:`pfft_line_kernel_table`.
 [[nodiscard]] PfftFamilyParts pfft_vertical_family(const ProjectionGridSpec& grid, bool sample_along_x,
                                                    std::int64_t rows, std::int64_t cols, const double* centre_x,
                                                    const double* centre_y, const double* pitch_x,
                                                    const double* pitch_y, std::int64_t levels, const double* span,
-                                                   const double* z_mid, const double* separation, int threads);
+                                                   const double* z_mid, int threads);
 
 }  // namespace pcbcore::sheet

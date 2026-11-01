@@ -272,11 +272,10 @@ PairStructure pair_structure(const ProjectionGridSpec& grid, const std::int64_t 
 }
 
 // P_i K P_j^T for each listed pair: what the FFT path credits it with.
-std::vector<double> grid_pair_coupling(const ProjectionGridSpec& grid, const CsrMatrix& projection,
-                                       const std::vector<std::int64_t>& pair_i,
-                                       const std::vector<std::int64_t>& pair_j, const double separation,
-                                       const int threads) {
-    const std::vector<double> table = pfft_kernel_table(grid, separation);
+std::vector<double> grid_pair_coupling_table(const ProjectionGridSpec& grid, const CsrMatrix& projection,
+                                             const std::vector<std::int64_t>& pair_i,
+                                             const std::vector<std::int64_t>& pair_j,
+                                             const std::vector<double>& table, const int threads) {
     const std::int64_t rows = 2 * grid.nodes_y;
     const std::int64_t cols = 2 * grid.nodes_x;
     const auto count = static_cast<std::int64_t>(pair_i.size());
@@ -311,6 +310,13 @@ std::vector<double> grid_pair_coupling(const ProjectionGridSpec& grid, const Csr
         out[static_cast<size_t>(p)] = acc;
     }
     return out;
+}
+
+std::vector<double> grid_pair_coupling(const ProjectionGridSpec& grid, const CsrMatrix& projection,
+                                       const std::vector<std::int64_t>& pair_i,
+                                       const std::vector<std::int64_t>& pair_j, const double separation,
+                                       const int threads) {
+    return grid_pair_coupling_table(grid, projection, pair_i, pair_j, pfft_kernel_table(grid, separation), threads);
 }
 
 // The square (planes count) CSR of per-plane-pair blocks, row by row: for
@@ -360,6 +366,23 @@ std::vector<double> pfft_kernel_table(const ProjectionGridSpec& grid, const doub
             const double dx = static_cast<double>(wrapped_offset(c, cols)) * grid.pitch;
             const double radius = std::sqrt(dx * dx + dy * dy + separation * separation);
             table[static_cast<size_t>(r * cols + c)] = radius > 0.0 ? kMu0Over4Pi / radius : 0.0;
+        }
+    }
+    return table;
+}
+
+std::vector<double> pfft_line_kernel_table(const ProjectionGridSpec& grid, const double span_a, const double span_b,
+                                           const double axial_offset) {
+    const std::int64_t rows = 2 * grid.nodes_y;
+    const std::int64_t cols = 2 * grid.nodes_x;
+    std::vector<double> table(static_cast<size_t>(rows * cols));
+    const double per_length = 1.0 / (span_a * span_b);
+    for (std::int64_t r = 0; r < rows; ++r) {
+        const double dy = static_cast<double>(wrapped_offset(r, rows)) * grid.pitch;
+        for (std::int64_t c = 0; c < cols; ++c) {
+            const double dx = static_cast<double>(wrapped_offset(c, cols)) * grid.pitch;
+            table[static_cast<size_t>(r * cols + c)] =
+                per_length * parallel_filament_mutual_inductance(span_a, span_b, axial_offset, std::sqrt(dx * dx + dy * dy));
         }
     }
     return table;
@@ -474,7 +497,7 @@ PfftFamilyParts pfft_vertical_family(const ProjectionGridSpec& grid, const bool 
                                      const std::int64_t rows, const std::int64_t cols, const double* const centre_x,
                                      const double* const centre_y, const double* const pitch_x,
                                      const double* const pitch_y, const std::int64_t levels, const double* const span,
-                                     const double* const z_mid, const double* const separation, const int threads) {
+                                     const double* const z_mid, const int threads) {
     check_grid(grid);
     const std::int64_t count = rows * cols;
     std::vector<double> hx(static_cast<size_t>(count));
@@ -523,12 +546,14 @@ PfftFamilyParts pfft_vertical_family(const ProjectionGridSpec& grid, const bool 
         dv[u] = centre_x[j] - centre_x[i];
         dw[u] = centre_y[j] - centre_y[i];
     }
-    std::map<double, std::vector<double>> grid_cache;
+    // One grid coupling per level pair: the line kernel depends on both spans
+    // and the mid-plane offset, and is symmetric in the order of the two.
+    std::map<std::pair<std::int64_t, std::int64_t>, std::vector<double>> grid_cache;
     std::vector<std::vector<double>> correction_blocks;
     std::vector<std::vector<double>> near_blocks;
     for (std::int64_t a = 0; a < levels; ++a) {
         for (std::int64_t b = 0; b < levels; ++b) {
-            const double sep = separation[a * levels + b];
+            const std::pair<std::int64_t, std::int64_t> key{std::min(a, b), std::max(a, b)};
             const double sa[1] = {span[a]};
             const double sb[1] = {span[b]};
             const double du[1] = {z_mid[b] - z_mid[a]};
@@ -536,10 +561,12 @@ PfftFamilyParts pfft_vertical_family(const ProjectionGridSpec& grid, const bool 
             closed_form_arrays(static_cast<std::int64_t>(unique_exact), BarArrays{sa, wi.data(), ti.data(), 0, 1, 1},
                                BarArrays{sb, wj.data(), tj.data(), 0, 1, 1}, OffsetArrays{du, dv.data(), dw.data(), 0, 1, 1},
                                exact_unique.data(), threads);
-            if (grid_cache.find(sep) == grid_cache.end()) {
-                grid_cache.emplace(sep, grid_pair_coupling(grid, parts.projection, gi, gj, sep, threads));
+            if (grid_cache.find(key) == grid_cache.end()) {
+                const std::vector<double> table =
+                    pfft_line_kernel_table(grid, span[key.first], span[key.second], z_mid[key.second] - z_mid[key.first]);
+                grid_cache.emplace(key, grid_pair_coupling_table(grid, parts.projection, gi, gj, table, threads));
             }
-            const std::vector<double>& grid_unique = grid_cache.at(sep);
+            const std::vector<double>& grid_unique = grid_cache.at(key);
             std::vector<double> corr(total);
             std::vector<double> near(total);
             for (size_t k = 0; k < total; ++k) {

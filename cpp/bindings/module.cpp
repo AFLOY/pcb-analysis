@@ -442,14 +442,14 @@ py::dict pfft_vertical_family(const double origin_x, const double origin_y, cons
                               const int near_radius, const int preconditioner_radius, const bool sample_along_x,
                               const Input<double>& centre_x, const Input<double>& centre_y,
                               const Input<double>& pitch_x, const Input<double>& pitch_y, const Input<double>& span,
-                              const Input<double>& z_mid, const Input<double>& separation, const int threads) {
+                              const Input<double>& z_mid, const int threads) {
     if (centre_x.ndim() != 2 || centre_y.size() != centre_x.size() || pitch_x.size() != centre_x.shape(1) ||
         pitch_y.size() != centre_x.shape(0)) {
         throw pcbcore::InvalidInput("centres must be (rows, cols) with one pitch per column and per row");
     }
     const std::int64_t levels = span.size();
-    if (z_mid.size() != levels || separation.size() != levels * levels) {
-        throw pcbcore::InvalidInput("one span and mid-plane per level and a levels x levels separation table");
+    if (z_mid.size() != levels) {
+        throw pcbcore::InvalidInput("one span and mid-plane per level");
     }
     const auto spec = grid_spec(origin_x, origin_y, pitch, nodes_x, nodes_y, order, near_radius, preconditioner_radius);
     pcbcore::sheet::PfftFamilyParts parts;
@@ -457,7 +457,7 @@ py::dict pfft_vertical_family(const double origin_x, const double origin_y, cons
         py::gil_scoped_release release;
         parts = pcbcore::sheet::pfft_vertical_family(spec, sample_along_x, centre_x.shape(0), centre_x.shape(1),
                                                      centre_x.data(), centre_y.data(), pitch_x.data(), pitch_y.data(),
-                                                     levels, span.data(), z_mid.data(), separation.data(), threads);
+                                                     levels, span.data(), z_mid.data(), threads);
     }
     return family_dict(std::move(parts), levels, centre_x.size());
 }
@@ -632,8 +632,26 @@ PYBIND11_MODULE(_pcbcore, m) {
     sheet.def("pfft_vertical_family", &pfft_vertical_family, py::arg("origin_x"), py::arg("origin_y"),
               py::arg("pitch"), py::arg("nodes_x"), py::arg("nodes_y"), py::arg("order"), py::arg("near_radius"),
               py::arg("preconditioner_radius"), py::arg("sample_along_x"), py::arg("centre_x"), py::arg("centre_y"),
-              py::arg("pitch_x"), py::arg("pitch_y"), py::arg("span"), py::arg("z_mid"), py::arg("separation"),
-              py::arg("threads"));
+              py::arg("pitch_x"), py::arg("pitch_y"), py::arg("span"), py::arg("z_mid"), py::arg("threads"));
+    sheet.def(
+        "pfft_line_kernel_table",
+        [](const double pitch, const std::int64_t nodes_x, const std::int64_t nodes_y, const double span_a,
+           const double span_b, const double axial_offset) {
+            pcbcore::sheet::ProjectionGridSpec spec{};
+            spec.pitch = pitch;
+            spec.nodes_x = nodes_x;
+            spec.nodes_y = nodes_y;
+            std::vector<double> table = pcbcore::sheet::pfft_line_kernel_table(spec, span_a, span_b, axial_offset);
+            return to_array(std::move(table), {static_cast<py::ssize_t>(2 * nodes_y), static_cast<py::ssize_t>(2 * nodes_x)});
+        },
+        py::arg("pitch"), py::arg("nodes_x"), py::arg("nodes_y"), py::arg("span_a"), py::arg("span_b"),
+        py::arg("axial_offset"));
+    sheet.def(
+        "parallel_filament_mutual_inductance",
+        [](const double length_a, const double length_b, const double axial_offset, const double separation) {
+            return pcbcore::sheet::parallel_filament_mutual_inductance(length_a, length_b, axial_offset, separation);
+        },
+        py::arg("length_a"), py::arg("length_b"), py::arg("axial_offset"), py::arg("separation"));
     sheet.def("solve_sheet", &solve_sheet, py::arg("node_count"), py::arg("left"), py::arg("right"),
               py::arg("resistance"), py::arg("injection"), py::arg("frequency_hz"), py::arg("tolerance"),
               py::arg("max_iterations"), py::arg("restart"), py::arg("preconditioner"),

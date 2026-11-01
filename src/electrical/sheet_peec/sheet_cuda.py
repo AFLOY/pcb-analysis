@@ -273,8 +273,7 @@ class CudaPfftSheetInductanceOperator:
         for target in range(levels):
             accumulated = cp.zeros_like(spectra[0])
             for source in range(levels):
-                sep = round(abs(self.source._vertical_geometry[source][1] - self.source._vertical_geometry[target][1]), 15)
-                accumulated += self._spectra_z[sep] * spectra[source]
+                accumulated += self._spectra_z[self.source._vertical_key(target, source)] * spectra[source]
             potential = cp.fft.irfft2(accumulated, s=grid.padded)[: grid_shape[0], : grid_shape[1]]
             out[target] = spans[target] * (self._projection_z @ potential.reshape(-1))
         flux_z = out.reshape(-1) + self._correction_z @ flat.reshape(-1)

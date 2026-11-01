@@ -39,7 +39,11 @@ from electrical import backend as _backend
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
 from electrical.threads import thread_budget
 
-from .sheet_inductance import _MU0_OVER_4PI, closed_form_mutual_inductance_arrays
+from .sheet_inductance import (
+    _MU0_OVER_4PI,
+    closed_form_mutual_inductance_arrays,
+    parallel_filament_mutual_inductance,
+)
 from .sheet_operator import SheetStackup
 from .sheet_peec import SheetMesh
 
@@ -100,6 +104,33 @@ class ProjectionGrid:
         with np.errstate(divide="ignore"):
             table = np.where(r > 0.0, _MU0_OVER_4PI / np.where(r > 0.0, r, 1.0), 0.0)
         return table
+
+    def line_kernel_table(self, span_a_m: float, span_b_m: float, axial_offset_m: float) -> np.ndarray:
+        """Two vertical lines between grid points at every wrapped offset, per unit length of each.
+
+        The parallel-filament mutual inductance of lines ``span_a`` and
+        ``span_b`` long, mid-points ``axial_offset`` apart, over
+        ``span_a span_b``; zero where the two would be one line.  The vertical
+        family projects ``I span``, so its grid coupling is this table rather
+        than the point kernel at the mid-plane separation, which misses a via's
+        length by percents at a millimetre (17.6 % at 0.9 mm for 1.6 mm vias).
+        """
+
+        core = _backend.core()
+        if core is not None:
+            return np.asarray(
+                core.sheet.pfft_line_kernel_table(
+                    float(self.pitch_m), int(self.nodes_x), int(self.nodes_y),
+                    float(span_a_m), float(span_b_m), float(axial_offset_m),
+                )
+            )
+        rows, cols = self.padded
+        dy = np.fft.fftfreq(rows, d=1.0 / rows) * self.pitch_m
+        dx = np.fft.fftfreq(cols, d=1.0 / cols) * self.pitch_m
+        rho = np.sqrt(dx[None, :] ** 2 + dy[:, None] ** 2)
+        return np.asarray(
+            parallel_filament_mutual_inductance(span_a_m, span_b_m, axial_offset_m, rho), dtype=np.float64
+        ) / (float(span_a_m) * float(span_b_m))
 
 
 _GAUSS_3 = (np.array([-math.sqrt(3.0 / 5.0), 0.0, math.sqrt(3.0 / 5.0)]) / 2.0, np.array([5.0, 8.0, 5.0]) / 18.0)
@@ -256,20 +287,18 @@ class PfftSheetInductanceOperator:
         self._projection_z: sp.csr_matrix | None = None
         self._correction_z: sp.csr_matrix | None = None
         self._self_z: np.ndarray | None = None
-        self._spectra_z: dict[float, np.ndarray] = {}
+        # one spectrum per level pair (the line kernel depends on both spans
+        # and the offset), keyed by :meth:`_vertical_key`
+        self._spectra_z: dict[tuple[int, int], np.ndarray] = {}
         if self.vertical_levels:
             xc = 0.5 * (tensor.x_edges_m[:-1] + tensor.x_edges_m[1:]) - tensor.x_edges_m[0]
             yc = 0.5 * (tensor.y_edges_m[:-1] + tensor.y_edges_m[1:]) - tensor.y_edges_m[0]
             centre_x = np.broadcast_to(xc[None, :], self.shape)
             centre_y = np.broadcast_to(yc[:, None], self.shape)
             levels = len(self.vertical_levels)
-            vertical_separation = np.zeros((levels, levels))
             for a in range(levels):
-                for b in range(levels):
-                    sep = round(abs(self._vertical_geometry[b][1] - self._vertical_geometry[a][1]), 15)
-                    vertical_separation[a, b] = sep
-                    if sep not in self._spectra_z:
-                        self._spectra_z[sep] = np.fft.rfft2(self.grid.kernel_table(sep))
+                for b in range(a, levels):
+                    self._spectra_z[(a, b)] = np.fft.rfft2(self._vertical_table(a, b))
             if core is not None:
                 extent_x = np.broadcast_to(tensor.pitch_x_m[None, :], self.shape)
                 extent_y = np.broadcast_to(tensor.pitch_y_m[:, None], self.shape)
@@ -280,7 +309,7 @@ class PfftSheetInductanceOperator:
                     np.ascontiguousarray(tensor.pitch_y_m, dtype=np.float64),
                     np.asarray([span for span, _ in self._vertical_geometry], dtype=np.float64),
                     np.asarray([z for _, z in self._vertical_geometry], dtype=np.float64),
-                    vertical_separation, thread_budget(),
+                    thread_budget(),
                 )
                 self._projection_z = _csr(parts["projection"])
                 self._correction_z = _csr(parts["correction"])
@@ -300,6 +329,15 @@ class PfftSheetInductanceOperator:
             int(self.grid.nodes_x), int(self.grid.nodes_y), int(self.order),
             int(self.near_radius_cells), int(self.preconditioner_radius_cells),
         )
+
+    @staticmethod
+    def _vertical_key(target: int, source: int) -> tuple[int, int]:
+        return (target, source) if target <= source else (source, target)
+
+    def _vertical_table(self, a: int, b: int) -> np.ndarray:
+        """The grid coupling of levels ``a`` and ``b`` per unit length of each."""
+        (span_a, z_a), (span_b, z_b) = self._vertical_geometry[a], self._vertical_geometry[b]
+        return self.grid.line_kernel_table(span_a, span_b, z_b - z_a)
 
     def _near_pairs(self, coords: np.ndarray, half_extent: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Index pairs of a sorted 1D coordinate array within the near radius plus both half extents."""
@@ -330,10 +368,16 @@ class PfftSheetInductanceOperator:
         weights[mask] = projection.data[positions]
         return nodes, weights
 
-    def _grid_pair_coupling(self, projection: sp.csr_matrix, i: np.ndarray, j: np.ndarray, separation: float) -> np.ndarray:
-        """``P_i K P_j^T`` for the listed branch pairs: what the FFT path credits them with."""
+    def _grid_pair_coupling(
+        self, projection: sp.csr_matrix, i: np.ndarray, j: np.ndarray, separation: float, table: np.ndarray | None = None
+    ) -> np.ndarray:
+        """``P_i K P_j^T`` for the listed branch pairs: what the FFT path credits them with.
 
-        table = self.grid.kernel_table(separation)
+        ``K`` is the point kernel at ``separation``, or ``table`` when given.
+        """
+
+        if table is None:
+            table = self.grid.kernel_table(separation)
         rows, cols = self.grid.padded
         p = projection.tocsr()
         if _native is not None and self.use_native:
@@ -426,7 +470,7 @@ class PfftSheetInductanceOperator:
         # the exact one through the two thicknesses), so each distinct
         # combination is evaluated once and reused across layer pairs.
         exact_cache: dict[tuple[float, float, float], np.ndarray] = {}
-        grid_cache: dict[float, np.ndarray] = {}
+        grid_cache: dict[tuple[int, int], np.ndarray] = {}
         ui, uj = bi[ef], bj[ef]
         gi_, gj_ = bi[gf], bj[gf]
         for a, la in enumerate(layers):
@@ -488,7 +532,7 @@ class PfftSheetInductanceOperator:
             span_a, z_a = self._vertical_geometry[a]
             for b in range(levels):
                 span_b, z_b = self._vertical_geometry[b]
-                sep = round(abs(z_b - z_a), 15)
+                key = self._vertical_key(a, b)
                 exact_unique = closed_form_mutual_inductance_arrays(
                     (np.full(ui.size, span_a), fhx[ui], fhy[ui]),
                     (np.full(uj.size, span_b), fhx[uj], fhy[uj]),
@@ -496,9 +540,11 @@ class PfftSheetInductanceOperator:
                     check_precision=False,
                 )
                 exact = exact_unique[ei]
-                if sep not in grid_cache:
-                    grid_cache[sep] = self._grid_pair_coupling(self._projection_z, gi_, gj_, sep)
-                approximate = (span_a * span_b * grid_cache[sep])[gi]
+                if key not in grid_cache:
+                    grid_cache[key] = self._grid_pair_coupling(
+                        self._projection_z, gi_, gj_, 0.0, table=self._vertical_table(*key)
+                    )
+                approximate = (span_a * span_b * grid_cache[key])[gi]
                 blocks.append(sp.csr_matrix((exact - approximate, (bi, bj)), shape=(count, count)))
                 near_blocks.append(sp.csr_matrix((exact[near_mask], (bi[near_mask], bj[near_mask])), shape=(count, count)))
                 if a == b:
@@ -523,6 +569,14 @@ class PfftSheetInductanceOperator:
                     np.ascontiguousarray(self.grid.kernel_table(sep)), thread_budget()
                 )
             return kernel_index[(kind, sep)]
+
+        def vertical_kernel(target: int, source: int) -> int:
+            key = ("vertical", self._vertical_key(target, source))
+            if key not in kernel_index:
+                kernel_index[key] = native.add_kernel(
+                    np.ascontiguousarray(self._vertical_table(*key[1])), thread_budget()
+                )
+            return kernel_index[key]
 
         def csr(matrix: sp.csr_matrix) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
             matrix = matrix.tocsr()
@@ -552,13 +606,7 @@ class PfftSheetInductanceOperator:
             spans = np.asarray([span for span, _ in self._vertical_geometry])
             count = self._projection_z.shape[0]
             kernel_of = np.array(
-                [
-                    [
-                        kernel("vertical", round(abs(self._vertical_geometry[s_][1] - self._vertical_geometry[t][1]), 15))
-                        for s_ in range(levels)
-                    ]
-                    for t in range(levels)
-                ],
+                [[vertical_kernel(t, s_) for s_ in range(levels)] for t in range(levels)],
                 dtype=np.int64,
             )
             self._core_family["z"] = native.add_family(
@@ -654,8 +702,7 @@ class PfftSheetInductanceOperator:
         for target in range(levels):
             accumulated = np.zeros_like(spectra[0])
             for source in range(levels):
-                sep = round(abs(self._vertical_geometry[source][1] - self._vertical_geometry[target][1]), 15)
-                accumulated += self._spectra_z[sep] * spectra[source]
+                accumulated += self._spectra_z[self._vertical_key(target, source)] * spectra[source]
             potential = np.fft.irfft2(accumulated, s=self.grid.padded)[: grid_shape[0], : grid_shape[1]]
             out[target] = spans[target] * (self._projection_z @ potential.reshape(-1))
         flux_z = out.reshape(-1) + self._correction_z @ np.asarray(currents_z, dtype=np.float64).reshape(-1)

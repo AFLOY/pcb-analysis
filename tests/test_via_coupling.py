@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 
 from electrical import backend
+from electrical.matrix_free_mpir_fem.grid import TensorGrid
+from electrical.sheet_peec import SheetInductanceOperator, SheetLayer, SheetMesh, SheetStackup, ViaBranch
 from electrical.sheet_peec.sheet_inductance import (
     NEAR_RADIUS_CELLS,
     build_vertical_kernel,
@@ -14,6 +16,7 @@ from electrical.sheet_peec.sheet_inductance import (
     parallel_filament_mutual_inductance,
     vertical_cell,
 )
+from electrical.sheet_peec.sheet_pfft import PfftSheetInductanceOperator
 
 MU0_OVER_4PI = 1e-7
 
@@ -61,3 +64,38 @@ def test_the_core_tabulates_the_vertical_kernel_as_numpy_does() -> None:
     with backend.use_reference():
         reference = build_vertical_kernel(*args, near_radius_cells=8)
     np.testing.assert_allclose(native, reference, rtol=1e-12, atol=0.0)
+
+
+def _via_operators(near_radius_cells: int):
+    h, n, span = 0.1e-3, 40, 1.6e-3
+    stackup = SheetStackup((SheetLayer("F.Cu", 0.0, 3.5e-5, 1.724e-8), SheetLayer("B.Cu", -span, 3.5e-5, 1.724e-8)))
+    mesh = SheetMesh((n, n), None, stackup, np.ones((2, n, n), bool), vias=(ViaBranch(5, 5, 1, 0, 1e-6),),
+                     grid=TensorGrid.uniform(h, (n, n)))
+    uniform = SheetInductanceOperator((n, n), h, stackup, vertical_levels=mesh.vertical_levels)
+    return n, uniform, PfftSheetInductanceOperator(mesh, near_radius_cells=near_radius_cells)
+
+
+STRUCTURES = {
+    "3x3 at 1.0 mm, one current": [((5 + 10 * i, 5 + 10 * j), 1 / 9) for i in range(3) for j in range(3)],
+    "3x3 at 0.5 mm, one current": [((5 + 5 * i, 5 + 5 * j), 1 / 9) for i in range(3) for j in range(3)],
+    "go and return 1.0 mm apart": [((20, 5), 1.0), ((20, 15), -1.0)],
+    "go and return 2.0 mm apart": [((20, 5), 1.0), ((20, 25), -1.0)],
+    "two go, two return, interleaved at 1.0 mm": [((10, 5), 1.0), ((10, 15), -1.0), ((20, 5), -1.0), ((20, 15), 1.0)],
+}
+
+
+@pytest.mark.parametrize("name", list(STRUCTURES))
+def test_the_pfft_couples_vias_as_the_uniform_operator_does(name) -> None:
+    # 1.6 mm vias on 0.1 mm cells, projected on the 0.2 mm grid with the
+    # current-field contract's near reach of 4: the point kernel at the
+    # mid-plane was 0.6 to 6.7 % off on these
+    n, uniform, pfft = _via_operators(4)
+    currents = np.zeros((1, n, n))
+    for (row, col), value in STRUCTURES[name]:
+        currents[0, row, col] = value
+    zero = np.zeros((2, n, n))
+
+    def energy(operator):
+        return float(np.sum(operator.apply(zero, zero, currents)[2] * currents))
+
+    assert energy(pfft) == pytest.approx(energy(uniform), rel=1e-3)
