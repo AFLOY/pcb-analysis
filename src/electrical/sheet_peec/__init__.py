@@ -45,6 +45,7 @@ from .sheet_peec import (
     solve_sheet_case,
     via_resistance,
 )
+from .sheet_ports import PortPad, SheetPortImpedance, solve_port_impedance
 from .sheet_results import (
     SheetFields,
     cell_current_density,
@@ -56,6 +57,9 @@ from .skin_filaments import skin_depth_m
 from .skin_screen import LayerSkin, classify_layer_thickness
 
 __all__ = [
+    "PortPad",
+    "SheetPortImpedance",
+    "solve_port_impedance",
     "CURRENT_FIELD_PROBLEM_SCHEMA",
     "CURRENT_FIELD_RESULT_SCHEMA",
     "CellGeometry",

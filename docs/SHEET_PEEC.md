@@ -778,5 +778,16 @@ and their mutual inductance 7.43 nH, so a matrix per conductor would
 overstate this loop eightfold.  Part of the 0.8 % in L is the vias' own
 modelling: a vertical branch couples to no other vertical branch.
 
+`solve_port_impedance(mesh, operator, pads, references, frequency_hz=)`
+(`sheet_ports.py`) builds that matrix.  Each port pad names the reference pad
+of its own conductor.  Port `k` is driven with 1 A into its pad and out of
+its reference, every other pad is a 0 A terminal, and
+`z[j, k] = V(port j) - V(reference of j)` uses the mean potential over each
+pad's cells.  All excitations list the same pads, so they solve in one
+lockstep group with `keep_terminal_components`.  A port whose reference lies
+on another conductor is refused by the solve's per-component closure.
+`electrical.port_network.realize_port_network` turns the result into a
+circuit (docs/PORT_NETWORK.md).
+
 Measured device acceptance and CPU comparisons are in
 `docs/SHEET_CUDA_RESULTS.md`.
