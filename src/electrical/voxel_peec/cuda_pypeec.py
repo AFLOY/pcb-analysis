@@ -79,8 +79,8 @@ class CudaPeecConfig:
         precision = str(values.get("precision", "auto"))
         if precision not in {"auto", "complex128"}:
             raise ValueError(
-                "current_field_solver.cuda_peec.precision must be auto or "
-                "complex128. complex64 was accepted while it did nothing: "
+                "CudaPeecConfig precision must be 'auto' or "
+                "'complex128'. complex64 was accepted while it did nothing: "
                 "PyPEEC 5.8 allocates its FFT tensors and solution vectors as "
                 "complex128 and offers no way to ask for anything narrower, so "
                 "requesting it bought no memory and named a policy that was "
