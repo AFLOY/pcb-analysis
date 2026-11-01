@@ -46,12 +46,13 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
 import numpy as np
 
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
+from electrical.port_network.sweep import FrequencyCheck, PortImpedanceSweep, refine_frequencies
 
 from .current_field_contract import (
     CurrentFieldLayer,
@@ -208,6 +209,15 @@ class PortImpedanceResult:
     metrics: dict[str, Any] = field(default_factory=dict)
     meshes: tuple[SheetMesh, ...] | None = field(default=None, repr=False, compare=False)
     """The mesh each frequency was solved on, with ``keep_solutions`` (for superposed fields)."""
+    refinement: dict[str, Any] | None = None
+    """With ``frequency_refinement``: the tolerance, whether it was met, the frequencies asked for, and every midpoint check."""
+
+    def sweep(self) -> PortImpedanceSweep:
+        """The matrices as an ``electrical.port_network.PortImpedanceSweep`` (with the checks, when refined)."""
+        refinement = self.refinement or {}
+        checks = [FrequencyCheck(**check) for check in refinement.get("checks", [])]
+        return PortImpedanceSweep(self.impedances, checks, tolerance=refinement.get("relative_tolerance"),
+                                  converged=refinement.get("converged"))
 
     @property
     def frequencies_hz(self) -> tuple[float, ...]:
@@ -236,6 +246,7 @@ class PortImpedanceResult:
                 for z in self.impedances
             ],
             "metrics": self.metrics,
+            "refinement": self.refinement,
         }
 
     @classmethod
@@ -261,6 +272,7 @@ class PortImpedanceResult:
             pad_groups={str(k): tuple(str(m) for m in v) for k, v in value["pad_groups"].items()},
             impedances=tuple(impedances),
             metrics=dict(value.get("metrics") or {}),
+            refinement=value.get("refinement"),
         )
 
 
@@ -303,6 +315,13 @@ def solve_port_impedance_problem(
     runs on the CPU; ``execution_backend`` other than ``cpu`` is refused.
     ``keep_solutions`` keeps each port's solve and the mesh it is on, for
     :meth:`SheetPortImpedance.superpose`.
+
+    ``frequency_refinement`` (``relative_tolerance`` 0.01, ``maximum_solves``
+    24, ``minimum_ratio`` 1.05) solves the problem's frequencies and then the
+    midpoints :func:`electrical.port_network.refine_frequencies` needs for R
+    and L to interpolate within the tolerance between them; the result then
+    holds every solved frequency and the checks (``result.refinement``,
+    ``result.sweep()``).  Without it only the frequencies stated are solved.
     """
     settings = dict(settings or {})
     if str(settings.get("execution_backend", "cpu")) != "cpu":
@@ -319,11 +338,11 @@ def solve_port_impedance_problem(
         "near_tiles": None if settings.get("near_tiles") is None else int(settings["near_tiles"]),
     }
 
+    refinement = settings.get("frequency_refinement")
     built: dict[tuple, tuple[SheetMesh, Any, list[PortPad]]] = {}
-    impedances: list[SheetPortImpedance] = []
-    meshes: list[SheetMesh] = []
-    records: list[dict[str, Any]] = []
-    for frequency in problem.frequencies_hz:
+    solved: dict[float, tuple[SheetPortImpedance, SheetMesh, dict[str, Any]]] = {}
+
+    def solve_at(frequency: float) -> SheetPortImpedance:
         started = time.perf_counter()
         key = _cut_key(problem, frequency, settings)
         reused = key in built
@@ -335,9 +354,7 @@ def solve_port_impedance_problem(
         impedance = solve_port_impedance(
             mesh, operator, pads, ports, frequency_hz=frequency, keep_solutions=keep_solutions, **solve_arguments
         )
-        impedances.append(impedance)
-        meshes.append(mesh)
-        records.append({
+        solved[frequency] = (impedance, mesh, {
             "frequency_hz": frequency,
             "mesh_reused": reused,
             "sheet_layers": len(mesh.stackup),
@@ -348,6 +365,33 @@ def solve_port_impedance_problem(
             "converged": all(impedance.converged),
             "maximum_iterations": max(impedance.iterations),
         })
+        return impedance
+
+    refined: dict[str, Any] | None = None
+    if refinement is None:
+        for frequency in problem.frequencies_hz:
+            solve_at(frequency)
+    else:
+        options = dict(refinement)
+        unknown = sorted(set(options) - {"relative_tolerance", "maximum_solves", "minimum_ratio"})
+        if unknown:
+            raise ValueError(f"frequency_refinement takes relative_tolerance, maximum_solves, minimum_ratio; not {unknown}")
+        sweep = refine_frequencies(
+            solve_at, problem.frequencies_hz,
+            tolerance=float(options.get("relative_tolerance", 0.01)),
+            maximum_solves=int(options.get("maximum_solves", 24)),
+            minimum_ratio=float(options.get("minimum_ratio", 1.05)),
+        )
+        refined = {
+            "relative_tolerance": sweep.tolerance,
+            "converged": sweep.converged,
+            "requested_hz": list(problem.frequencies_hz),
+            "checks": [asdict(check) for check in sweep.checks],
+        }
+    order = sorted(solved)
+    impedances = [solved[f][0] for f in order]
+    meshes = [solved[f][1] for f in order]
+    records = [solved[f][2] for f in order]
     groups = problem.pad_groups()
     return PortImpedanceResult(
         name=problem.name,
@@ -363,6 +407,7 @@ def solve_port_impedance_problem(
             "frequencies": records,
         },
         meshes=tuple(meshes) if keep_solutions else None,
+        refinement=refined,
     )
 
 

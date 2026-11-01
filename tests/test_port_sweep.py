@@ -17,6 +17,8 @@ from electrical.port_network import (
     capacitor,
     refine_frequencies,
 )
+from electrical.sheet_peec import solve_port_impedance_problem
+from test_port_impedance_contract import _problem
 
 
 @dataclass(frozen=True)
@@ -117,3 +119,27 @@ def test_a_network_on_a_sweep_solves_harmonics_it_did_not_solve_and_says_so() ->
 def solution_drive(f, harmonics):
     k = list(harmonics.values()).index(f) + 1
     return 1.0 / k
+
+
+def test_the_contract_refines_the_band_of_two_strips_and_the_unsolved_points_hold() -> None:
+    # skin filaments on: R and L move with frequency over the band
+    settings = {"maximum_filaments": 6, "relative_tolerance": 1e-10,
+                "frequency_refinement": {"relative_tolerance": 0.01, "maximum_solves": 24}}
+    result = solve_port_impedance_problem(_problem(frequencies=(1e5, 1e8)), settings)
+    refinement = result.refinement
+    assert refinement["converged"] and refinement["requested_hz"] == [1e5, 1e8]
+    assert len(result.impedances) == len(refinement["checks"]) + 2
+    sweep = result.sweep()
+    # unsolved points, solved directly now, against the interpolation
+    check = solve_port_impedance_problem(_problem(frequencies=(2.7e5, 4.1e6, 3.3e7)), {"maximum_filaments": 6,
+                                                                                      "relative_tolerance": 1e-10})
+    for direct in check.impedances:
+        guess = sweep.at(direct.frequency_hz)
+        assert guess.interpolated
+        z = direct.z_ohm
+        assert np.abs(guess.z_ohm.real - z.real).max() <= 0.02 * np.abs(z.real).max()
+        assert np.abs(guess.z_ohm.imag - z.imag).max() <= 0.02 * np.abs(z.imag).max()
+    again = type(result).from_mapping(json.loads(json.dumps(result.to_mapping())))
+    assert again.refinement == refinement
+    with pytest.raises(ValueError, match="frequency_refinement takes"):
+        solve_port_impedance_problem(_problem(frequencies=(1e5, 1e8)), {"frequency_refinement": {"tol": 0.1}})
