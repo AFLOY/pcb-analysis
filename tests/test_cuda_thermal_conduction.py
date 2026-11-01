@@ -53,7 +53,8 @@ def _problem() -> ThermalConductionProblem:
 def test_cuda_low_action_matches_the_host_operator() -> None:
     runtime = _cuda_runtime()
     problem = _problem()
-    cpu = MatrixFreeThermalOperator(problem)
+    # the NumPy reference, whether or not the C++ core is built
+    cpu = MatrixFreeThermalOperator(problem, native=False)
     gpu = MatrixFreeThermalOperator(problem, runtime=runtime)
     vector = np.random.default_rng(3).standard_normal(cpu.size)
 
