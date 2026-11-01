@@ -102,12 +102,13 @@ class CudaSheetInductanceOperator:
         self.padded = source.padded
         self.layer_count = len(source.stackup)
         self.vertical_levels = source.vertical_levels
-        self._kernels = {
-            key: cp.asarray(value) for key, value in source._kernels.items()
-        }
-        self._kernels_z = {
-            key: cp.asarray(value) for key, value in source._kernels_z.items()
-        }
+        # The host operator keeps spectra only on its NumPy path; with the C++
+        # core built they live in the core.  Both keep the real-space tables,
+        # whose spectra are the ones the NumPy path would have.
+        kernels = source._kernels or {key: np.fft.rfft2(table) for key, table in source._tables.items()}
+        kernels_z = source._kernels_z or {key: np.fft.rfft2(table) for key, table in source._tables_z.items()}
+        self._kernels = {key: cp.asarray(value) for key, value in kernels.items()}
+        self._kernels_z = {key: cp.asarray(value) for key, value in kernels_z.items()}
 
     def _kernel(self, axis: str, first: int, second: int) -> Any:
         key = (
