@@ -9,7 +9,14 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from electrical.port_network import PortImpedanceSweep, refine_frequencies
+from electrical.port_network import (
+    BoardNetwork,
+    CurrentSource,
+    Part,
+    PortImpedanceSweep,
+    capacitor,
+    refine_frequencies,
+)
 
 
 @dataclass(frozen=True)
@@ -82,3 +89,31 @@ def test_a_sweep_round_trips_through_json() -> None:
     assert again.solved_frequencies_hz == sweep.solved_frequencies_hz
     assert again.checks == sweep.checks and again.converged == sweep.converged
     np.testing.assert_array_equal(again.at(7.7e5).z_ohm, sweep.at(7.7e5).z_ohm)
+
+
+def test_a_network_on_a_sweep_solves_harmonics_it_did_not_solve_and_says_so() -> None:
+    sweep = refine_frequencies(_synthetic, [1e5, 1e7], tolerance=1e-3)
+    parts = [Part("C1", "A", "G", capacitor(1e-6, 2e-3, 0.5e-9)), Part("C2", "B", "G", capacitor(10e-6, 5e-3, 1e-9))]
+    sources = [CurrentSource("Q", "B", "A", {})]
+    network = BoardNetwork(sweep, parts, ground="G", current_sources=sources)
+    harmonics = {f"h{k}": 3.3e5 * k for k in range(1, 20)}
+    spectra = network.solve_cases({"run": {"Q": {f: 1.0 / k for k, f in enumerate(harmonics.values(), start=1)}}})
+    run = spectra["run"]
+    assert all(s.copper_interpolated for s in run.solutions)
+    # each harmonic against the network on the exact copper there
+    for f, solution in zip(run.frequency_hz, run.solutions):
+        exact = BoardNetwork([_synthetic(f)], parts, ground="G",
+                             current_sources=[CurrentSource("Q", "B", "A", {f: solution_drive(f, harmonics)})]).solve(f)
+        assert solution.part_current_a["C1"] == pytest.approx(exact.part_current_a["C1"], rel=2e-3, abs=1e-9)
+    solved_here = network.solve(sweep.solved_frequencies_hz[0])
+    assert not solved_here.copper_interpolated
+    with pytest.raises(ValueError, match="outside the solved band"):
+        network.solve(2e7)
+    # copper given as matrices still refuses what it was not solved at
+    with pytest.raises(ValueError, match="no copper matrix"):
+        BoardNetwork(list(sweep.points), parts, ground="G", current_sources=sources).solve(3.3e5)
+
+
+def solution_drive(f, harmonics):
+    k = list(harmonics.values()).index(f) + 1
+    return 1.0 / k

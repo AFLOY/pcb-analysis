@@ -18,7 +18,9 @@ are those columns weighted by the source phasors.
 The copper's ``Z(f)`` comes from the caller at the frequencies asked for.
 This module runs no field solve, so ``electrical.sheet_peec`` stays the
 solver.  A frequency the copper has no matrix for is refused, not
-interpolated.
+interpolated -- unless the copper is a ``PortImpedanceSweep``, whose
+interpolation answers inside its solved band; a solution then says whether
+its copper was solved or interpolated.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from typing import Mapping, Protocol, Sequence
 import numpy as np
 
 from .parts import CurrentSource, Part, Tie, VoltageSource
+from .sweep import PortImpedanceSweep
 
 
 class CopperPorts(Protocol):
@@ -56,6 +59,8 @@ class NetworkSolution:
     """Into each copper port pad from the network (out of its reference)."""
     solve_residual: float = 0.0
     """Largest entry of the linear system's residual, for checking."""
+    copper_interpolated: bool = False
+    """The copper's matrix at this frequency came from a sweep's interpolation, not a solve."""
 
 
 @dataclass(frozen=True)
@@ -77,14 +82,17 @@ class BoardNetwork:
 
     def __init__(
         self,
-        copper: Mapping[float, CopperPorts] | Sequence[CopperPorts],
+        copper: Mapping[float, CopperPorts] | Sequence[CopperPorts] | PortImpedanceSweep,
         parts: Sequence[Part],
         ground: str,
         *,
         current_sources: Sequence[CurrentSource] = (),
         voltage_sources: Sequence[VoltageSource] = (),
     ) -> None:
-        if not isinstance(copper, Mapping):
+        self.sweep = copper if isinstance(copper, PortImpedanceSweep) else None
+        if self.sweep is not None:
+            copper = {float(p.frequency_hz): p for p in self.sweep.points}
+        elif not isinstance(copper, Mapping):
             copper = {float(c.frequency_hz): c for c in copper}
         self.copper = {float(f): c for f, c in copper.items()}
         if not self.copper:
@@ -135,6 +143,10 @@ class BoardNetwork:
         if frequency_hz <= 0.0:
             raise ValueError("solve at a positive frequency")
         copper = self.copper.get(frequency_hz)
+        interpolated = False
+        if copper is None and self.sweep is not None:
+            copper = self.sweep.at(frequency_hz)  # refuses outside the solved band
+            interpolated = copper.interpolated
         if copper is None:
             raise ValueError(f"no copper matrix at {frequency_hz:g} Hz (have {sorted(self.copper)})")
         omega = 2.0 * math.pi * frequency_hz
@@ -225,6 +237,7 @@ class BoardNetwork:
             source_current_a=source_current,
             copper_port_current_a=port_current,
             solve_residual=residual,
+            copper_interpolated=interpolated,
         )
         self._transfers[frequency_hz] = transfer
         return transfer
@@ -306,6 +319,8 @@ class NetworkTransfer:
     copper_port_current_a: np.ndarray
     solve_residual: float
     """Largest entry of the factorised system's residual over the unit columns."""
+    copper_interpolated: bool = False
+    """The copper's matrix came from a sweep's interpolation, not a solve."""
 
     def excitation_vector(self, phasors: Mapping[str, complex]) -> np.ndarray:
         unknown = sorted(set(phasors) - set(self.sources))
@@ -334,6 +349,7 @@ class NetworkTransfer:
                 source_current_a={name: complex(source[i, c]) for i, name in enumerate(self.voltage_sources)},
                 copper_port_current_a={name: complex(port[i, c]) for i, name in enumerate(self.ports)},
                 solve_residual=self.solve_residual,
+                copper_interpolated=self.copper_interpolated,
             )
             for c in range(drive.shape[1])
         ]
