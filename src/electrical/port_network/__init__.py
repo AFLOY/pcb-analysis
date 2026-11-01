@@ -10,7 +10,9 @@ domain, either as a nodal network of series R-L-C branches
 together, frequency by frequency, and keeps each part's own current: the
 share of the ripple each capacitor shunts is a result.  It also reduces
 simulated port-current waveforms to the time averages a linear copper
-solve needs (``window_moments``).
+solve needs (``window_moments``).  ``PortImpedanceSweep`` interpolates the
+copper's matrix over a band from a few solves, and ``refine_frequencies``
+chooses those solves by checking each interval at its midpoint.
 
 No solver of the copper lives here, and no circuit simulator is run.
 """
@@ -29,8 +31,20 @@ from .realization import (
     resistor_network,
 )
 from .subckt import node_token, subckt_text
+from .sweep import (
+    PORT_IMPEDANCE_SWEEP_SCHEMA,
+    FrequencyCheck,
+    PortImpedanceSweep,
+    SweepPoint,
+    refine_frequencies,
+)
 
 __all__ = [
+    "PORT_IMPEDANCE_SWEEP_SCHEMA",
+    "FrequencyCheck",
+    "PortImpedanceSweep",
+    "SweepPoint",
+    "refine_frequencies",
     "VoltageSource",
     "Tie",
     "TabulatedImpedance",
