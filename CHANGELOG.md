@@ -49,19 +49,39 @@ Versions before 0.7.0 were not tagged; see the Git history.
   `references`. Resistors stay within a conductor, inductors couple across
   conductors, and the mutual resistance left out is recorded in
   `dropped_cross_resistance_ohm`.
-- The native builders take another compiler from `PCB_NATIVE_CXX` (the
-  command and any arguments it needs; `g++` when unset), and CMake adds
-  `-fcx-limited-range` only where the compiler accepts it. AMD AOCC 5.2
-  (clang 17) builds every kernel and passes the suite with
-  `PCB_NATIVE_CXX="<aocc>/bin/clang++ --gcc-install-dir=<gcc 12 dir>
-  -Wl,-rpath,<aocc>/lib"`. Measured on one host (Zen 5, 1 / 8 threads),
-  against g++ 12: layered DC solve 148 -> 44 ms / 20 -> 7.3 ms, thermal
-  2726 -> 1240 ms / 387 -> 188 ms, scalar Maxwell MPIR (256x256) 2.7 -> 4.4 s
-  / 0.51 -> 0.77 s, dipole near field (8000 x 4096) 756 -> 791 ms /
-  98 -> 110 ms. g++ stays the default.
-- `layered_dc_q1.cpp` keeps FMA contraction off in its gathers under clang
-  too (`#pragma clang fp contract(off)`; clang ignores the `optimize`
-  attribute).
+- Another compiler builds the C++ core through CMake (`-DCMAKE_CXX_COMPILER=`,
+  with its flags in `CMAKE_CXX_FLAGS`); every optional flag
+  (`-fcx-limited-range`, `-march`) is checked before use and Clang builds the
+  kernel library without FMA contraction. The `PCB_NATIVE_CXX` variable of
+  the former per-package Python builders went with them. AMD AOCC 5.2
+  (clang 17) built every kernel through those builders and passed the suite;
+  measured on one host (Zen 5, 1 / 8 threads) against g++ 12: layered DC solve
+  148 -> 44 ms / 20 -> 7.3 ms, thermal 2726 -> 1240 ms / 387 -> 188 ms,
+  scalar Maxwell MPIR (256x256) 2.7 -> 4.4 s / 0.51 -> 0.77 s, dipole near
+  field (8000 x 4096) 756 -> 791 ms / 98 -> 110 ms. AOCC through the CMake
+  build has not been run. g++ stays the default.
+- The sheet solve is a hybrid: the Python driver (lockstep excitations, the
+  near block in strips, cell regions, `keep_terminal_components`) calls the
+  C++ core for the mesh topology, the convolution and pFFT operators and the
+  kernel tables. The core's own sheet solve driver (`core.sheet.solve_sheet`)
+  is built but not called: it predates those features. A mesh with cell
+  regions is built in Python. The suite takes 17 s with the core built
+  against 80 s on the NumPy references (one host, not a benchmark).
+- Vias couple to one another with their length: the vertical kernel's far
+  form is two parallel filaments of the two spans
+  (`parallel_filament_mutual_inductance`), not two points, and the pFFT
+  couples via levels through line kernels instead of mid-plane points
+  (`docs/SHEET_PEEC.md`, `docs/SHEET_VIA_RESULTS.json`).
+- A via can be its plated barrel (`ViaBranch.barrel_radius_m`,
+  `barrel_bore_radius_m`): its own inductance is then the barrel's, not the
+  cell's column's. The current-field and port-impedance contracts read each
+  vertical connection's `barrel` (as `geometry.cad_import` writes it from the
+  STEP solid) and use it by default; the setting
+  `via_self_inductance: "column"` keeps the previous model. **This moves the
+  solved field of every mapping that carries barrels.** The CUDA sheet solve
+  refuses barrel vias.
+- `CudaPeecConfig`'s precision error no longer names a consumer's
+  configuration key.
 
 ## 0.10.0
 

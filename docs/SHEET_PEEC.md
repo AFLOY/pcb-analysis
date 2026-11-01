@@ -182,6 +182,81 @@ redistribution currents in neighbouring columns oppose one another, so the
 mutual terms cancel much of the loop inductance the self terms would claim.
 Supplying the self term alone would have been worse than supplying neither.
 
+### Barrels and the length of a via (measured, `SHEET_VIA_RESULTS.json`)
+
+Two things about vias were wrong in the vertical operator, though the
+couplings themselves were there.
+
+- **The self term followed the cell, not the drill.**  A vertical branch is
+  a column of one cell's cross-section.  `ViaBranch.barrel_radius_m` (and
+  `barrel_bore_radius_m`, 0 for a solid pin) now make the branch the plated
+  barrel it is: its own inductance becomes
+  `barrel_self_inductance(span, r_outer, r_bore)`, the two-filament formula
+  at the tube's geometric mean distance from itself (Grover), and its
+  couplings stay the operator's, which beyond a cell or two do not depend on
+  the cross-section.  The solve applies `L_barrel - L_column` on each barrel
+  branch's diagonal by wrapping the operator, so the products, the near
+  matrix and the preconditioners' self terms all see it, on the convolution
+  and the pFFT operator alike.  Overlapping barrels are refused; the CUDA
+  solve refuses barrels for now.  The contracts read each vertical
+  connection's `barrel` (`geometry.cad_import` writes it from the STEP solid)
+  and use it unless `via_self_inductance` is `"column"`.
+- **Far apart, a via was a point.**  Past `NEAR_RADIUS_CELLS` (24) pitches
+  the uniform kernel took `mu0 l_a l_b / (4 pi r)`, and the pFFT coupled via
+  levels on its grid through the point kernel at the mid-plane separation.
+  Both now use two parallel filaments of the two spans with their axial
+  offset (`parallel_filament_mutual_inductance`); the pFFT keeps one line
+  kernel per level pair.  The C++ core and the NumPy references compute the
+  same tables.
+
+Current (main 8e157fe, NumPy) against candidate (C++ core built), 1.6 mm
+vias, 0.3 mm drill with 25 um plating, 1 MHz, tolerance 1e-10.  A 1 mm
+go/return pair joined by a one-cell trace; the vias' share of the loop
+against the barrels' closed form `2 (L_barrel - M)`, nH:
+
+| cells | barrels' closed form | current (columns) | candidate (barrels) |
+|---|---:|---:|---:|
+| 0.10 mm | 0.9649 | 1.6692 (+73.0 %) | 0.9647 (-0.02 %) |
+| 0.20 mm | 0.9649 | 1.2453 (+29.1 %) | 0.9643 (-0.06 %) |
+| 0.25 mm | 0.9649 | 1.1121 (+15.3 %) | 0.9639 (-0.10 %) |
+
+A 3 x 3 array carrying one current, against the barrels' closed form, nH:
+
+| cells / via pitch | closed form | current (columns) | candidate (barrels) |
+|---|---:|---:|---:|
+| 0.1 / 0.5 mm | 0.3253 | 0.3645 (+12.1 %) | 0.3254 (+0.04 %) |
+| 0.2 / 1.0 mm | 0.2213 | 0.2371 (+7.1 %) | 0.2215 (+0.07 %) |
+
+Via structures on 0.1 mm cells read off the pFFT operator (projection
+0.2 mm, near reach 4, the current-field contract's) against the uniform
+operator, no solve:
+
+| structure | uniform | current pFFT | candidate pFFT |
+|---|---:|---:|---:|
+| 3x3 at 1.0 mm, one current | 0.2606 | +5.55 % | -0.016 % |
+| 3x3 at 0.5 mm, one current | 0.3645 | +2.96 % | -0.005 % |
+| go/return 1.0 mm | 1.6692 | -4.00 % | +0.019 % |
+| go/return 2.0 mm | 1.8695 | -0.62 % | +0.001 % |
+| 2 go + 2 return interleaved 1.0 mm | 3.1152 | -6.71 % | +0.045 % |
+
+The two-layer plane of `sheet_preconditioner_benchmark.py` (33 x 30.3 mm at
+0.25 mm, 31944 nodes, 40 vias, 30 MHz, `near`, 1e-9), one solve on AMD Ryzen 7 9700X 8-Core Processor:
+
+| run | solve | iterations | residual | R | L |
+|---|---:|---:|---:|---:|---:|
+| current, columns | 12.51 s | 182 | 9.8e-10 | 0.7165 mOhm | 9.5388 nH |
+| candidate, columns | 12.32 s | 182 | 9.8e-10 | 0.7165 mOhm | 9.5387 nH |
+| candidate, barrels | 12.38 s | 182 | 9.4e-10 | 0.6761 mOhm | 9.5357 nH |
+
+With columns the two trees agree within 6e-6 of R and L: on this board,
+whose vias stand 15 cells apart, the far form and the C++ kernels move the
+impedance by rounding-level amounts.  The
+barrels lower the loop's R by 5.6 % at 30 MHz: lighter vias draw more of the
+current through them.  The C++ kernels do not change the solve time here --
+the near-field LU dominates it.  Decision: adopted (every check in the JSON).
+Not measured: CUDA (no device), a graded board through the contract, and
+barrels covering several cells.
+
 ## Thick copper: the inlay
 
 The sheet form assumes the current is uniform through a layer's thickness. For
@@ -791,9 +866,10 @@ wall itself, self and mutual terms included, which the via-closed loop
 carries and the port matrix of the open strips does not.  Vertical branches
 do couple to one another: the operator built with `vertical_levels` holds a
 kernel per pair of via levels (`build_vertical_kernel`), and the AC solve
-refuses a mesh whose levels the operator was not built for.  What the via
-model lacks is the barrel: a vertical branch is a pitch x pitch column, so
-its self inductance follows the cell size, not the drill.
+refuses a mesh whose levels the operator was not built for.  A via without a
+barrel is a pitch x pitch column, whose self inductance follows the cell
+size; with `barrel_radius_m` it has the barrel's (see "Barrels and the length
+of a via").
 
 `solve_port_impedance(mesh, operator, pads, references, frequency_hz=)`
 (`sheet_ports.py`) builds that matrix.  Each port pad names the reference pad

@@ -1,0 +1,222 @@
+{
+ "benchmark": "via model: barrel self term, filament far form, pFFT line kernels",
+ "measured_utc": "2026-11-01T15:09:30+00:00",
+ "environment": {
+  "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+  "cpu_count": 16,
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "python": "3.12.14",
+  "numpy": "2.3.5",
+  "scipy": "1.17.1",
+  "device": "CPU (no CUDA device on this host; CUDA not measured)"
+ },
+ "settings": {
+  "frequency_hz": 1000000.0,
+  "via_span_mm": 1.6,
+  "barrel_outer_diameter_mm": 0.3,
+  "barrel_drill_diameter_mm": 0.25,
+  "tolerance": 1e-10,
+  "plane": {
+   "frequency_hz": 30000000.0,
+   "pitch_mm": 0.25,
+   "preconditioner": "near",
+   "tolerance": 1e-09
+  }
+ },
+ "current": {
+  "label": "current",
+  "source": "main 8e157fe (NumPy references; no C++ core on main)",
+  "capabilities": {
+   "cpp_core": false,
+   "barrel_vias": false
+  },
+  "pair": [
+   {
+    "pitch_mm": 0.1,
+    "reference_via_share_nH": 0.9648955935608767,
+    "column_via_share_nH": 1.6691872062717175,
+    "column_error": 0.7299148399172433
+   },
+   {
+    "pitch_mm": 0.2,
+    "reference_via_share_nH": 0.9648955935608767,
+    "column_via_share_nH": 1.2453394623278806,
+    "column_error": 0.290646854062258
+   },
+   {
+    "pitch_mm": 0.25,
+    "reference_via_share_nH": 0.9648955935608767,
+    "column_via_share_nH": 1.1121424967909725,
+    "column_error": 0.15260397519973323
+   }
+  ],
+  "array": [
+   {
+    "pitch_mm": 0.1,
+    "via_pitch_mm": 0.5,
+    "reference_nH": 0.3252610755751005,
+    "column_nH": 0.3645194926195009,
+    "column_error": 0.12069817138428518
+   },
+   {
+    "pitch_mm": 0.2,
+    "via_pitch_mm": 1.0,
+    "reference_nH": 0.22131722724956826,
+    "column_nH": 0.2370791761920471,
+    "column_error": 0.07121880722238072
+   }
+  ],
+  "pfft": {
+   "3x3 at 1.0 mm, one current": {
+    "uniform_nH": 0.2605988695020858,
+    "pfft_error": 0.05551483907368571
+   },
+   "3x3 at 0.5 mm, one current": {
+    "uniform_nH": 0.36451949261950106,
+    "pfft_error": 0.029599742137453866
+   },
+   "go/return 1.0 mm": {
+    "uniform_nH": 1.6691872062717181,
+    "pfft_error": -0.04001141601841418
+   },
+   "go/return 2.0 mm": {
+    "uniform_nH": 1.8695300985534822,
+    "pfft_error": -0.0061955776131203955
+   },
+   "2 go + 2 return interleaved 1.0 mm": {
+    "uniform_nH": 3.1152432645512524,
+    "pfft_error": -0.06709932800228047
+   }
+  },
+  "plane": {
+   "column": {
+    "nodes": 31944,
+    "branches": 63422,
+    "vias": 40,
+    "solve_s": 12.512,
+    "iterations": 182,
+    "converged": true,
+    "residual": 9.754430812532003e-10,
+    "z_ohm": [
+     0.0007165267137919254,
+     1.7980154349243915
+    ]
+   }
+  }
+ },
+ "candidate": {
+  "label": "candidate",
+  "source": "feature/cpp-core-hybrid e995168 (C++ core built with GCC 12.5, -march=native)",
+  "capabilities": {
+   "cpp_core": true,
+   "barrel_vias": true
+  },
+  "pair": [
+   {
+    "pitch_mm": 0.1,
+    "reference_via_share_nH": 0.9648955935608767,
+    "column_via_share_nH": 1.669187206271718,
+    "column_error": 0.7299148399172437,
+    "barrel_via_share_nH": 0.96473921770413,
+    "barrel_error": -0.0001620650542818458
+   },
+   {
+    "pitch_mm": 0.2,
+    "reference_via_share_nH": 0.9648955935608767,
+    "column_via_share_nH": 1.2453394623278806,
+    "column_error": 0.290646854062258,
+    "barrel_via_share_nH": 0.9642735907629867,
+    "barrel_error": -0.000644632229684694
+   },
+   {
+    "pitch_mm": 0.25,
+    "reference_via_share_nH": 0.9648955935608767,
+    "column_via_share_nH": 1.1121424967909725,
+    "column_error": 0.15260397519973323,
+    "barrel_via_share_nH": 0.9639278197587462,
+    "barrel_error": -0.0010029829222859554
+   }
+  ],
+  "array": [
+   {
+    "pitch_mm": 0.1,
+    "via_pitch_mm": 0.5,
+    "reference_nH": 0.3252610755751005,
+    "column_nH": 0.3645194926195009,
+    "column_error": 0.12069817138428518,
+    "barrel_nH": 0.32538349325463495,
+    "barrel_error": 0.00037636744365432406
+   },
+   {
+    "pitch_mm": 0.2,
+    "via_pitch_mm": 1.0,
+    "reference_nH": 0.22131722724956826,
+    "column_nH": 0.23707917619204716,
+    "column_error": 0.07121880722238094,
+    "barrel_nH": 0.221464405549553,
+    "barrel_error": 0.0006650105905166015
+   }
+  ],
+  "pfft": {
+   "3x3 at 1.0 mm, one current": {
+    "uniform_nH": 0.2604897260111328,
+    "pfft_error": -0.00015836897986720722
+   },
+   "3x3 at 0.5 mm, one current": {
+    "uniform_nH": 0.36451949261950106,
+    "pfft_error": -4.974027420734384e-05
+   },
+   "go/return 1.0 mm": {
+    "uniform_nH": 1.6691872062717181,
+    "pfft_error": 0.00018918717498461746
+   },
+   "go/return 2.0 mm": {
+    "uniform_nH": 1.8695300985534822,
+    "pfft_error": 8.95405537959526e-06
+   },
+   "2 go + 2 return interleaved 1.0 mm": {
+    "uniform_nH": 3.115243264551252,
+    "pfft_error": 0.0004459004478016837
+   }
+  },
+  "plane": {
+   "column": {
+    "nodes": 31944,
+    "branches": 63422,
+    "vias": 40,
+    "solve_s": 12.32,
+    "iterations": 182,
+    "converged": true,
+    "residual": 9.751427515371942e-10,
+    "z_ohm": [
+     0.0007165225798004261,
+     1.798010868944054
+    ]
+   },
+   "barrel": {
+    "nodes": 31944,
+    "branches": 63422,
+    "vias": 40,
+    "solve_s": 12.38,
+    "iterations": 182,
+    "converged": true,
+    "residual": 9.41655519439915e-10,
+    "z_ohm": [
+     0.0006760923482668736,
+     1.797435929812142
+    ]
+   }
+  }
+ },
+ "decision": {
+  "adopted": true,
+  "criteria": "candidate: go/return via share within 1 % of the barrels' closed form at 0.10/0.20/0.25 mm and within 2 % of itself across them; 3 x 3 arrays within 1 %; pFFT within 0.1 % of the uniform operator on every via structure; the plane converges with columns and barrels",
+  "checks": {
+   "pair": true,
+   "pitch_independence": true,
+   "array": true,
+   "pfft": true,
+   "plane_converged": true
+  }
+ }
+}
