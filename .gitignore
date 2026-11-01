@@ -27,6 +27,7 @@ experiments/*
 !experiments/maxwell_native_benchmark.py
 !experiments/maxwell_native_benchmark.py
 !experiments/thermal_native_benchmark.py
+!experiments/via_model_benchmark.py
 !experiments/emc_native_benchmark.py
 !experiments/board_enclosure_acceptance.py
 !experiments/geometry_classify_benchmark.py
