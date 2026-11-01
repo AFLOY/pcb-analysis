@@ -25,6 +25,9 @@ Versions before 0.7.0 were not tagged; see the Git history.
   - A `PortPad` may cover cells on several layers (`other_layers`), and
     `merge_pads` makes one port of several pads (the pins of one part on one
     net). A one-layer pad gives the same bits as before.
+  - `keep_solutions=True` keeps each port's solve, and
+    `SheetPortImpedance.superpose(port_currents)` returns the copper's
+    `SheetSolution` for any port currents.
 - `BoardNetwork` solves copper (`Z(f)` per frequency) with every part that
   joins its nets, by modified nodal analysis. Each part keeps its own current
   spectrum.

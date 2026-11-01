@@ -144,7 +144,7 @@ def test_merged_pins_lose_only_the_division_between_them() -> None:
     assert abs(merged.imag / tied.imag - 1.0) > 0.03
 
 
-def test_a_pad_over_two_layers() -> None:
+def test_a_pad_over_two_layers_and_the_superposed_field() -> None:
     # the strips joined by vias across both ends: one conductor; a plated pad over
     # both layers at the near end, the far end of the top strip its return
     ends = tuple(ViaBranch(row, col, 1, 0, 1e-6) for col in (2, LENGTH - 1) for row, _ in _cells(col))
@@ -152,9 +152,37 @@ def test_a_pad_over_two_layers() -> None:
     operator = SheetInductanceOperator(shape, PITCH_M, _stackup(), vertical_levels=mesh.vertical_levels)
     plated = PortPad("j1", 0, _cells(1), ((1, _cells(1)),))
     pads = [plated, PortPad("mid", 1, _cells(LENGTH // 2)), PortPad("far", 0, _cells(LENGTH))]
-    result = solve_port_impedance(mesh, operator, pads, {"j1": "far", "mid": "far"}, frequency_hz=FREQUENCY)
+    result = solve_port_impedance(mesh, operator, pads, {"j1": "far", "mid": "far"}, frequency_hz=FREQUENCY,
+                                  keep_solutions=True)
     assert all(result.converged)
     np.testing.assert_allclose(result.z_ohm, result.z_ohm.T, rtol=1e-6)
+
+    # any port currents: the sum of the kept solutions is the direct solve of those currents
+    currents = {"j1": 0.7 - 0.2j, "mid": -0.3 + 0.5j}
+    field = result.superpose(currents)
+    j1_cells = 2 * WIDTH
+    direct = solve_sheet_case(
+        mesh, operator,
+        [Terminal("j1", 0, _cells(1), currents["j1"] * WIDTH / j1_cells),
+         Terminal("j1", 1, _cells(1), currents["j1"] * WIDTH / j1_cells),
+         Terminal("mid", 1, _cells(LENGTH // 2), currents["mid"]),
+         Terminal("far", 0, _cells(LENGTH), -(currents["j1"] + currents["mid"]))],
+        frequency_hz=FREQUENCY,
+    )
+    scale = np.abs(direct.branch_current).max()
+    assert np.abs(field.branch_current - direct.branch_current).max() < 1e-7 * scale
+    np.testing.assert_allclose(field.node_voltage, direct.node_voltage, atol=1e-7 * np.abs(direct.node_voltage).max())
+    with pytest.raises(ValueError, match="not ports"):
+        result.superpose({"far": 1.0})
+
+
+def test_superposing_needs_the_kept_solutions() -> None:
+    mesh, shape = _mesh()
+    operator = SheetInductanceOperator(shape, PITCH_M, _stackup())
+    result = solve_port_impedance(mesh, operator, PADS, {"top_near": "top_far"}, frequency_hz=FREQUENCY)
+    assert result.solutions is None
+    with pytest.raises(ValueError, match="keep_solutions"):
+        result.superpose({"top_near": 1.0})
 
 
 def test_a_pad_lists_each_layer_once() -> None:

@@ -20,18 +20,23 @@ on them is read: the matrix couples ports on different conductors through
 their mutual inductance, which a matrix per conductor drops.  Every
 excitation lists the same pads, so all of them solve in one lockstep group.
 
+With ``keep_solutions`` each port's solve is kept.  The copper is linear,
+so the field of any set of port currents is their sum
+(:meth:`SheetPortImpedance.superpose`): the copper's current distribution
+under a circuit's solution, without another field solve.
+
 Nothing here reads a board.  The caller states the pads as mesh cells.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 
 from .sheet_operator import SheetInductanceOperator
-from .sheet_peec import Cell, SheetMesh, Terminal, solve_sheet_cases
+from .sheet_peec import Cell, SheetMesh, SheetSolution, Terminal, solve_sheet_cases
 
 
 @dataclass(frozen=True)
@@ -94,9 +99,47 @@ class SheetPortImpedance:
     frequency_hz: float
     converged: tuple[bool, ...]
     iterations: tuple[int, ...]
+    solutions: tuple[SheetSolution, ...] | None = field(default=None, repr=False, compare=False)
+    """Port ``k``'s solve (1 A into it, out of its reference), with ``keep_solutions``."""
+
     @property
     def reference_pads(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys(self.references[p] for p in self.ports))
+
+    def superpose(self, port_current_a: Mapping[str, complex]) -> SheetSolution:
+        """The copper's solution when each port carries the current given (others 0 A).
+
+        ``port_current_a[p]`` flows into port ``p``'s pad and out of its
+        reference, for instance ``NetworkSolution.copper_port_current_a`` of
+        ``electrical.port_network.BoardNetwork``.  Node voltages and branch
+        currents are the sums of the kept port solutions; every one of those
+        shares its grounded nodes, so the voltages add on one gauge.
+        """
+        if self.solutions is None:
+            raise ValueError("the port solutions were not kept; solve with keep_solutions=True")
+        unknown = sorted(set(port_current_a) - set(self.ports))
+        if unknown:
+            raise ValueError(f"not ports of this matrix: {unknown}")
+        weights = [complex(port_current_a.get(port, 0.0)) for port in self.ports]
+        first = self.solutions[0]
+        voltage = np.zeros_like(first.node_voltage, dtype=np.complex128)
+        current = np.zeros_like(first.branch_current, dtype=np.complex128)
+        for weight, solution in zip(weights, self.solutions):
+            if weight != 0:
+                voltage += weight * solution.node_voltage
+                current += weight * solution.branch_current
+        return SheetSolution(
+            node_voltage=voltage,
+            branch_current=current,
+            frequency_hz=first.frequency_hz,
+            iterations=max(s.iterations for s in self.solutions),
+            residual=max(s.residual for s in self.solutions),
+            converged=all(s.converged for s in self.solutions),
+            grounded_node=first.grounded_node,
+            undriven_nodes=first.undriven_nodes,
+            lockstep_columns=first.lockstep_columns,
+        )
+
 
 def _pad_nodes(mesh: SheetMesh, pad: PortPad) -> list[int]:
     nodes = [mesh.node_index[(layer, row, col)] for layer, cells in pad.footprint for row, col in cells
@@ -128,12 +171,14 @@ def solve_port_impedance(
     restart: int = 60,
     preconditioner: str = "auto",
     near_tiles: int | None = None,
+    keep_solutions: bool = False,
 ) -> SheetPortImpedance:
     """The impedance matrix between the ports ``references`` names (port -> its reference pad).
 
     ``pads`` lists every port pad and every reference pad.  A port and its
     reference have to be on one conductor (the solve refuses a component that
     does not close its current); ports of different conductors couple.
+    ``keep_solutions`` keeps each port's solve for :meth:`SheetPortImpedance.superpose`.
     """
     by_name = {pad.name: pad for pad in pads}
     if len(by_name) != len(pads):
@@ -173,6 +218,7 @@ def solve_port_impedance(
         frequency_hz=float(frequency_hz),
         converged=tuple(bool(s.converged) for s in solutions),
         iterations=tuple(int(s.iterations) for s in solutions),
+        solutions=tuple(solutions) if keep_solutions else None,
     )
 
 

@@ -809,5 +809,13 @@ then carries a circulating current an even spread cannot represent.  Merging
 is meant for a package's leads, not for pins spread along the copper.  The
 default keeps every pad its own port.
 
+With `keep_solutions=True` each port's solve is kept, and
+`SheetPortImpedance.superpose(port_currents)` returns the `SheetSolution` of
+any port currents as the sum of those solves: the copper's current under a
+circuit's solution (`BoardNetwork`'s `copper_port_current_a`) without
+another field solve.  It agrees with a direct solve of the same terminal
+currents within 1e-7 of the largest branch current at the 1e-10 solve
+tolerance.  The kept solves cost one node and one branch vector per port.
+
 Measured device acceptance and CPU comparisons are in
 `docs/SHEET_CUDA_RESULTS.md`.
