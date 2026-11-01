@@ -15,8 +15,8 @@ PCHIP neither overshoots nor invents a turning point between the points.
 These forms were chosen by measurement (``docs/PORT_SWEEP_RESULTS.json``):
 on two strips with skin filaments over 0.1-100 MHz, ``a + b sqrt(f)``
 between neighbours (linear in ``sqrt f``) passed its 1 % checks yet missed R
-by 1.9 % between them, where these kept within 0.6 % on the same number of
-solves.  ``forms`` selects another pair for such comparisons.
+by 1.9 % between them, where these kept within 0.6 % with fewer solves
+(15 against 17).  ``forms`` selects another pair for such comparisons.
 
 Every entry of the matrix, couplings across conductors included, is
 interpolated alike.  Outside the solved band nothing is returned: an
