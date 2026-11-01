@@ -722,7 +722,13 @@ same restarted, left-preconditioned GMRES as `solve_sheet_case` on its own
 Krylov space, while the operator (`apply_many`) and the preconditioner
 (SuperLU with several right-hand sides) are applied to all running columns at
 once and the columns' Gram-Schmidt steps run side by side. Each excitation
-gets the bits and the iteration count it gets alone.
+gets the bits and the iteration count it gets alone on OpenBLAS (Linux,
+Windows).  On Apple's Accelerate BLAS (the macOS arm64 wheels of NumPy and
+SciPy) the iteration count holds but the bits need not: the pFFT test of
+`tests/test_sheet_pfft.py` differed in the last bits on macOS 15 in CI
+(2026-11-01), while the smaller uniform-operator test kept them.  The likely
+cause is SuperLU's solve with two right-hand sides against two solves of one
+on Accelerate; it was not reproduced on a Mac.
 `solve_current_field_problems` groups current-field problems of one geometry
 the same way.
 

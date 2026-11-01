@@ -89,6 +89,10 @@ length.
 - The CUDA sheet solve works with the C++ core built: the device
   convolution operator takes its spectra from the host operator's real-space
   tables when the core holds the spectra (it raised `KeyError` before).
+- Excitations solved together keep the bits of their solve alone on OpenBLAS
+  only: on Accelerate (macOS arm64) the C++ core's macOS CI job showed
+  last-bit differences on the pFFT operator, iteration counts equal
+  (`docs/SHEET_PEEC.md`). The guarantee is unchanged elsewhere.
 - `CudaPeecConfig`'s precision error no longer names a consumer's
   configuration key.
 - `electrical._pcbcore`: the C++ solver core (`cpp/`), one extension module
