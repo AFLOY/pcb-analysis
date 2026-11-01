@@ -192,3 +192,12 @@ def test_what_cases_refuse(strips) -> None:
         network.solve_cases({"bad": {"nope": {1e6: 1.0}}})
     with pytest.raises(ValueError, match="no copper matrix"):
         network.solve_cases({"third_harmonic": {"Q": {3e6: 1.0}}})
+
+
+def test_a_solution_reports_every_source_s_current(strips) -> None:
+    network = BoardNetwork(strips, _caps(), ground="PGND.sw",
+                           current_sources=[CurrentSource("Q", "PGND.sw", "VIN.sw", {})],
+                           voltage_sources=[VoltageSource("VIN", "VIN.far", "PGND.far", {})])
+    run = network.solve_cases({"run": {"Q": {1e6: 0.4 - 0.1j}, "VIN": {1e6: 1e-3}}})["run"].solutions[0]
+    assert run.source_current_a["Q"] == 0.4 - 0.1j  # a current source carries its own, per case
+    assert "VIN" in run.source_current_a            # a voltage source's is solved

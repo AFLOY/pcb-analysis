@@ -54,7 +54,7 @@ class NetworkSolution:
     part_current_a: dict[str, complex]
     """Through each part from its pad ``a`` to its pad ``b``; ties included."""
     source_current_a: dict[str, complex]
-    """Through each voltage source from ``a`` to ``b`` (a current source carries its own)."""
+    """Through each source from ``a`` to ``b``: a voltage source's solved current, a current source's own."""
     copper_port_current_a: dict[str, complex]
     """Into each copper port pad from the network (out of its reference)."""
     solve_residual: float = 0.0
@@ -346,7 +346,11 @@ class NetworkTransfer:
                 frequency_hz=self.frequency_hz,
                 pad_voltage_v={pad: complex(voltage[i, c]) for i, pad in enumerate(self.pads)},
                 part_current_a={name: complex(part[i, c]) for i, name in enumerate(self.parts)},
-                source_current_a={name: complex(source[i, c]) for i, name in enumerate(self.voltage_sources)},
+                source_current_a={
+                    **{name: complex(drive[i, c]) for i, name in enumerate(self.sources)
+                       if name not in self.voltage_sources},
+                    **{name: complex(source[i, c]) for i, name in enumerate(self.voltage_sources)},
+                },
                 copper_port_current_a={name: complex(port[i, c]) for i, name in enumerate(self.ports)},
                 solve_residual=self.solve_residual,
                 copper_interpolated=self.copper_interpolated,
