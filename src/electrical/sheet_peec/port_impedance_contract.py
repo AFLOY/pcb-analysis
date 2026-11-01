@@ -181,6 +181,28 @@ class PortImpedanceProblem:
             raise ValueError(f"merged pad names clash with pads stated: {clash}")
         return {key: tuple(members) for key, members in groups.items()}
 
+    def pad_positions_m(self) -> dict[str, tuple[float, float, float]]:
+        """Each pad of the solve (as :meth:`pad_groups` names it) at the centre of its cells, in metres.
+
+        x and y are the mean of its cells' centres in the solve's grid frame,
+        z the mean of their layers' centres: where a part's current enters
+        and leaves the copper, for ``emc.tiled_dipole_superposition.network_dipoles``.
+        """
+        grid = self.grid if self.grid is not None else TensorGrid.uniform(self.pitch_mm * 1e-3, (self.rows, self.columns))
+        xc = 0.5 * (np.asarray(grid.x_edges_m[:-1]) + np.asarray(grid.x_edges_m[1:]))
+        yc = 0.5 * (np.asarray(grid.y_edges_m[:-1]) + np.asarray(grid.y_edges_m[1:]))
+        z_of = {layer.name: layer.center_z_mm * 1e-3 for layer in self.layers}
+        stated = {pad.name: pad for pad in self.pads}
+        positions = {}
+        for key, members in self.pad_groups().items():
+            cells = [cell for name in members for cell in stated[name].cells]
+            positions[key] = (
+                float(np.mean([xc[x] for _, x, _ in cells])),
+                float(np.mean([yc[y] for _, _, y in cells])),
+                float(np.mean([z_of[layer] for layer, _, _ in cells])),
+            )
+        return positions
+
     def port_groups(self) -> dict[str, str]:
         """Each port of the solve (a pad group) and its reference group, in the order the ports were stated."""
         group_of = {name: key for key, members in self.pad_groups().items() for name in members}

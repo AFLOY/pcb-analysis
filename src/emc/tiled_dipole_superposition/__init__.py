@@ -4,6 +4,9 @@ Every current element of a solved board is a Hertzian dipole.  Summing the
 exact dipole fields gives the near-field map a scan probe reads; summing the
 far-zone terms gives the pattern, radiated power, and the field a test site
 reads at 3 m or 10 m, which the limit tables then turn into a margin.
+A board network's solution (copper and the parts that join its nets) becomes
+its current elements through ``network_dipoles``, and its emission per
+harmonic through ``network_emission``.
 """
 
 from .far_field import (
@@ -36,6 +39,7 @@ from .limits import (
     emission_margin,
 )
 from .moments import DipoleMoments, dipole_moments
+from .network import NetworkEmission, network_dipoles, network_emission, path_dipoles
 from .sources import (
     dipoles_from_pcb_dc,
     dipoles_from_sheet_peec,
@@ -56,6 +60,7 @@ __all__ = [
     "FarFieldPattern",
     "FieldSamples",
     "LimitBand",
+    "NetworkEmission",
     "MU_0_H_PER_M",
     "SPEED_OF_LIGHT_M_PER_S",
     "STANDARD_LIMITS",
@@ -67,6 +72,9 @@ __all__ = [
     "dipoles_from_sheet_peec",
     "emission_margin",
     "evaluate_fields",
+    "network_dipoles",
+    "network_emission",
+    "path_dipoles",
     "far_field_pattern",
     "scan_plane",
     "terminal_closure_dipoles",
