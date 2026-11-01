@@ -41,7 +41,9 @@ def test_peec_solves_the_skin_slab_with_filaments_rather_than_a_formula() -> Non
     result = peec_skin_effect_case(8, 1)
 
     assert result["peec_converged"]
-    assert result["filaments"] == 9
+    # 8 since a middle thinner than the face filaments joins its neighbours (it was 9:
+    # AC/DC 2.59455 and profile error 0.18286 then, 2.59487 and 0.18260 now)
+    assert result["filaments"] == 8
     assert 1.5 < result["peec_ac_to_dc_ratio"] < result["closed_form_ac_to_dc_ratio"]
     assert result["peec_profile_relative_l2_error_vs_filament_averaged_slab"] < 0.25
     assert result["peec_residual"] < 1.0e-8

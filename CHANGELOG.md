@@ -4,6 +4,20 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
+## Unreleased
+
+- `graded_filaments` no longer leaves a middle filament thinner than the face
+  filaments: such a middle joins the two filaments beside it. A 35 um foil
+  near 0.9 MHz had a 1 nm middle between two 17.5 um filaments, and every
+  solve with `maximum_filaments` of 3 or more failed there ("partial
+  inductance lost its precision"). The cut changes where the middle was
+  thinner than the faces (35 um, default settings: 0.89-2.0, 8.0-10.9,
+  44-50, 201-214 and 861-881 MHz); where the old cut solved, the two strips'
+  impedance moved by 1e-4 of |Z| (R by 0.13 % at 1.67 MHz, 0.41 % at 50 MHz)
+  and the skin slab of `tests/test_peec_fem_comparison.py` by 1.2e-4 in its
+  AC/DC ratio. Above about 180 MHz on 0.2 mm cells the 1 um face filaments
+  still exceed the closed form's precision, as before.
+
 ## 0.11.0
 
 `electrical.dice_peec` is gone (breaking: see below). The C++ core joins the

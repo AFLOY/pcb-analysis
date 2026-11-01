@@ -179,3 +179,20 @@ class FilamentLinkTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_no_middle_filament_is_thinner_than_the_faces() -> None:
+    # 35 um foil near 0.9 MHz left a 1 nm middle between two 17.5 um filaments,
+    # and the closed form of its couplings lost its precision
+    import pytest
+
+    from electrical.sheet_peec.skin_filaments import graded_filaments
+
+    for frequency in np.logspace(4, 9, 1001):
+        for thickness in (18e-6, 35e-6, 70e-6, 105e-6):
+            cut = graded_filaments(thickness, 0.0, frequency)
+            assert sum(cut.thicknesses_m) == pytest.approx(thickness, rel=1e-12)
+            if len(cut.thicknesses_m) > 1:
+                assert min(cut.thicknesses_m) >= cut.surface_thickness_m * (1 - 1e-12)
+    cut = graded_filaments(35e-6, 0.0, 8.913e5)
+    assert len(cut.thicknesses_m) == 2 and cut.thicknesses_m[0] == pytest.approx(17.5e-6)

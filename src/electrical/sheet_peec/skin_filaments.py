@@ -173,6 +173,14 @@ def graded_filaments(
         upper.append(step)
         remaining -= 2.0 * step
         step *= growth
+    # A middle left thinner than the face filaments is a sliver, not a step
+    # of the grading: it goes to the two filaments beside it.  (Kept, a
+    # 1 nm sliver between two 17 um filaments of 35 um foil near 0.9 MHz
+    # took the closed form of its couplings past its precision.)
+    if lower and 0.0 < remaining < surface:
+        lower[-1] += remaining / 2.0
+        upper[-1] += remaining / 2.0
+        remaining = 0.0
     thicknesses = lower + ([remaining] if remaining > 0.0 else []) + upper[::-1]
 
     # Place each filament's mid-plane, measuring from the conductor's top face
