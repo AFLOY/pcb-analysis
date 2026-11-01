@@ -50,8 +50,8 @@ def branch_by_branch_near_inductance(operator, mesh, radius_cells=1):
 
     rows, cols = operator.shape
     padded_rows, padded_cols = operator.padded
-    tables = {key: np.fft.irfft2(spectrum, s=operator.padded) for key, spectrum in operator._kernels.items()}
-    tables_z = {key: np.fft.irfft2(spectrum, s=operator.padded) for key, spectrum in operator._kernels_z.items()}
+    # the real-space tables the operator keeps whichever implementation applies it
+    tables, tables_z = operator._tables, operator._tables_z
     entries_i, entries_j, values = [], [], []
     span = range(-radius_cells, radius_cells + 1)
 
