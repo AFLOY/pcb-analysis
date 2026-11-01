@@ -6,6 +6,16 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
+- `electrical.port_network.PortImpedanceSweep` interpolates the copper's
+  pad-port matrix over a band from a few solves (R: PCHIP in `sqrt f`, L:
+  PCHIP in `log f`, chosen by measurement in
+  `docs/PORT_SWEEP_RESULTS.json`), refusing outside it; `refine_frequencies`
+  chooses the solves by checking every interval at its midpoint and keeps the
+  checks. `BoardNetwork` takes a sweep as its copper and marks solutions on
+  interpolated copper (`copper_interpolated`). The port-impedance contract
+  refines with `settings["frequency_refinement"]` and returns
+  `result.refinement` and `result.sweep()`. Without a sweep a frequency the
+  copper was not solved at is refused, as before.
 - `graded_filaments` no longer leaves a middle filament thinner than the face
   filaments: such a middle joins the two filaments beside it. A 35 um foil
   near 0.9 MHz had a 1 nm middle between two 17.5 um filaments, and every

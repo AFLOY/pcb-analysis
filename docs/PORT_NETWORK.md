@@ -147,7 +147,8 @@ reduction that merged the parts would lose it.
   every part's current spectrum is a result per case.  What the cases mean
   (the share a capacitor takes, the dB of a transfer, a hot loop's value) is
   the caller's to define.
-- A frequency without a copper matrix is refused, not interpolated.  A pad
+- A frequency without a copper matrix is refused, not interpolated, unless
+  the copper is a `PortImpedanceSweep` (below).  A pad
   or a conductor with no path to the ground pad is reported as singular.
 
 Checked (`tests/test_board_network.py`): on the strips below with a 1 uF
@@ -161,6 +162,75 @@ On two strips (VIN over PGND, a switch at one end, a capacitor of 1 uF /
 2 mOhm / 0.5 nH at the middle and one at the far end;
 `tests/test_board_network.py`), the switch current closes through the two
 capacitors.  The nearer one takes 0.50 of it at 100 kHz and 0.81 at 10 MHz.
+
+## Copper over a band (`sweep.py`)
+
+A board network is solved at many frequencies -- every harmonic of every
+operating case -- and the copper's field solve is the expensive part.
+`PortImpedanceSweep(points)` holds the matrices solved at a few frequencies
+and answers any frequency inside their band by interpolation, entry by entry
+(couplings across conductors included):
+
+- `R = Re Z`: monotone cubic (PCHIP) in `sqrt(f)`, where the skin-effect law
+  is a straight line and the bend from the DC value is followed;
+- `L = Im Z / omega`: PCHIP in `log f`.
+
+`sweep.at(f)` returns the solved matrix at a solved frequency and an
+interpolated one (`interpolated=True`) inside the band; outside it refuses.
+
+`refine_frequencies(solve, frequencies, tolerance=0.01, maximum_solves=24,
+minimum_ratio=1.05)` chooses the solves.  Each interval between solved points
+is checked at its geometric midpoint: the copper is solved there and compared
+with what the interpolation over the points solved so far predicted, R and L
+each against the largest entry of its own matrix.  An interval that misses is
+split and its halves checked in turn.  The checks (`FrequencyCheck`) are kept
+with the sweep, and `converged` says whether every interval met the tolerance
+before an interval got narrower than `minimum_ratio` or the solves ran out.
+The port-impedance contract runs it with
+`settings["frequency_refinement"]` (`docs/SHEET_PEEC.md`).
+
+`BoardNetwork(sweep, ...)` takes a sweep as its copper: a frequency the
+copper was not solved at is served by the interpolation and the solution
+says so (`NetworkSolution.copper_interpolated`, also on `NetworkTransfer`).
+Copper given as matrices still refuses a frequency it has no matrix for.
+`PortImpedanceSweep.to_mapping()` / `from_mapping()` serialise a sweep with
+its checks and forms (`port-impedance-sweep/v1`).
+
+### The forms (measured, `PORT_SWEEP_RESULTS.json`)
+
+Each pair of forms refined over the band from its two ends, then compared
+not at its own checks but at validation frequencies solved directly: a
+synthetic two-port (R from its DC value into `sqrt f` at 200 kHz, L falling
+from 12 to 9 nH around 1 MHz; 80 points over 10 kHz-100 MHz) and the
+contract's two strips with up to six skin filaments per layer (30 points over
+0.1-100 MHz; one solve 1.22 s on AMD Ryzen 7 9700X 8-Core Processor):
+
+| copper | R / L form | tolerance | solves | converged | worst R between checks | worst L between checks |
+|---|---|---:|---:|---|---:|---:|
+| synthetic | linear-sqrt / pchip-log | 0.01 | 15 | yes | 0.38 % | 0.114 % |
+| synthetic | linear-sqrt / pchip-log | 0.002 | 33 | yes | 0.05 % | 0.043 % |
+| synthetic | pchip-sqrt / pchip-log | 0.01 | 9 | yes | 0.15 % | 0.211 % |
+| synthetic | pchip-sqrt / pchip-log | 0.002 | 15 | yes | 0.02 % | 0.043 % |
+| synthetic | pchip-log / pchip-log | 0.01 | 15 | yes | 0.32 % | 0.028 % |
+| synthetic | pchip-log / pchip-log | 0.002 | 33 | yes | 0.01 % | 0.003 % |
+| synthetic | linear-log / linear-log | 0.01 | 47 | yes | 0.24 % | 0.044 % |
+| synthetic | linear-log / linear-log | 0.002 | 80 | no | 0.06 % | 0.006 % |
+| two strips | linear-sqrt / pchip-log | 0.01 | 17 | yes | 1.92 % | 0.159 % |
+| two strips | linear-sqrt / pchip-log | 0.002 | 43 | yes | 0.12 % | 0.003 % |
+| two strips | pchip-sqrt / pchip-log | 0.01 | 15 | yes | 0.58 % | 0.019 % |
+| two strips | pchip-sqrt / pchip-log | 0.002 | 31 | no | 0.12 % | 0.002 % |
+| two strips | pchip-log / pchip-log | 0.01 | 15 | yes | 0.84 % | 0.019 % |
+| two strips | pchip-log / pchip-log | 0.002 | 33 | no | 0.11 % | 0.002 % |
+| two strips | linear-log / linear-log | 0.01 | 27 | yes | 0.32 % | 0.062 % |
+| two strips | linear-log / linear-log | 0.002 | 71 | no | 0.05 % | 0.008 % |
+
+`a + b sqrt(f)` between neighbours (linear in `sqrt f`) passed its 1 % checks
+on the strips yet missed R by 1.9 % between them.  PCHIP in `sqrt f` held
+1 % everywhere with the fewest solves (24 over both coppers at 1 %, against
+30 and 74 for the other pairs that also held it) and is the default; `forms=`
+selects another pair.  At 0.2 % no pair converges on the strips: their R
+steps where the number of skin filaments changes with frequency, and the
+refinement stops at `minimum_ratio` and says so.
 
 ## Port moments (`moments.py`)
 
@@ -185,6 +255,6 @@ error.
 - The mutual resistance between conductors is dropped (see above).
 - The cross-conductor matrix is measured by
   `electrical.sheet_peec.solve_port_impedance` on the CPU path only.
-- Frequency dependence beyond one `R + jωL` (skin effect across the band) is
-  not fitted; a wideband macromodel (vector fitting with passivity) is not
-  implemented.
+- Across a band the copper's matrices are interpolated between solves
+  (`PortImpedanceSweep`), not fitted: a wideband macromodel for time-domain
+  export (vector fitting with passivity) is not implemented.

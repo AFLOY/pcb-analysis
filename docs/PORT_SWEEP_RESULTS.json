@@ -1,0 +1,284 @@
+{
+ "benchmark": "port-impedance sweep: interpolation forms and frequency refinement",
+ "measured_utc": "2026-11-01T16:48:37+00:00",
+ "environment": {
+  "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+  "cpu_count": 16,
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "python": "3.12.14",
+  "numpy": "2.3.5",
+  "scipy": "1.17.1",
+  "device": "CPU"
+ },
+ "settings": {
+  "two_strips": {
+   "maximum_filaments": 6,
+   "relative_tolerance": 1e-10
+  },
+  "minimum_ratio": 1.05,
+  "maximum_solves": 80,
+  "two_strips_mean_solve_s": 1.2169579180571797
+ },
+ "rows": [
+  {
+   "copper": "synthetic",
+   "band_hz": [
+    10000.0,
+    100000000.0
+   ],
+   "resistance_form": "linear-sqrt",
+   "inductance_form": "pchip-log",
+   "tolerance": 0.01,
+   "solves": 15,
+   "converged": true,
+   "validation_points": 80,
+   "worst_validation_resistance_error": 0.0038018782036232436,
+   "worst_validation_inductance_error": 0.001137886526302693
+  },
+  {
+   "copper": "synthetic",
+   "band_hz": [
+    10000.0,
+    100000000.0
+   ],
+   "resistance_form": "linear-sqrt",
+   "inductance_form": "pchip-log",
+   "tolerance": 0.002,
+   "solves": 33,
+   "converged": true,
+   "validation_points": 80,
+   "worst_validation_resistance_error": 0.00046450771764382795,
+   "worst_validation_inductance_error": 0.0004335057669181888
+  },
+  {
+   "copper": "synthetic",
+   "band_hz": [
+    10000.0,
+    100000000.0
+   ],
+   "resistance_form": "pchip-sqrt",
+   "inductance_form": "pchip-log",
+   "tolerance": 0.01,
+   "solves": 9,
+   "converged": true,
+   "validation_points": 80,
+   "worst_validation_resistance_error": 0.0015034342555419935,
+   "worst_validation_inductance_error": 0.002106337920489814
+  },
+  {
+   "copper": "synthetic",
+   "band_hz": [
+    10000.0,
+    100000000.0
+   ],
+   "resistance_form": "pchip-sqrt",
+   "inductance_form": "pchip-log",
+   "tolerance": 0.002,
+   "solves": 15,
+   "converged": true,
+   "validation_points": 80,
+   "worst_validation_resistance_error": 0.0001770009077397325,
+   "worst_validation_inductance_error": 0.0004335057669181888
+  },
+  {
+   "copper": "synthetic",
+   "band_hz": [
+    10000.0,
+    100000000.0
+   ],
+   "resistance_form": "pchip-log",
+   "inductance_form": "pchip-log",
+   "tolerance": 0.01,
+   "solves": 15,
+   "converged": true,
+   "validation_points": 80,
+   "worst_validation_resistance_error": 0.003152205492267115,
+   "worst_validation_inductance_error": 0.0002777536242461939
+  },
+  {
+   "copper": "synthetic",
+   "band_hz": [
+    10000.0,
+    100000000.0
+   ],
+   "resistance_form": "pchip-log",
+   "inductance_form": "pchip-log",
+   "tolerance": 0.002,
+   "solves": 33,
+   "converged": true,
+   "validation_points": 80,
+   "worst_validation_resistance_error": 9.406098567141899e-05,
+   "worst_validation_inductance_error": 3.3379713880254844e-05
+  },
+  {
+   "copper": "synthetic",
+   "band_hz": [
+    10000.0,
+    100000000.0
+   ],
+   "resistance_form": "linear-log",
+   "inductance_form": "linear-log",
+   "tolerance": 0.01,
+   "solves": 47,
+   "converged": true,
+   "validation_points": 80,
+   "worst_validation_resistance_error": 0.0024073516840249997,
+   "worst_validation_inductance_error": 0.0004413197480616505
+  },
+  {
+   "copper": "synthetic",
+   "band_hz": [
+    10000.0,
+    100000000.0
+   ],
+   "resistance_form": "linear-log",
+   "inductance_form": "linear-log",
+   "tolerance": 0.002,
+   "solves": 80,
+   "converged": false,
+   "validation_points": 80,
+   "worst_validation_resistance_error": 0.0006466960573122694,
+   "worst_validation_inductance_error": 6.47782001439002e-05
+  },
+  {
+   "copper": "two strips",
+   "band_hz": [
+    100000.0,
+    100000000.0
+   ],
+   "resistance_form": "linear-sqrt",
+   "inductance_form": "pchip-log",
+   "tolerance": 0.01,
+   "solves": 17,
+   "converged": true,
+   "validation_points": 30,
+   "worst_validation_resistance_error": 0.01916455791481139,
+   "worst_validation_inductance_error": 0.0015947928220842822
+  },
+  {
+   "copper": "two strips",
+   "band_hz": [
+    100000.0,
+    100000000.0
+   ],
+   "resistance_form": "linear-sqrt",
+   "inductance_form": "pchip-log",
+   "tolerance": 0.002,
+   "solves": 43,
+   "converged": true,
+   "validation_points": 30,
+   "worst_validation_resistance_error": 0.0011825523007586384,
+   "worst_validation_inductance_error": 2.5078031399818732e-05
+  },
+  {
+   "copper": "two strips",
+   "band_hz": [
+    100000.0,
+    100000000.0
+   ],
+   "resistance_form": "pchip-sqrt",
+   "inductance_form": "pchip-log",
+   "tolerance": 0.01,
+   "solves": 15,
+   "converged": true,
+   "validation_points": 30,
+   "worst_validation_resistance_error": 0.005834119924569811,
+   "worst_validation_inductance_error": 0.0001884029227693817
+  },
+  {
+   "copper": "two strips",
+   "band_hz": [
+    100000.0,
+    100000000.0
+   ],
+   "resistance_form": "pchip-sqrt",
+   "inductance_form": "pchip-log",
+   "tolerance": 0.002,
+   "solves": 31,
+   "converged": false,
+   "validation_points": 30,
+   "worst_validation_resistance_error": 0.001155766550899432,
+   "worst_validation_inductance_error": 1.646919656213193e-05
+  },
+  {
+   "copper": "two strips",
+   "band_hz": [
+    100000.0,
+    100000000.0
+   ],
+   "resistance_form": "pchip-log",
+   "inductance_form": "pchip-log",
+   "tolerance": 0.01,
+   "solves": 15,
+   "converged": true,
+   "validation_points": 30,
+   "worst_validation_resistance_error": 0.00841602591353791,
+   "worst_validation_inductance_error": 0.0001884029227693817
+  },
+  {
+   "copper": "two strips",
+   "band_hz": [
+    100000.0,
+    100000000.0
+   ],
+   "resistance_form": "pchip-log",
+   "inductance_form": "pchip-log",
+   "tolerance": 0.002,
+   "solves": 33,
+   "converged": false,
+   "validation_points": 30,
+   "worst_validation_resistance_error": 0.0011434163322129626,
+   "worst_validation_inductance_error": 1.646919656213193e-05
+  },
+  {
+   "copper": "two strips",
+   "band_hz": [
+    100000.0,
+    100000000.0
+   ],
+   "resistance_form": "linear-log",
+   "inductance_form": "linear-log",
+   "tolerance": 0.01,
+   "solves": 27,
+   "converged": true,
+   "validation_points": 30,
+   "worst_validation_resistance_error": 0.00321300314447163,
+   "worst_validation_inductance_error": 0.0006160129488987946
+  },
+  {
+   "copper": "two strips",
+   "band_hz": [
+    100000.0,
+    100000000.0
+   ],
+   "resistance_form": "linear-log",
+   "inductance_form": "linear-log",
+   "tolerance": 0.002,
+   "solves": 71,
+   "converged": false,
+   "validation_points": 30,
+   "worst_validation_resistance_error": 0.0005198470678324607,
+   "worst_validation_inductance_error": 7.541873943543912e-05
+  }
+ ],
+ "decision": {
+  "adopted": true,
+  "candidate": [
+   "pchip-sqrt",
+   "pchip-log"
+  ],
+  "criteria": "at a 1 % tolerance the candidate converges and its sweep is within 1 % in R and L at every validation point of both coppers, with no more solves than any other pair that also does",
+  "holding_at_1_percent": {
+   "linear-sqrt/pchip-log": false,
+   "pchip-sqrt/pchip-log": true,
+   "pchip-log/pchip-log": true,
+   "linear-log/linear-log": true
+  },
+  "solves_at_1_percent": {
+   "linear-sqrt/pchip-log": 32,
+   "pchip-sqrt/pchip-log": 24,
+   "pchip-log/pchip-log": 30,
+   "linear-log/linear-log": 74
+  }
+ }
+}

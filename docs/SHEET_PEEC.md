@@ -953,6 +953,13 @@ keys and defaults (`relative_tolerance` 1e-9, `maximum_iterations` 200,
   and per frequency `mesh_reused`, `build_seconds`, `solve_seconds`).
 - `keep_solutions=True` keeps each port's solve and its mesh
   (`PortImpedanceResult.meshes`) for `SheetPortImpedance.superpose`.
+- `settings["frequency_refinement"]` (`relative_tolerance` 0.01,
+  `maximum_solves` 24, `minimum_ratio` 1.05) solves the stated frequencies
+  and then the midpoints `electrical.port_network.refine_frequencies` needs
+  for R and L to interpolate within the tolerance between them.  The result
+  holds every solved frequency, `result.refinement` (the tolerance, whether
+  it converged, the frequencies asked for and every check) and
+  `result.sweep()` for `BoardNetwork` (docs/PORT_NETWORK.md).
 
 Acceptance (`tests/test_port_impedance_contract.py`): on the two 5 x 40 cell
 strips, at 1 and 10 MHz, with vertical connections and a pad over two
