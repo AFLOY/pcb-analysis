@@ -6,6 +6,17 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
+- `electrical.port_network` is new: copper as a network of pad ports, closed
+  by lumped parts (`docs/PORT_NETWORK.md`).
+  - `realize_port_network` turns a pad-port impedance into resistors and
+    coupled inductors, exact at the extraction frequency and resistive at DC.
+  - `subckt_text` writes it as a SPICE `.subckt`.
+  - `SeriesRLC` and `capacitor` model lumped parts. `nodal_voltages` solves a
+    network of series R-L-C branches. `loop_impedance` and `mesh_matrices`
+    close parallel meshes through shared copper.
+  - `window_moments`, `close_kcl` and `port_block` reduce simulated port
+    currents to the second moments a linear copper solve takes.
+  - The code moved from Kicad_PowerOpt with the same arithmetic.
 - The native builders take another compiler from `PCB_NATIVE_CXX` (the
   command and any arguments it needs; `g++` when unset), and CMake adds
   `-fcx-limited-range` only where the compiler accepts it. AMD AOCC 5.2

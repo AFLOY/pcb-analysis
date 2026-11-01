@@ -5,7 +5,7 @@
 - 設計の正本は`docs/DESIGN.md`と`docs/REQUIREMENTS.md`、各packageの契約は
   `docs/MATRIX_FREE_MPIR_FEM.md`、`docs/SHEET_PEEC.md`、`docs/THERMAL_MPIR_FEM.md`、
   `docs/EMC_DIPOLE_SUPERPOSITION.md`、`docs/MULTIPHYSICS_SCENARIOS.md`、
-  `docs/GEOMETRY_CAD_IMPORT.md`、`docs/VOXEL_PEEC.md`である。
+  `docs/GEOMETRY_CAD_IMPORT.md`、`docs/VOXEL_PEEC.md`、`docs/PORT_NETWORK.md`である。
 - 採用判定はbenchmark dataで行う。同じfixture、同じ精度要求、同じdeviceで現行実装と
   候補を突き合わせ、solve時間、inner/outer反復数、到達残差、解の差、storageを記録する。
   単体testの合格、画像、個別指標の改善だけで採用方式を変更しない。
@@ -26,6 +26,10 @@
   計測型2つを`dice_peec.controller`からimportする以外に`electrical`内の依存は持たない。
 - `src/electrical/matrix_free_mpir_fem/`: MPIR solverとNumPy/CuPy runtime、二段preconditioner、tensor格子(`grid`)、Q1 DC伝導、
   2D周波数領域Maxwell、fused CUDA kernel。solverとruntimeはここが唯一の所有者である。
+- `src/electrical/port_network/`: 銅箔をPADポートの回路網として扱う。PADポートimpedanceの
+  抵抗+結合誘導への実現、SPICE subcktの書出し、集中定数(直列R-L-C)での周波数領域の節点解析と
+  網目閉合、回路simulator波形のポート電流モーメントとKCL閉合。場のsolverを持たず、回路simulatorを
+  実行しない。
 - `src/thermal/matrix_free_mpir_fem/`: 定常・過渡(後退Euler)熱伝導の離散化、対流・輻射(Newton線形化)境界、
   二段preconditioner、CUDA kernel、電気→熱のJoule loss写像。solverとruntimeは`electrical`からimportし複製しない。
 - `src/emc/tiled_dipole_superposition/`: 電流分布を読むadapter、dipole場、遠方界、規格

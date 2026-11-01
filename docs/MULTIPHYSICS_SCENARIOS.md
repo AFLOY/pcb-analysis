@@ -153,10 +153,11 @@ Two implementations of the circuit exist or are planned:
   `C = I Iᵀ`. This is the path for a board without a circuit model; a
   source with internal resistance and a resistive load are expressed
   directly.
-- A circuit-simulator adapter (Kicad_PowerOpt's ngspice adapter, planned)
-  that inserts the N-port into its deck, runs the transient and returns the
-  second moments of the measured pad currents over the switching window.
-  Nothing in this package changes for it.
+- A circuit-simulator adapter (Kicad_PowerOpt's LTspice and ngspice
+  adapters) that inserts the N-port into its deck, runs the transient and
+  returns the second moments of the measured pad currents over the switching
+  window, computed with `electrical.port_network.window_moments` and
+  `close_kcl`. Nothing in this package changes for it.
 
 Current drive is the limit `r → ∞` with `v = I r`, and voltage drive the
 limit `r = 0`; the scenario raises no deprecation warning, because the
