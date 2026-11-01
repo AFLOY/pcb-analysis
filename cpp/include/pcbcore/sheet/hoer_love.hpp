@@ -29,6 +29,14 @@ struct Bar {
 [[nodiscard]] double far_field_mutual_inductance(const Bar& a, const Bar& b, double du, double dv,
                                                  double dw) noexcept;
 
+// Two parallel line filaments: ``a`` over [-l_a/2, l_a/2] along their common
+// direction, ``b`` over [u - l_b/2, u + l_b/2], ``d`` apart across it
+// (Grover/Campbell, written with G(z) = z asinh(z/d) - z^2/(sqrt(z^2+d^2)+d)
+// so the sum keeps its digits far away).  Collinear and disjoint (d = 0):
+// G(z) = |z| ln|z|; collinear and overlapping: mu0 l_a l_b / (4 pi |u|).
+[[nodiscard]] double parallel_filament_mutual_inductance(double length_a, double length_b, double axial_offset,
+                                                         double separation) noexcept;
+
 // The closed form within ``near_radius_cells * scale`` of the first bar, the
 // far limit beyond (scale: the largest in-plane extent of either bar unless
 // given).
@@ -43,7 +51,8 @@ struct Bar {
                                                int threads);
 
 // Coupling of two levels of vertical branches (spans ``span_a``/``span_b``,
-// mid-planes ``center_separation`` apart) over every wrapped offset.
+// mid-planes ``center_separation`` apart) over every wrapped offset: the bars'
+// closed form near, two filaments of the spans' lengths far.
 [[nodiscard]] std::vector<double> build_vertical_kernel(std::int64_t rows, std::int64_t cols, double pitch,
                                                         double span_a, double span_b, double center_separation,
                                                         int near_radius_cells, int threads);

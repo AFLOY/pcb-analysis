@@ -111,6 +111,37 @@ double far_field_mutual_inductance(const Bar& a, const Bar& b, const double du, 
     return radius > 0.0 ? (kMu0Over4PiExact * a.length * b.length) / radius : 0.0;
 }
 
+double parallel_filament_mutual_inductance(const double length_a, const double length_b, const double axial_offset,
+                                           const double separation) noexcept {
+    const double z1a = -0.5 * length_a;
+    const double z1b = 0.5 * length_a;
+    const double z2a = axial_offset - 0.5 * length_b;
+    const double z2b = axial_offset + 0.5 * length_b;
+    const double ends[4] = {z2b - z1a, z2a - z1a, z2b - z1b, z2a - z1b};
+    const double signs[4] = {1.0, -1.0, -1.0, 1.0};
+    if (separation > 0.0) {
+        const double d = separation;
+        double total = 0.0;
+        for (int k = 0; k < 4; ++k) {
+            const double z = ends[k];
+            total += signs[k] * (z * std::asinh(z / d) - (z * z) / (std::sqrt(z * z + d * d) + d));
+        }
+        return kMu0Over4PiExact * total;
+    }
+    double collinear = 0.0;
+    double overlap = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        const double magnitude = std::abs(ends[k]);
+        collinear += signs[k] * (magnitude > 0.0 ? magnitude * std::log(magnitude) : 0.0);
+        overlap += signs[k] * magnitude;
+    }
+    if (std::abs(overlap) <= 1e-12 * std::max(length_a + length_b, 1e-300)) {
+        return kMu0Over4PiExact * collinear;
+    }
+    const double gap = std::abs(axial_offset);
+    return gap > 0.0 ? kMu0Over4PiExact * length_a * length_b / gap : 0.0;
+}
+
 double mutual_partial_inductance(const Bar& a, const Bar& b, const double du, const double dv, const double dw,
                                  const double near_radius, const double scale) noexcept {
     const double radius = std::sqrt(du * du + dv * dv + dw * dw);
@@ -123,9 +154,9 @@ double mutual_partial_inductance(const Bar& a, const Bar& b, const double du, co
 namespace {
 
 // One wrapped table; ``offset(r, c, du, dv, dw)`` places the second bar.
-template <typename Offset>
+template <typename Offset, typename Far>
 std::vector<double> tabulate(const std::int64_t rows, const std::int64_t cols, const Bar& a, const Bar& b,
-                             const double near_radius, const double scale, const int threads, Offset offset) {
+                             const double near_radius, const double scale, const int threads, Offset offset, Far far) {
     if (rows < 1 || cols < 1) {
         throw InvalidInput("kernel shape must be positive");
     }
@@ -148,7 +179,7 @@ std::vector<double> tabulate(const std::int64_t rows, const std::int64_t cols, c
                 value = closed_form_mutual_inductance(a, b, du, dv, dw, &retained);
                 row_worst = std::min(row_worst, retained);
             } else {
-                value = far_field_mutual_inductance(a, b, du, dv, dw);
+                value = far(du, dv, dw);
             }
             table[static_cast<size_t>(r * cols + c)] = value;
         }
@@ -182,6 +213,9 @@ std::vector<double> build_kernel(const std::int64_t rows, const std::int64_t col
                             dv = static_cast<double>(c) * width;
                         }
                         dw = layer_separation;
+                    },
+                    [&](const double du, const double dv, const double dw) {
+                        return far_field_mutual_inductance(a, b, du, dv, dw);
                     });
 }
 
@@ -198,6 +232,10 @@ std::vector<double> build_vertical_kernel(const std::int64_t rows, const std::in
                         du = center_separation;
                         dv = static_cast<double>(c) * pitch;
                         dw = static_cast<double>(r) * pitch;
+                    },
+                    [&](const double du, const double dv, const double dw) {
+                        // a via is far longer than a cell: two filaments, not two points
+                        return parallel_filament_mutual_inductance(span_a, span_b, du, std::sqrt(dv * dv + dw * dw));
                     });
 }
 

@@ -439,6 +439,58 @@ def far_field_mutual_inductance(
     return float(result) if result.ndim == 0 else result
 
 
+def parallel_filament_mutual_inductance(
+    length_a_m: float | np.ndarray,
+    length_b_m: float | np.ndarray,
+    axial_offset_m: float | np.ndarray,
+    separation_m: float | np.ndarray,
+) -> float | np.ndarray:
+    """Give the mutual inductance of two parallel line filaments of any lengths and axial offset.
+
+    Filament ``a`` runs along the common direction over ``[-l_a/2, l_a/2]``,
+    filament ``b`` over ``[u - l_b/2, u + l_b/2]`` with ``u`` the axial offset
+    of its centre, and ``d`` apart across it (Grover; Campbell):
+
+    .. math::
+
+        M = \\frac{\\mu_0}{4\\pi}\\left[G(z_{2b} - z_{1a}) - G(z_{2a} - z_{1a})
+            - G(z_{2b} - z_{1b}) + G(z_{2a} - z_{1b})\\right]
+
+    with ``G(z) = z asinh(z/d) - z^2 / (sqrt(z^2 + d^2) + d)``: the classic
+    ``z asinh(z/d) - sqrt(z^2 + d^2)`` shifted by the constant ``d``, which the
+    second difference cancels, so that no term grows with ``d`` and the sum
+    keeps its digits far away.  Collinear filaments (``d = 0``) that do not
+    overlap take ``G(z) = |z| ln|z|``; overlapping ones have no finite mutual
+    inductance and give the centre-to-centre value ``mu0 l_a l_b / (4 pi |u|)``
+    instead, which is what a kernel table needs there.
+
+    This is the far form of the coupling of vertical branches: a via is far
+    longer than the grid it stands on, so its length matters long after its
+    cross-section stops mattering.
+    """
+    la, lb, u, d = np.broadcast_arrays(
+        *(np.asarray(value, dtype=np.float64) for value in (length_a_m, length_b_m, axial_offset_m, separation_m))
+    )
+    z1a, z1b = -0.5 * la, 0.5 * la
+    z2a, z2b = u - 0.5 * lb, u + 0.5 * lb
+    ends = ((z2b - z1a, 1.0), (z2a - z1a, -1.0), (z2b - z1b, -1.0), (z2a - z1b, 1.0))
+    apart = d > 0.0
+    safe_d = np.where(apart, d, 1.0)
+    total = np.zeros(la.shape, dtype=np.float64)
+    collinear = np.zeros(la.shape, dtype=np.float64)
+    overlap = np.zeros(la.shape, dtype=np.float64)
+    for z, sign in ends:
+        total += sign * (z * np.arcsinh(z / safe_d) - z * z / (np.sqrt(z * z + safe_d * safe_d) + safe_d))
+        magnitude = np.abs(z)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            collinear += sign * np.where(magnitude > 0.0, magnitude * np.log(np.where(magnitude > 0.0, magnitude, 1.0)), 0.0)
+        overlap += sign * magnitude
+    point = np.divide(la * lb, np.abs(u), out=np.zeros_like(u), where=np.abs(u) > 0.0)
+    disjoint = np.abs(overlap) <= 1e-12 * np.maximum(la + lb, 1e-300)
+    result = _MU0_OVER_4PI * np.where(apart, total, np.where(disjoint, collinear, point))
+    return float(result) if result.ndim == 0 else result
+
+
 def kernel_accuracy(
     cell: CellGeometry,
     layer_separation_m: float,
@@ -595,18 +647,22 @@ def build_vertical_kernel(
     col_offsets = np.fft.fftfreq(cols, d=1.0 / cols).astype(np.int64)
     cell = vertical_cell(span_a_m, pitch)
     other = vertical_cell(span_b_m, pitch)
-    offset = (
+    du, dv, dw = np.broadcast_arrays(
         np.full((1, 1), float(center_separation_m)),   # along the current, z
         col_offsets[None, :] * pitch,
         row_offsets[:, None] * pitch,
     )
-    return np.asarray(
-        mutual_partial_inductance(
-            cell,
-            other,
-            offset,
-            near_radius_cells=near_radius_cells,
-            scale_m=pitch,
-        ),
-        dtype=np.float64,
-    )
+    # Near: the closed form for the two bars.  Far: two filaments of the bars'
+    # lengths, not two points -- a via is far longer than a cell, and at
+    # NEAR_RADIUS_CELLS pitches the centre-to-centre limit misses its length by
+    # percents (3 % for 1.6 mm at 0.1 mm cells, 11 % for 3.2 mm).
+    radius = np.sqrt(du * du + dv * dv + dw * dw)
+    near = radius <= near_radius_cells * pitch
+    table = np.asarray(
+        parallel_filament_mutual_inductance(span_a_m, span_b_m, du, np.sqrt(dv * dv + dw * dw)), dtype=np.float64
+    ).copy()
+    if near.any():
+        table[near] = np.asarray(
+            closed_form_mutual_inductance(cell, other, (du[near], dv[near], dw[near])), dtype=np.float64
+        )
+    return table
