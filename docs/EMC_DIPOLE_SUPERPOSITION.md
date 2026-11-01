@@ -73,6 +73,45 @@ the component is not represented. For a voltage-driven solve the legs carry
 the solved `voltage_terminal_current_a`; `dipoles_from_pcb_dc` passes it on,
 and `terminal_closure_dipoles` called directly needs it as an argument.
 
+### A board network (`network.py`)
+
+`electrical.port_network.BoardNetwork` solves copper together with the parts
+that join its nets; `network_dipoles(network, solution, copper, mesh,
+pad_positions_m)` makes one solution's current elements:
+
+- the copper's: `copper` is the port matrix at the solution's frequency,
+  solved with `keep_solutions=True` on `mesh`; its port solves are summed
+  with the solution's port currents (`SheetPortImpedance.superpose`) and read
+  by `dipoles_from_sheet_peec`, which takes graded grids too (an in-plane
+  element runs between the two cell centres);
+- the parts' and sources': each carries its current from its pad `a` to its
+  pad `b` as one element `I (r_b - r_a)` at the midpoint of the pads'
+  centres (`path_dipoles`).  The port contract gives the centres
+  (`PortImpedanceProblem.pad_positions_m()`).
+
+Each pad takes from the copper what the parts deliver, so the elements close
+every loop and their moments sum to zero: no star-point closure is needed.
+A frequency whose copper was interpolated, or solved without its port
+solves, is refused: the current distribution is needed there.
+`network_emission(network, solutions, coppers, meshes, pad_positions_m,
+distance_m=, limit=, scan_points_m=)` returns, per frequency, the largest
+far-zone field over the sphere, the radiated power, the margin where the
+limit line has a value (`None` elsewhere, as CISPR 32 below 30 MHz), and the
+largest near-field |H| over the scan points.
+
+Checked (`tests/test_network_emission.py`, two 5 x 40 cell strips, VIN over
+PGND, a switch current source and two capacitors):
+
+| check | result |
+|---|---|
+| moments summed against their magnitudes, 1 / 30 / 100 MHz | 4.6e-16 / 5.6e-16 / 4.0e-16 |
+| superposed against the same port currents solved directly, 30 MHz: near-field H on a scan 3 mm above | 7.2e-13 relative |
+| the same, largest far field and radiated power at 3 m | 3.1e-14 / 2.8e-13 relative |
+| a graded board through the port contract (pFFT operator) | moments sum to zero (< 1e-7) |
+
+The part path is a straight line between pad centres at the copper's
+heights: a component's own loop (its height, its leads) is not represented.
+
 ## Verification
 
 The tests in `tests/test_emc_dipole_superposition.py` and

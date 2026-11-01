@@ -16,6 +16,17 @@ Versions before 0.7.0 were not tagged; see the Git history.
   refines with `settings["frequency_refinement"]` and returns
   `result.refinement` and `result.sweep()`. Without a sweep a frequency the
   copper was not solved at is refused, as before.
+- `emc.tiled_dipole_superposition.network_dipoles` and `network_emission`:
+  a `BoardNetwork` solution as current elements -- the copper's current
+  superposed from the kept port solves, each part and source along the line
+  between its pads -- and per frequency its far field, radiated power,
+  margin to a limit line and near-field |H|. The elements close every loop
+  (moments sum to 4e-16 of their magnitudes) and radiate as the same port
+  currents solved directly (7e-13). `path_dipoles` is public;
+  `PortImpedanceProblem.pad_positions_m()` gives the pads' centres.
+- `dipoles_from_sheet_peec` takes graded grids (`SheetMesh.pitch_m is None`).
+- `NetworkSolution.source_current_a` also holds each current source's own
+  current (per case in `solve_cases`), not only the voltage sources'.
 - `graded_filaments` no longer leaves a middle filament thinner than the face
   filaments: such a middle joins the two filaments beside it. A 35 um foil
   near 0.9 MHz had a 1 nm middle between two 17.5 um filaments, and every

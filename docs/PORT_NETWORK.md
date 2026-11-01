@@ -131,7 +131,8 @@ reduction that merged the parts would lose it.
   frequency.  The result `NetworkSolution` holds:
   - pad voltages against the ground pad
   - each part's current (from `a` to `b`)
-  - each voltage source's current
+  - each source's current from `a` to `b` (a voltage source's solved, a
+    current source's own, per case)
   - the current into each copper port
 - Each frequency is factorised once (`transfer(f)`), with one right-hand
   side per source at unit strength (current sources at 1 A, then voltage
@@ -231,6 +232,17 @@ on the strips yet missed R by 1.9 % between them.  PCHIP in `sqrt f` held
 selects another pair.  At 0.2 % no pair converges on the strips: their R
 steps where the number of skin filaments changes with frequency, and the
 refinement stops at `minimum_ratio` and says so.
+
+## Emission of a network
+
+`emc.tiled_dipole_superposition.network_dipoles(network, solution, copper,
+mesh, pad_positions)` turns a `NetworkSolution` into radiating current
+elements: the copper's current is the sum of the port solves kept with its
+matrix (`solve_port_impedance(keep_solutions=True)`,
+`SheetPortImpedance.superpose`) weighted by the solution's port currents,
+and each part and source carries its current along the line between its
+pads.  `network_emission` gives each frequency's far field, margin to a limit
+line and near-field |H| (docs/EMC_DIPOLE_SUPERPOSITION.md).
 
 ## Port moments (`moments.py`)
 
