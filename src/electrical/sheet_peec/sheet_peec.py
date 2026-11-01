@@ -58,25 +58,25 @@ Node = tuple[int, int, int]
 class ViaBranch:
     """A vertical conductor joining one cell of two layers.
 
-    ``resistance_ohm`` is the barrel's own resistance.  ``inductance_h`` is its
-    partial self inductance.
+    ``resistance_ohm`` is the barrel's own resistance.
 
     A vertical branch couples to no in-plane branch: the two are perpendicular
-    and the defining integral carries ``dl_i . dl_j``.  It does couple to every
-    other vertical branch, because those are parallel to it, and that coupling
-    is not modelled here -- only the scalar self term is, and it defaults to
-    zero.
+    and the defining integral carries ``dl_i . dl_j``.  It couples to every
+    other vertical branch, which is parallel to it, through the operator
+    (``SheetInductanceOperator(vertical_levels=mesh.vertical_levels)``: a
+    kernel per pair of via levels, self terms included).  The AC solve refuses
+    a mesh whose levels the operator was not built for, so no vertical
+    coupling is dropped silently.  Self terms without the mutual ones would be
+    worse than neither: redistribution currents in neighbouring columns often
+    oppose one another and the mutual terms cancel much of the loop inductance
+    the self terms would claim.
 
-    What that costs depends on where the vertical current is.  In a developed
-    region there is none, so a developed in-plane profile and the resistance
-    read off it do not depend on this at all.  Where vertical current does flow
-    -- the entry region of a conductor, the neighbourhood of a barrel -- it is
-    not negligible: for the filament links of a 3.5mm inlay on a 0.2mm grid at
-    300kHz the reactance of the self term alone reaches twice the resistance.
-    Adding the self term without the mutual terms would be worse than adding
-    neither, since redistribution currents in neighbouring columns often oppose
-    one another and the mutual terms cancel much of the loop inductance the
-    self terms would claim.
+    The branch is a column of one cell's cross section, so its self
+    inductance follows the cell size, not the drill of a barrel.
+
+    ``inductance_h`` does not enter a solved result.  The preconditioner
+    falls back to it as the self term only when the operator has no vertical
+    kernels for the mesh's levels, which the AC solve refuses.
     """
 
     row: int

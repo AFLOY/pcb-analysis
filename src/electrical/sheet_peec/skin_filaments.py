@@ -257,8 +257,8 @@ def filament_links(
 
     So every filament is joined to the one below it at every cell, with the
     resistance of the copper between their mid-planes.  These are ordinary
-    vertical branches: a vertical conductor couples to no in-plane branch, so
-    they add nothing to the transform.
+    vertical branches: a vertical conductor couples to no in-plane branch, and
+    to the other vertical branches through the operator's vertical kernels.
     """
     from .sheet_peec import ViaBranch  # imported here to avoid a cycle
 

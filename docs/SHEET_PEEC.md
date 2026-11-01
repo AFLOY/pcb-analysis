@@ -243,7 +243,7 @@ Two things were then measured. First, whether the operator represents a
 developed state at all: the field solve's own converged complex current density
 was integrated onto the sheet mesh's branches, repeated along every column, and
 `u = R I + j w L I` applied directly -- no solve, no terminals, and no vertical
-current, so the missing vertical-branch mutual operator cannot enter. For a
+current, so the vertical-branch operator does not enter. For a
 developed mode `u_b / pitch` has to be one common axial field for every branch
 of the cross section, and it is: the dominant imaginary part spans +/-3.7%, the
 worst departure over all branches 6.1%.
@@ -775,8 +775,14 @@ end:
 These figures are from a 60-cell strip, and the test uses 40 cells with a
 2 % / 1 % tolerance.  The partial self inductance of each strip is 8.51 nH
 and their mutual inductance 7.43 nH, so a matrix per conductor would
-overstate this loop eightfold.  Part of the 0.8 % in L is the vias' own
-modelling: a vertical branch couples to no other vertical branch.
+overstate this loop eightfold.  The 0.8 % in L is the inductance of the via
+wall itself, self and mutual terms included, which the via-closed loop
+carries and the port matrix of the open strips does not.  Vertical branches
+do couple to one another: the operator built with `vertical_levels` holds a
+kernel per pair of via levels (`build_vertical_kernel`), and the AC solve
+refuses a mesh whose levels the operator was not built for.  What the via
+model lacks is the barrel: a vertical branch is a pitch x pitch column, so
+its self inductance follows the cell size, not the drill.
 
 `solve_port_impedance(mesh, operator, pads, references, frequency_hz=)`
 (`sheet_ports.py`) builds that matrix.  Each port pad names the reference pad
