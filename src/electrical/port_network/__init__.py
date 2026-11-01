@@ -15,7 +15,7 @@ solve needs (``window_moments``).
 No solver of the copper lives here, and no circuit simulator is run.
 """
 
-from .assembly import BoardNetwork, CopperPorts, NetworkSolution, NetworkSpectrum
+from .assembly import BoardNetwork, CopperPorts, NetworkSolution, NetworkSpectrum, NetworkTransfer
 from .loops import loop_impedance, mesh_matrices
 from .lumped import SeriesRLC, capacitor
 from .moments import WindowMoments, close_kcl, port_block, window_moments
@@ -36,6 +36,7 @@ __all__ = [
     "TabulatedImpedance",
     "Part",
     "NetworkSpectrum",
+    "NetworkTransfer",
     "NetworkSolution",
     "ImpedanceModel",
     "CurrentSource",

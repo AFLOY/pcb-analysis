@@ -41,6 +41,9 @@ Versions before 0.7.0 were not tagged; see the Git history.
   spectrum.
   - Parts: `Part` with `SeriesRLC`, `TabulatedImpedance` or `Tie`.
   - Sources: `CurrentSource` and `VoltageSource`.
+  - `transfer(f)` factorises each frequency once for every source at unit
+    strength (`NetworkTransfer`), and `solve_cases` solves many operating
+    cases and their harmonics with it, each part's current spectrum per case.
 - `realize_port_network` takes a reference pad per conductor. Breaking against
   the first version: `PortNetwork.reference_pad` is now a property of
   `references`. Resistors stay within a conductor, inductors couple across

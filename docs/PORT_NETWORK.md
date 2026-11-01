@@ -133,8 +133,29 @@ reduction that merged the parts would lose it.
   - each part's current (from `a` to `b`)
   - each voltage source's current
   - the current into each copper port
+- Each frequency is factorised once (`transfer(f)`), with one right-hand
+  side per source at unit strength (current sources at 1 A, then voltage
+  sources at 1 V).  `NetworkTransfer` holds every response per unit source:
+  pad voltages, part currents, voltage-source currents and copper port
+  currents, one column per source, kept per frequency.  `solve(f)` applies
+  the sources' own spectra to it.
+- `solve_cases({case: {source: {f: phasor}}})` solves many excitations at
+  once, each frequency with one factorisation and one matrix product for all
+  cases.  A case is an operating point of the circuit, its spectra the
+  harmonics of each source; a source or a frequency a case does not list
+  carries nothing in it.  Each case comes back as a `NetworkSpectrum`, so
+  every part's current spectrum is a result per case.  What the cases mean
+  (the share a capacitor takes, the dB of a transfer, a hot loop's value) is
+  the caller's to define.
 - A frequency without a copper matrix is refused, not interpolated.  A pad
   or a conductor with no path to the ground pad is reported as singular.
+
+Checked (`tests/test_board_network.py`): on the strips below with a 1 uF
+and a 10 uF capacitor, a switch current source and an input voltage source,
+three cases at 1 and 30 MHz from `solve_cases` agree with each case solved by
+its own network within 1e-12 relative, and 49 cases reuse one factorisation.
+`solve` through the transfer differs from the earlier direct solve by
+rounding only (2.3e-16 relative in the capacitor currents).
 
 On two strips (VIN over PGND, a switch at one end, a capacitor of 1 uF /
 2 mOhm / 0.5 nH at the middle and one at the far end;

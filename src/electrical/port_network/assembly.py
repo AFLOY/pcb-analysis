@@ -10,6 +10,11 @@ pads, so every part's current is a result.  A ``Tie`` or a ``VoltageSource``
 adds a branch current as an unknown (modified nodal analysis), and a
 ``CurrentSource`` adds to the right-hand side.  One pad is the ground.
 
+Each frequency is factorised once, for every source at unit strength
+(``transfer``): the network is linear, so the responses to any excitation
+-- several operating cases, each with its harmonics (``solve_cases``) --
+are those columns weighted by the source phasors.
+
 The copper's ``Z(f)`` comes from the caller at the frequencies asked for.
 This module runs no field solve, so ``electrical.sheet_peec`` stays the
 solver.  A frequency the copper has no matrix for is refused, not
@@ -108,9 +113,25 @@ class BoardNetwork:
         self.pads = tuple(pads)
         self._index = {pad: i for i, pad in enumerate(p for p in self.pads if p != ground)}
         self._branches = [p for p in self.parts if isinstance(p.model, Tie)] + list(self.voltage_sources)
+        self._transfers: dict[float, NetworkTransfer] = {}
 
-    def solve(self, frequency_hz: float) -> NetworkSolution:
+    @property
+    def sources(self) -> tuple[str, ...]:
+        """The sources in the order a transfer's columns take: current sources, then voltage sources."""
+        return tuple(s.name for s in (*self.current_sources, *self.voltage_sources))
+
+    def transfer(self, frequency_hz: float) -> "NetworkTransfer":
+        """Every response at one frequency to each source alone, from one factorisation.
+
+        Column ``k`` is the network driven by 1 A through current source ``k``
+        (or 1 V across voltage source ``k``) and nothing else.  The network is
+        linear, so any excitation is a weighted sum of the columns
+        (:meth:`NetworkTransfer.apply`).  Kept per frequency.
+        """
         frequency_hz = float(frequency_hz)
+        cached = self._transfers.get(frequency_hz)
+        if cached is not None:
+            return cached
         if frequency_hz <= 0.0:
             raise ValueError("solve at a positive frequency")
         copper = self.copper.get(frequency_hz)
@@ -119,7 +140,6 @@ class BoardNetwork:
         omega = 2.0 * math.pi * frequency_hz
         n, m = len(self._index), len(self._branches)
         a = np.zeros((n + m, n + m), dtype=complex)
-        rhs = np.zeros(n + m, dtype=complex)
 
         def node(pad: str) -> int | None:
             return self._index.get(pad)
@@ -156,51 +176,167 @@ class BoardNetwork:
             if ib is not None:
                 a[ib, row] -= 1.0
                 a[row, ib] -= 1.0
-            rhs[row] = branch.at(frequency_hz) if isinstance(branch, VoltageSource) else 0.0
-        for source in self.current_sources:
-            current = source.at(frequency_hz)
+
+        # one right-hand side per source at unit strength (a zero column keeps the singular check)
+        rhs = np.zeros((n + m, max(1, len(self.sources))), dtype=complex)
+        for column, source in enumerate(self.current_sources):
             ia, ib = node(source.a), node(source.b)
             if ia is not None:
-                rhs[ia] -= current
+                rhs[ia, column] -= 1.0
             if ib is not None:
-                rhs[ib] += current
+                rhs[ib, column] += 1.0
+        for k, branch in enumerate(self._branches):
+            if isinstance(branch, VoltageSource):
+                rhs[n + k, len(self.current_sources) + self.voltage_sources.index(branch)] = 1.0
         try:
             x = np.linalg.solve(a, rhs)
         except np.linalg.LinAlgError as error:
             raise np.linalg.LinAlgError(
                 f"the network is singular at {frequency_hz:g} Hz: a pad or a conductor has no path to {self.ground}"
             ) from error
+        residual = float(np.abs(a @ x - rhs).max()) if x.size else 0.0
+        x = x[:, : len(self.sources)]
 
-        def voltage(pad: str) -> complex:
+        voltage = np.zeros((len(self.pads), x.shape[1]), dtype=complex)
+        for i, pad in enumerate(self.pads):
             k = node(pad)
-            return complex(x[k]) if k is not None else 0j
-
-        pad_voltage = {pad: voltage(pad) for pad in self.pads}
-        part_current = {name: y * (pad_voltage[p.a] - pad_voltage[p.b])
-                        for p in self.parts if (name := p.name) in admittance
-                        for y in (admittance[name],)}
-        source_current: dict[str, complex] = {}
-        for k, branch in enumerate(self._branches):
-            if isinstance(branch, VoltageSource):
-                source_current[branch.name] = complex(x[n + k])
+            if k is not None:
+                voltage[i] = x[k]
+        row_of = {pad: i for i, pad in enumerate(self.pads)}
+        branch_row = {branch.name: n + k for k, branch in enumerate(self._branches)}
+        part_current = np.zeros((len(self.parts), x.shape[1]), dtype=complex)
+        for i, part in enumerate(self.parts):
+            if part.name in admittance:
+                part_current[i] = admittance[part.name] * (voltage[row_of[part.a]] - voltage[row_of[part.b]])
             else:
-                part_current[branch.name] = complex(x[n + k])
-        port_voltage = incidence @ x[:n]
-        port_current = y_cu @ port_voltage
-        solution = NetworkSolution(
+                part_current[i] = x[branch_row[part.name]]
+        source_current = np.array([x[branch_row[s.name]] for s in self.voltage_sources],
+                                  dtype=complex).reshape(len(self.voltage_sources), x.shape[1])
+        port_current = y_cu @ (incidence @ x[:n])
+        transfer = NetworkTransfer(
             frequency_hz=frequency_hz,
-            pad_voltage_v=pad_voltage,
-            part_current_a={p.name: part_current[p.name] for p in self.parts},
+            sources=self.sources,
+            pads=self.pads,
+            parts=tuple(p.name for p in self.parts),
+            voltage_sources=tuple(s.name for s in self.voltage_sources),
+            ports=self.ports,
+            pad_voltage_v=voltage,
+            part_current_a=part_current,
             source_current_a=source_current,
-            copper_port_current_a={port: complex(i) for port, i in zip(self.ports, port_current)},
-            solve_residual=float(np.abs(a @ x - rhs).max()) if x.size else 0.0,
+            copper_port_current_a=port_current,
+            solve_residual=residual,
         )
-        return solution
+        self._transfers[frequency_hz] = transfer
+        return transfer
+
+    def solve(self, frequency_hz: float) -> NetworkSolution:
+        """The network driven by its sources' own spectra at one frequency."""
+        transfer = self.transfer(frequency_hz)
+        return transfer.apply({s.name: s.at(transfer.frequency_hz)
+                               for s in (*self.current_sources, *self.voltage_sources)})
 
     def solve_spectrum(self, frequencies_hz: Sequence[float] | None = None) -> NetworkSpectrum:
         """Every frequency asked for (default: every frequency the copper has)."""
         frequencies = tuple(sorted(float(f) for f in (frequencies_hz if frequencies_hz is not None else self.copper)))
         return NetworkSpectrum(frequencies, tuple(self.solve(f) for f in frequencies))
 
+    def solve_cases(
+        self,
+        cases: Mapping[str, Mapping[str, Mapping[float, complex]]],
+        frequencies_hz: Sequence[float] | None = None,
+    ) -> dict[str, NetworkSpectrum]:
+        """Several excitations at once: ``cases[name][source][f]`` is that source's phasor at ``f``.
 
-__all__ = ["BoardNetwork", "CopperPorts", "NetworkSolution", "NetworkSpectrum"]
+        A case is one operating point of the circuit (a load, an input
+        voltage), its spectra the harmonics of each source.  A source a case
+        does not name carries nothing in it, and neither does a frequency its
+        spectrum does not list.  Each frequency is factorised once for every
+        case (:meth:`transfer`).  The frequencies default to every one any
+        case lists; each needs a copper matrix.
+        """
+        known = set(self.sources)
+        for name, spectra in cases.items():
+            unknown = sorted(set(spectra) - known)
+            if unknown:
+                raise ValueError(f"case {name} drives sources the network does not have: {unknown}")
+        if frequencies_hz is None:
+            frequencies = sorted({float(f) for spectra in cases.values() for spectrum in spectra.values() for f in spectrum})
+        else:
+            frequencies = sorted(float(f) for f in frequencies_hz)
+        names = list(cases)
+        by_case: dict[str, list[NetworkSolution]] = {name: [] for name in names}
+        for frequency in frequencies:
+            transfer = self.transfer(frequency)
+            drive = np.zeros((len(self.sources), len(names)), dtype=complex)
+            for column, name in enumerate(names):
+                drive[:, column] = transfer.excitation_vector(
+                    {source: _phasor(spectrum, frequency) for source, spectrum in cases[name].items()}
+                )
+            for column, solution in enumerate(transfer.apply_matrix(drive)):
+                by_case[names[column]].append(solution)
+        return {name: NetworkSpectrum(tuple(frequencies), tuple(by_case[name])) for name in names}
+
+
+def _phasor(spectrum: Mapping[float, complex], frequency_hz: float) -> complex:
+    value = spectrum.get(frequency_hz)
+    if value is None:
+        value = {float(f): v for f, v in spectrum.items()}.get(frequency_hz, 0.0)
+    return complex(value)
+
+
+@dataclass(frozen=True)
+class NetworkTransfer:
+    """The network at one frequency driven by each source alone at unit strength.
+
+    Arrays have one column per source (``sources``: current sources at 1 A,
+    then voltage sources at 1 V) and one row per pad, part, voltage source
+    or copper port.  An excitation is a vector of source phasors in the same
+    order; the responses are the arrays times it.
+    """
+
+    frequency_hz: float
+    sources: tuple[str, ...]
+    pads: tuple[str, ...]
+    parts: tuple[str, ...]
+    voltage_sources: tuple[str, ...]
+    ports: tuple[str, ...]
+    pad_voltage_v: np.ndarray
+    part_current_a: np.ndarray
+    source_current_a: np.ndarray
+    copper_port_current_a: np.ndarray
+    solve_residual: float
+    """Largest entry of the factorised system's residual over the unit columns."""
+
+    def excitation_vector(self, phasors: Mapping[str, complex]) -> np.ndarray:
+        unknown = sorted(set(phasors) - set(self.sources))
+        if unknown:
+            raise ValueError(f"not sources of this network: {unknown}")
+        return np.array([complex(phasors.get(name, 0.0)) for name in self.sources], dtype=complex)
+
+    def apply(self, phasors: Mapping[str, complex]) -> NetworkSolution:
+        """The solution for one excitation, ``phasors[source]`` (sources not named carry nothing)."""
+        return self.apply_matrix(self.excitation_vector(phasors)[:, None])[0]
+
+    def apply_matrix(self, drive: np.ndarray) -> list[NetworkSolution]:
+        """One solution per column of ``drive`` (sources x excitations)."""
+        drive = np.asarray(drive, dtype=complex)
+        if drive.ndim != 2 or drive.shape[0] != len(self.sources):
+            raise ValueError("drive must hold one row per source")
+        voltage = self.pad_voltage_v @ drive
+        part = self.part_current_a @ drive
+        source = self.source_current_a @ drive
+        port = self.copper_port_current_a @ drive
+        return [
+            NetworkSolution(
+                frequency_hz=self.frequency_hz,
+                pad_voltage_v={pad: complex(voltage[i, c]) for i, pad in enumerate(self.pads)},
+                part_current_a={name: complex(part[i, c]) for i, name in enumerate(self.parts)},
+                source_current_a={name: complex(source[i, c]) for i, name in enumerate(self.voltage_sources)},
+                copper_port_current_a={name: complex(port[i, c]) for i, name in enumerate(self.ports)},
+                solve_residual=self.solve_residual,
+            )
+            for c in range(drive.shape[1])
+        ]
+
+
+__all__ = ["BoardNetwork", "CopperPorts", "NetworkSolution", "NetworkSpectrum", "NetworkTransfer"]

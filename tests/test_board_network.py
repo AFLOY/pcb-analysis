@@ -127,3 +127,68 @@ def test_a_tabulated_impedance_follows_its_curve_and_refuses_outside_it() -> Non
     assert abs(table.impedance(2 * math.pi * between)) == pytest.approx(abs(part.impedance(2 * math.pi * between)), rel=0.02)
     with pytest.raises(ValueError, match="outside the table"):
         table.impedance(2 * math.pi * 2e8)
+
+
+def _caps():
+    return [Part("C_mid", "VIN.mid", "PGND.mid", capacitor(1e-6, 2e-3, 0.5e-9)),
+            Part("C_far", "VIN.far", "PGND.far", capacitor(10e-6, 5e-3, 1.0e-9))]
+
+
+def test_cases_and_harmonics_solve_together_as_each_alone(strips) -> None:
+    # topology only: the switch and a ripple on the input, each case gives the spectra
+    switch = CurrentSource("Q", "PGND.sw", "VIN.sw", {})
+    source = VoltageSource("VIN", "VIN.far", "PGND.far", {})
+    network = BoardNetwork(strips, _caps(), ground="PGND.sw", current_sources=[switch], voltage_sources=[source])
+    cases = {
+        "light": {"Q": {1e6: 0.5, 30e6: 0.05j}},
+        "heavy": {"Q": {1e6: 2.0 - 0.3j, 30e6: 0.2 + 0.1j}, "VIN": {1e6: 0.01}},
+        "ripple_only": {"VIN": {30e6: 1e-3}},
+    }
+    spectra = network.solve_cases(cases)
+    assert set(spectra) == set(cases)
+    for name, case in cases.items():
+        alone = BoardNetwork(
+            strips, _caps(), ground="PGND.sw",
+            current_sources=[CurrentSource("Q", "PGND.sw", "VIN.sw", dict(case.get("Q", {})))],
+            voltage_sources=[VoltageSource("VIN", "VIN.far", "PGND.far", dict(case.get("VIN", {})))],
+        ).solve_spectrum()
+        assert spectra[name].frequency_hz == (1e6, 30e6)
+        for part in ("C_mid", "C_far"):
+            np.testing.assert_allclose(spectra[name].part_current_a(part), alone.part_current_a(part),
+                                       rtol=1e-12, atol=1e-15)
+        np.testing.assert_allclose(spectra[name].pad_voltage_v("VIN.sw"), alone.pad_voltage_v("VIN.sw"),
+                                   rtol=1e-12, atol=1e-18)
+    # a frequency a case does not list carries nothing in it
+    quiet = spectra["ripple_only"].solutions[0]
+    assert all(v == 0 for v in quiet.part_current_a.values())
+    # the network is linear: the heavy case's switch alone plus its ripple alone
+    heavy, parts = spectra["heavy"].solutions[0], network.transfer(1e6)
+    q_alone = parts.apply({"Q": 2.0 - 0.3j})
+    v_alone = parts.apply({"VIN": 0.01})
+    for part in ("C_mid", "C_far"):
+        assert heavy.part_current_a[part] == pytest.approx(
+            q_alone.part_current_a[part] + v_alone.part_current_a[part], rel=1e-12)
+
+
+def test_a_transfer_is_one_factorisation_per_frequency(strips) -> None:
+    network = BoardNetwork(strips, _caps(), ground="PGND.sw",
+                           current_sources=[CurrentSource("Q", "PGND.sw", "VIN.sw", {1e6: 1.0})])
+    transfer = network.transfer(1e6)
+    assert network.transfer(1e6) is transfer
+    assert transfer.sources == ("Q",)
+    assert transfer.part_current_a.shape == (2, 1)
+    assert transfer.solve_residual < 1e-9
+    # the share of the switch current each capacitor takes, per ampere: the columns sum to the whole
+    assert transfer.part_current_a[:, 0].sum() == pytest.approx(1.0, abs=1e-9)
+    many = network.solve_cases({f"load_{k}": {"Q": {1e6: 0.1 * k}} for k in range(1, 50)})
+    assert network.transfer(1e6) is transfer  # the cases reused it
+    assert many["load_30"].part_current_a("C_mid")[0] == pytest.approx(3.0 * transfer.part_current_a[0, 0], rel=1e-12)
+
+
+def test_what_cases_refuse(strips) -> None:
+    network = BoardNetwork(strips, _caps(), ground="PGND.sw",
+                           current_sources=[CurrentSource("Q", "PGND.sw", "VIN.sw", {})])
+    with pytest.raises(ValueError, match="does not have"):
+        network.solve_cases({"bad": {"nope": {1e6: 1.0}}})
+    with pytest.raises(ValueError, match="no copper matrix"):
+        network.solve_cases({"third_harmonic": {"Q": {3e6: 1.0}}})
