@@ -65,6 +65,31 @@ def test_conductance_branches_of_a_full_and_a_reduced_matrix() -> None:
     assert conductance_branches(reduced, reduced=True) == [(0, 1, 0.5), (0, None, 1.0), (1, None, 2.0)]
 
 
+def test_two_conductors_get_a_resistor_network_each_and_inductors_coupled_across() -> None:
+    omega = 2 * math.pi * 1e6
+    # go (A1, A2 to A0) and return (B1 to B0); Re Z couples them a little, Im Z strongly
+    r = np.array([[2.0, 1.0, 0.01], [1.0, 3.0, 0.02], [0.01, 0.02, 4.0]]) * 1e-3
+    l = np.array([[8.0, 4.0, 7.0], [4.0, 6.0, 3.5], [7.0, 3.5, 8.5]]) * 1e-9
+    z = r + 1j * omega * l
+    pads = ("A1", "A2", "B1")
+    network = realize_port_network(z, pads, {"A1": "A0", "A2": "A0", "B1": "B0"}, 1e6)
+    assert network.reference_pads == ("A0", "B0")
+    with pytest.raises(ValueError, match="2 reference pads"):
+        network.reference_pad
+    joined = {frozenset((x.pad_a, x.pad_b)) for x in network.resistors}
+    assert joined == {frozenset(("A1", "A2")), frozenset(("A1", "A0")), frozenset(("A2", "A0")), frozenset(("B1", "B0"))}
+    assert network.dropped_cross_resistance_ohm == pytest.approx(0.02e-3)
+    assert {(a, b) for a, b, _ in network.couplings} == {("A1", "A2"), ("A1", "B1"), ("A2", "B1")}
+    rebuilt = network.impedance_matrix()
+    np.testing.assert_allclose(rebuilt.imag, z.imag, rtol=1e-12)
+    expected_r = r.copy()
+    expected_r[:2, 2] = expected_r[2, :2] = 0.0
+    np.testing.assert_allclose(rebuilt.real, expected_r, rtol=1e-12, atol=1e-18)
+    text = subckt_text(network, "loop")
+    assert ".subckt loop A0 B0 A1 A2 B1" in text
+    assert "R_B1__B0 B1_m B0 " in text and "K_A1__B1 L_A1 L_B1 " in text
+
+
 # --- SPICE export -------------------------------------------------------------
 
 

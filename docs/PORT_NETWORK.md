@@ -6,7 +6,8 @@ shape at a time (REQUIREMENTS.md).  This package takes what such solves
 measure between pads and carries it into circuit form:
 
 - realizes a pad-port impedance as resistors and coupled inductors
-  (`realize_port_network`);
+  (`realize_port_network`), with a reference per conductor when the copper
+  is in several;
 - writes the result as a SPICE subcircuit (`subckt_text`);
 - closes copper with lumped parts in the frequency domain
   (`nodal_voltages`, `loop_impedance`);
@@ -51,6 +52,29 @@ Flags, not silent fixes:
 | `coupling_clipped` | a coupling of magnitude 1 or more was set to ±0.999 |
 
 `PortNetwork.impedance_matrix(f)` rebuilds `Z` from the elements for checking.
+
+### Several conductors
+
+`realize_port_network(z, pads, references, f)` takes either one reference
+pad or each pad's reference pad (`SheetPortImpedance.references` from
+`electrical.sheet_peec.solve_port_impedance`).  With several conductors
+(a loop's go and return):
+
+- the resistor network is built per conductor from its own block of `Re Z`,
+  because a resistor between two conductors would join them at DC;
+- the inductors carry the whole `Im Z / ω`, couplings across conductors
+  included: that is what the cross-conductor matrix is for;
+- the resistance between conductors is left out, and its largest magnitude
+  is kept in `dropped_cross_resistance_ohm`.
+
+That resistance is not always small.  It is the loss the driven conductor's
+field causes by eddy currents in the other.  On two 5 x 40 cell strips
+(F.Cu over In1.Cu, 0.2 mm apart, 1 MHz) it is 0.34 mOhm against 4.21 mOhm
+self (`tests/test_sheet_ports.py`).  The realized loop keeps `L` exactly
+but reads `R` higher by twice the mutual resistance, 9 % here.  A mutual
+resistance that vanishes at DC needs a frequency-dependent element (a lossy
+coupled loop, or a fitted macromodel), which is not implemented.  The
+subcircuit lists every reference pad first among its ports.
 
 ## SPICE export (`subckt.py`)
 
@@ -99,10 +123,9 @@ error.
 
 ## Not done
 
-- Extracting the pad-port matrix itself across several nets (go and return
-  in one matrix, so a commutation loop's mutual inductance is kept) is the
-  next addition; today callers measure one conductor's matrix with their
-  own solves.
+- The mutual resistance between conductors is dropped (see above).
+- The cross-conductor matrix is measured by
+  `electrical.sheet_peec.solve_port_impedance` on the CPU path only.
 - Frequency dependence beyond one `R + jωL` (skin effect across the band) is
   not fitted; a wideband macromodel (vector fitting with passivity) is not
   implemented.

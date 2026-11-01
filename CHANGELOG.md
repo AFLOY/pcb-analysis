@@ -17,6 +17,16 @@ Versions before 0.7.0 were not tagged; see the Git history.
   - `window_moments`, `close_kcl` and `port_block` reduce simulated port
     currents to the second moments a linear copper solve takes.
   - The code moved from Kicad_PowerOpt with the same arithmetic.
+- `electrical.sheet_peec.solve_port_impedance` measures the pad-port
+  impedance of copper in several conductors in one lockstep solve.
+  `solve_sheet_case(s)(keep_terminal_components=True)` keeps the conductors
+  a 0 A terminal touches, so the open-port voltages across conductors are
+  read; the default is unchanged.
+- `realize_port_network` takes a reference pad per conductor. Breaking against
+  the first version: `PortNetwork.reference_pad` is now a property of
+  `references`. Resistors stay within a conductor, inductors couple across
+  conductors, and the mutual resistance left out is recorded in
+  `dropped_cross_resistance_ohm`.
 - The native builders take another compiler from `PCB_NATIVE_CXX` (the
   command and any arguments it needs; `g++` when unset), and CMake adds
   `-fcx-limited-range` only where the compiler accepts it. AMD AOCC 5.2

@@ -1,7 +1,7 @@
 """A port network as a SPICE ``.subckt``.
 
-The subcircuit's ports are the reference pad first, then the other pads in
-matrix order; its elements are ``L``/``K``/``R`` named after the pads.  Pad
+The subcircuit's ports are the reference pads first (one per conductor),
+then the other pads in matrix order; its elements are ``L``/``K``/``R`` named after the pads.  Pad
 names become node names with every character other than a letter, a digit
 or ``_`` replaced by ``_``.  Values are written with seven significant
 digits, couplings with six decimals.  Nothing here knows a simulator; any
@@ -23,10 +23,10 @@ def node_token(pad: str) -> str:
 
 
 def subckt_text(network: PortNetwork, name: str) -> str:
-    """The network as ``.subckt <name> <reference> <pads...> ... .ends``."""
+    """The network as ``.subckt <name> <references...> <pads...> ... .ends``."""
     if not network.pads:
         raise ValueError("a port network needs at least one non-reference pad")
-    ref = node_token(network.reference_pad)
+    references = set(network.reference_pads)
     inductive = bool(network.self_inductance_h)
 
     def outer(pad: str) -> str:
@@ -36,11 +36,11 @@ def subckt_text(network: PortNetwork, name: str) -> str:
         return f"{node_token(pad)}_m"
 
     def resistor_node(pad: str) -> str:
-        if pad == network.reference_pad:
-            return ref
+        if pad in references:
+            return node_token(pad)
         return inner(pad) if inductive else outer(pad)
 
-    ports = [ref, *(outer(p) for p in network.pads)]
+    ports = [*(node_token(r) for r in network.reference_pads), *(outer(p) for p in network.pads)]
     lines = [f"* {len(network.resistors)} resistors, {len(network.self_inductance_h)} inductors, "
              f"{len(network.couplings)} couplings at {network.frequency_hz:g} Hz"
              + (f"; {' '.join(network.flags)}" if network.flags else ""),

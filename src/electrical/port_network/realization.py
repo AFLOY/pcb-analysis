@@ -14,13 +14,21 @@ one frequency and is singular at DC.
 A resistor can come out negative when two pads share most of their copper
 path.  It is flagged, not clipped: the network as a whole is what was
 measured.
+
+Copper in several conductors (a loop's go and return) has a reference pad
+per conductor, and each port names its own.  The resistor network is then
+built per conductor from its block of ``Re Z``: a resistor between two
+conductors would join them at DC, which they are not.  The resistance a
+matrix carries between conductors (eddy and proximity loss, small) is
+dropped, and its largest magnitude recorded.  The inductors couple across
+conductors, which is what such a matrix is for.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
@@ -61,7 +69,8 @@ class Resistor:
 class PortNetwork:
     """Resistors and coupled inductors that present ``Z`` between ``pads`` and the reference."""
 
-    reference_pad: str
+    references: dict[str, str]
+    """Each non-reference pad's reference pad (one per conductor)."""
     pads: tuple[str, ...]
     """Non-reference pads, in matrix order."""
     frequency_hz: float
@@ -71,6 +80,20 @@ class PortNetwork:
     couplings: tuple[tuple[str, str, float], ...]
     """(pad_a, pad_b, k) for the mutual inductance between their inductors."""
     flags: tuple[str, ...] = field(default_factory=tuple)
+    dropped_cross_resistance_ohm: float = 0.0
+    """Largest ``|Re Z|`` between pads of different conductors, left out of the resistors."""
+
+    @property
+    def reference_pads(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(self.references[p] for p in self.pads))
+
+    @property
+    def reference_pad(self) -> str:
+        """The reference pad of a network of one conductor."""
+        refs = self.reference_pads
+        if len(refs) != 1:
+            raise ValueError(f"the network has {len(refs)} reference pads: {list(refs)}")
+        return refs[0]
 
     def impedance_matrix(self, frequency_hz: float | None = None) -> np.ndarray:
         """The reduced impedance this network presents, for checking."""
@@ -100,7 +123,7 @@ class PortNetwork:
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "reference_pad": self.reference_pad,
+            "references": dict(self.references),
             "pads": list(self.pads),
             "frequency_hz": self.frequency_hz,
             "resistors": [
@@ -110,6 +133,7 @@ class PortNetwork:
             "self_inductance_h": dict(self.self_inductance_h),
             "couplings": [list(item) for item in self.couplings],
             "flags": list(self.flags),
+            "dropped_cross_resistance_ohm": self.dropped_cross_resistance_ohm,
         }
 
 
@@ -132,9 +156,12 @@ def resistor_network(
 
 
 def realize_port_network(
-    z_ohm: np.ndarray, pads: Sequence[str], reference_pad: str, frequency_hz: float
+    z_ohm: np.ndarray, pads: Sequence[str], references: str | Mapping[str, str], frequency_hz: float
 ) -> PortNetwork:
     """Turn a reduced impedance matrix into resistors and coupled inductors.
+
+    ``references`` is the one reference pad of a single conductor, or each
+    pad's reference pad (``SheetPortImpedance.references``) for several.
 
     The inductance matrix ``Im Z / ω`` must be positive definite for coupled
     inductors; a quasi-static extraction can miss that slightly, and then
@@ -145,8 +172,21 @@ def realize_port_network(
     """
     z = np.asarray(z_ohm)
     pads = tuple(pads)
+    reference_of = {p: references for p in pads} if isinstance(references, str) else {p: str(references[p]) for p in pads}
     omega = 2.0 * math.pi * frequency_hz
-    resistors, flags = resistor_network(pads, reference_pad, z.real)
+    resistors: list[Resistor] = []
+    flags: list[str] = []
+    groups = list(dict.fromkeys(reference_of[p] for p in pads))
+    for reference in groups:
+        members = [j for j, p in enumerate(pads) if reference_of[p] == reference]
+        block, block_flags = resistor_network([pads[j] for j in members], reference, z.real[np.ix_(members, members)])
+        resistors += block
+        flags += block_flags
+    cross = 0.0
+    if len(groups) > 1:
+        label = np.array([groups.index(reference_of[p]) for p in pads])
+        across = label[:, None] != label[None, :]
+        cross = float(np.max(np.abs(z.real[across]))) if across.any() else 0.0
     self_inductance: dict[str, float] = {}
     couplings: list[tuple[str, str, float]] = []
     if omega > 0.0:
@@ -172,13 +212,14 @@ def realize_port_network(
                     if abs(coefficient) >= 1e-6:
                         couplings.append((pad_a, pads[k], coefficient))
     return PortNetwork(
-        reference_pad=reference_pad,
+        references=reference_of,
         pads=pads,
         frequency_hz=frequency_hz,
         resistors=tuple(resistors),
         self_inductance_h=self_inductance,
         couplings=tuple(couplings),
         flags=tuple(dict.fromkeys(flags)),
+        dropped_cross_resistance_ohm=cross,
     )
 
 

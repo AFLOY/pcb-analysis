@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from electrical.port_network import realize_port_network, subckt_text
 from electrical.sheet_peec import (
     PortPad,
     SheetInductanceOperator,
@@ -89,3 +90,23 @@ def test_bad_port_statements_are_refused() -> None:
     with pytest.raises(ValueError, match="close its own"):
         # a port whose reference is on the other conductor drives a net current into each
         solve_port_impedance(mesh, operator, PADS, {"top_near": "bottom_far"}, frequency_hz=FREQUENCY)
+
+
+def test_the_solved_matrix_realizes_as_a_circuit_of_two_conductors() -> None:
+    mesh, shape = _mesh()
+    operator = SheetInductanceOperator(shape, PITCH_M, _stackup())
+    result = solve_port_impedance(mesh, operator, PADS, {"top_near": "top_far", "bottom_near": "bottom_far"},
+                                  frequency_hz=FREQUENCY)
+    network = realize_port_network(result.z_ohm, result.ports, result.references, result.frequency_hz)
+    assert network.flags == ()
+    assert len(network.couplings) == 1  # across the conductors
+    assert all({x.pad_a, x.pad_b} in ({"top_near", "top_far"}, {"bottom_near", "bottom_far"}) for x in network.resistors)
+    np.testing.assert_allclose(network.impedance_matrix().imag, result.z_ohm.imag, rtol=1e-9)
+    # the eddy loss the driven strip induces in the other is a mutual resistance; a resistor
+    # between conductors would join them at DC, so it is left out and recorded
+    assert network.dropped_cross_resistance_ohm == pytest.approx(abs(result.z_ohm[0, 1].real))
+    z, rebuilt = result.z_ohm, network.impedance_matrix()
+    loop, loop_rebuilt = z[0, 0] - 2 * z[0, 1] + z[1, 1], rebuilt[0, 0] - 2 * rebuilt[0, 1] + rebuilt[1, 1]
+    assert loop_rebuilt.imag == pytest.approx(loop.imag, rel=1e-9)
+    assert loop_rebuilt.real - loop.real == pytest.approx(2 * z[0, 1].real, rel=1e-9)
+    assert subckt_text(network, "strips").splitlines()[1] == ".subckt strips top_far bottom_far top_near bottom_near"
