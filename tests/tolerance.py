@@ -33,3 +33,27 @@ def iterative_rtol(solver_relative_tolerance: float, factor: float = ITERATIVE_F
     """Comparison tolerance for an answer of an iterative solve stopped at ``solver_relative_tolerance``."""
 
     return factor * solver_relative_tolerance
+
+
+def blas_is_accelerate() -> bool:
+    """Whether NumPy or SciPy runs on Apple's Accelerate BLAS (the macOS arm64 wheels).
+
+    Excitations solved together reproduce their solve alone to the bit on
+    OpenBLAS; on Accelerate a larger system has shown last-bit differences
+    (docs/SHEET_PEEC.md), so bit-identity tests compare to rounding there.
+    """
+
+    import numpy as np
+
+    names = []
+    try:
+        names.append(str(np.show_config(mode="dicts")["Build Dependencies"]["blas"]["name"]))
+    except Exception:  # noqa: BLE001 -- a build without the record
+        pass
+    try:
+        import scipy
+
+        names.append(str(scipy.show_config(mode="dicts")["Build Dependencies"]["blas"]["name"]))
+    except Exception:  # noqa: BLE001
+        pass
+    return any("accelerate" in name.lower() for name in names)
