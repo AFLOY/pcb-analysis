@@ -95,6 +95,140 @@ class CurrentFieldVerticalSegment:
     length_mm: float
 
 
+def _parse_geometry(value: Mapping[str, Any]) -> dict[str, Any]:
+    """The conductor of a current-field mapping: grid, layers, copper, vertical connections, regions.
+
+    Shared by every contract that states copper the way ``current-field-problem/v2`` does; the
+    keys of the result are the field names of :class:`CurrentFieldProblem`.
+    """
+    grid = value.get("grid") or {}
+    rows = int(grid["rows"])
+    columns = int(grid["columns"])
+    if rows < 1 or columns < 1:
+        raise ValueError("grid shape must be positive")
+    tensor: TensorGrid | None = None
+    if "x_edges_mm" in grid or "y_edges_mm" in grid:
+        # Schema v2: the grid lines themselves, in millimetres; graded or not.
+        x_edges = np.asarray(grid["x_edges_mm"], dtype=np.float64) * 1e-3
+        y_edges = np.asarray(grid["y_edges_mm"], dtype=np.float64) * 1e-3
+        if x_edges.size != columns + 1 or y_edges.size != rows + 1:
+            raise ValueError("x_edges_mm and y_edges_mm must hold columns + 1 and rows + 1 lines")
+        tensor = TensorGrid(x_edges, y_edges)
+        pitch_mm = float(tensor.pitch_x_m[0]) * 1e3 if tensor.is_uniform else None
+    else:
+        pitch_mm = float(grid["pitch_mm"])
+        if not math.isfinite(pitch_mm) or pitch_mm <= 0.0:
+            raise ValueError("grid pitch must be positive")
+    layers = tuple(
+        sorted(
+            (
+                CurrentFieldLayer.from_mapping(item)
+                for item in (value.get("layers") or [])
+            ),
+            key=lambda item: item.order,
+        )
+    )
+    if not layers:
+        raise ValueError("at least one conductor layer is required")
+    if tuple(layer.order for layer in layers) != tuple(range(len(layers))):
+        raise ValueError("layers must use contiguous physical order")
+    names = tuple(layer.name for layer in layers)
+    names_set = set(names)
+    if len(names) != len(names_set):
+        raise ValueError("layer names must be unique")
+    masks = value.get("copper_by_layer") or {}
+    if set(masks) != names_set:
+        raise ValueError("copper_by_layer must match the resolved layers")
+    copper = {
+        name: frozenset(
+            (int(cell["x"]), int(cell["y"])) for cell in masks[name]
+        )
+        for name in names
+    }
+    for name, cells in copper.items():
+        if not cells:
+            raise ValueError(f"{name}: conductor mask must not be empty")
+        if any(
+            not (0 <= x < columns and 0 <= y < rows)
+            for x, y in cells
+        ):
+            raise ValueError(f"{name}: conductor cell lies outside the grid")
+
+    vertical: list[
+        tuple[str, tuple[int, int], CurrentFieldVerticalSegment]
+    ] = []
+    layer_order = {layer.name: layer.order for layer in layers}
+    vertical_keys: set[tuple[int, int, str, str]] = set()
+    for connection in value.get("vertical_connections") or []:
+        cell_value = connection.get("cell") or {}
+        cell = (int(cell_value["x"]), int(cell_value["y"]))
+        for segment in connection.get("segments") or []:
+            upper = str(segment["upper_layer"])
+            lower = str(segment["lower_layer"])
+            if upper not in names_set or lower not in names_set:
+                raise ValueError(
+                    f"vertical connection {connection.get('name')} "
+                    "names an unknown layer"
+                )
+            if layer_order[upper] >= layer_order[lower]:
+                raise ValueError(
+                    "vertical segment must be ordered front to back"
+                )
+            if cell not in copper[upper] or cell not in copper[lower]:
+                raise ValueError(
+                    f"vertical connection {connection.get('name')} "
+                    "must land on conductor at both layers"
+                )
+            resistance = float(segment["resistance_ohm"])
+            length = float(segment["length_mm"])
+            if (
+                not math.isfinite(resistance)
+                or not math.isfinite(length)
+                or resistance <= 0.0
+                or length <= 0.0
+            ):
+                raise ValueError(
+                    "vertical segment resistance and length must be positive"
+                )
+            key = (cell[0], cell[1], upper, lower)
+            if key in vertical_keys:
+                raise ValueError("duplicate vertical connection segment")
+            vertical_keys.add(key)
+            vertical.append(
+                (
+                    str(connection.get("name") or ""),
+                    cell,
+                    CurrentFieldVerticalSegment(
+                        upper_layer=upper,
+                        lower_layer=lower,
+                        resistance_ohm=resistance,
+                        length_mm=length,
+                    ),
+                )
+            )
+
+    regions: dict[str, dict[tuple[int, int], int]] | None = None
+    if value.get("cell_regions"):
+        regions = {}
+        for name, items in (value.get("cell_regions") or {}).items():
+            if name not in names_set:
+                raise ValueError(f"cell_regions names an unknown layer {name!r}")
+            regions[name] = {(int(item["x"]), int(item["y"])): int(item["region"]) for item in items}
+            if any(cell not in copper[name] for cell in regions[name]):
+                raise ValueError(f"{name}: a cell region lies off the conductor")
+
+    return {
+        "rows": rows,
+        "columns": columns,
+        "pitch_mm": pitch_mm,
+        "grid": tensor,
+        "layers": layers,
+        "copper_by_layer": copper,
+        "vertical_segments": tuple(vertical),
+        "cell_regions": regions,
+    }
+
+
 @dataclass(frozen=True)
 class CurrentFieldProblem:
     name: str
@@ -125,59 +259,9 @@ class CurrentFieldProblem:
         schema = str(value.get("schema") or "")
         if schema not in (CURRENT_FIELD_PROBLEM_SCHEMA, CURRENT_FIELD_PROBLEM_SCHEMA_V2):
             raise ValueError(f"unsupported current-field problem schema: {schema}")
-        grid = value.get("grid") or {}
-        rows = int(grid["rows"])
-        columns = int(grid["columns"])
-        if rows < 1 or columns < 1:
-            raise ValueError("grid shape must be positive")
-        tensor: TensorGrid | None = None
-        if "x_edges_mm" in grid or "y_edges_mm" in grid:
-            # Schema v2: the grid lines themselves, in millimetres; graded or not.
-            x_edges = np.asarray(grid["x_edges_mm"], dtype=np.float64) * 1e-3
-            y_edges = np.asarray(grid["y_edges_mm"], dtype=np.float64) * 1e-3
-            if x_edges.size != columns + 1 or y_edges.size != rows + 1:
-                raise ValueError("x_edges_mm and y_edges_mm must hold columns + 1 and rows + 1 lines")
-            tensor = TensorGrid(x_edges, y_edges)
-            pitch_mm = float(tensor.pitch_x_m[0]) * 1e3 if tensor.is_uniform else None
-        else:
-            pitch_mm = float(grid["pitch_mm"])
-            if not math.isfinite(pitch_mm) or pitch_mm <= 0.0:
-                raise ValueError("grid pitch must be positive")
-        layers = tuple(
-            sorted(
-                (
-                    CurrentFieldLayer.from_mapping(item)
-                    for item in (value.get("layers") or [])
-                ),
-                key=lambda item: item.order,
-            )
-        )
-        if not layers:
-            raise ValueError("at least one conductor layer is required")
-        if tuple(layer.order for layer in layers) != tuple(range(len(layers))):
-            raise ValueError("layers must use contiguous physical order")
-        names = tuple(layer.name for layer in layers)
-        names_set = set(names)
-        if len(names) != len(names_set):
-            raise ValueError("layer names must be unique")
-        masks = value.get("copper_by_layer") or {}
-        if set(masks) != names_set:
-            raise ValueError("copper_by_layer must match the resolved layers")
-        copper = {
-            name: frozenset(
-                (int(cell["x"]), int(cell["y"])) for cell in masks[name]
-            )
-            for name in names
-        }
-        for name, cells in copper.items():
-            if not cells:
-                raise ValueError(f"{name}: conductor mask must not be empty")
-            if any(
-                not (0 <= x < columns and 0 <= y < rows)
-                for x, y in cells
-            ):
-                raise ValueError(f"{name}: conductor cell lies outside the grid")
-
+        geometry = _parse_geometry(value)
+        copper = geometry["copper_by_layer"]
+        names_set = {layer.name for layer in geometry["layers"]}
         terminals: list[CurrentFieldTerminal] = []
         for item in value.get("terminals") or []:
             cells = tuple(
@@ -235,87 +319,17 @@ class CurrentFieldProblem:
         if not any(abs(terminal.current_a) > tolerance for terminal in terminals):
             raise ValueError("terminal excitation must be non-zero")
 
-        vertical: list[
-            tuple[str, tuple[int, int], CurrentFieldVerticalSegment]
-        ] = []
-        layer_order = {layer.name: layer.order for layer in layers}
-        vertical_keys: set[tuple[int, int, str, str]] = set()
-        for connection in value.get("vertical_connections") or []:
-            cell_value = connection.get("cell") or {}
-            cell = (int(cell_value["x"]), int(cell_value["y"]))
-            for segment in connection.get("segments") or []:
-                upper = str(segment["upper_layer"])
-                lower = str(segment["lower_layer"])
-                if upper not in names_set or lower not in names_set:
-                    raise ValueError(
-                        f"vertical connection {connection.get('name')} "
-                        "names an unknown layer"
-                    )
-                if layer_order[upper] >= layer_order[lower]:
-                    raise ValueError(
-                        "vertical segment must be ordered front to back"
-                    )
-                if cell not in copper[upper] or cell not in copper[lower]:
-                    raise ValueError(
-                        f"vertical connection {connection.get('name')} "
-                        "must land on conductor at both layers"
-                    )
-                resistance = float(segment["resistance_ohm"])
-                length = float(segment["length_mm"])
-                if (
-                    not math.isfinite(resistance)
-                    or not math.isfinite(length)
-                    or resistance <= 0.0
-                    or length <= 0.0
-                ):
-                    raise ValueError(
-                        "vertical segment resistance and length must be positive"
-                    )
-                key = (cell[0], cell[1], upper, lower)
-                if key in vertical_keys:
-                    raise ValueError("duplicate vertical connection segment")
-                vertical_keys.add(key)
-                vertical.append(
-                    (
-                        str(connection.get("name") or ""),
-                        cell,
-                        CurrentFieldVerticalSegment(
-                            upper_layer=upper,
-                            lower_layer=lower,
-                            resistance_ohm=resistance,
-                            length_mm=length,
-                        ),
-                    )
-                )
-
-        regions: dict[str, dict[tuple[int, int], int]] | None = None
-        if value.get("cell_regions"):
-            regions = {}
-            for name, items in (value.get("cell_regions") or {}).items():
-                if name not in names_set:
-                    raise ValueError(f"cell_regions names an unknown layer {name!r}")
-                regions[name] = {(int(item["x"]), int(item["y"])): int(item["region"]) for item in items}
-                if any(cell not in copper[name] for cell in regions[name]):
-                    raise ValueError(f"{name}: a cell region lies off the conductor")
-
         problem = cls(
             name=str(value.get("name") or ""),
             role=str(value.get("role") or ""),
             frequency_hz=float(value.get("frequency_hz", 0.0)),
-            rows=rows,
-            columns=columns,
-            pitch_mm=pitch_mm,
-            grid=tensor,
-            layers=layers,
-            copper_by_layer=copper,
-            vertical_segments=tuple(vertical),
             terminals=tuple(terminals),
-            cell_regions=regions,
             source_board_sha256=(
                 None
                 if value.get("source_board_sha256") is None
                 else str(value.get("source_board_sha256"))
             ),
+            **geometry,
         )
         if not problem.name or not problem.role:
             raise ValueError("problem name and role are required")
@@ -375,27 +389,42 @@ class _SheetGeometry:
     layer_by_name: Mapping[str, CurrentFieldLayer]
 
 
-def _sheet_geometry(
-    problem: CurrentFieldProblem, settings: Mapping[str, Any]
-) -> tuple[SheetMesh, Any, _SheetGeometry]:
-    """The mesh and the inductance operator of a problem; its terminals play no part."""
-    tensor = problem.grid if problem.grid is not None else TensorGrid.uniform(problem.pitch_mm * 1e-3, (problem.rows, problem.columns))
-    pitch_m = problem.pitch_mm * 1e-3 if problem.pitch_mm is not None else None
-    sheet_layers = []
-    filament_of: dict[str, tuple[int, ...]] = {}
-    cuts = {}
-    for layer in problem.layers:
-        cut = graded_filaments(
+def _filament_cuts(
+    layers: Sequence[CurrentFieldLayer], frequency_hz: float, settings: Mapping[str, Any]
+) -> dict[str, Any]:
+    """How each layer's thickness is cut into filaments at one frequency."""
+    return {
+        layer.name: graded_filaments(
             layer.thickness_mm * 1e-3,
             layer.center_z_mm * 1e-3,
-            problem.frequency_hz,
+            frequency_hz,
             resistivity_ohm_m=layer.resistivity_ohm_m,
             cells_per_skin_depth=float(
                 settings.get("cells_per_skin_depth", 4.0)
             ),
             maximum_filaments=int(settings.get("maximum_filaments", 64)),
         )
-        cuts[layer.name] = cut
+        for layer in layers
+    }
+
+
+def _sheet_geometry(
+    problem: CurrentFieldProblem, settings: Mapping[str, Any], frequency_hz: float | None = None
+) -> tuple[SheetMesh, Any, _SheetGeometry]:
+    """The mesh and the inductance operator of a problem; its terminals play no part.
+
+    ``problem`` needs only the geometry fields :func:`_parse_geometry` gives.
+    The thickness is cut for ``frequency_hz`` (default: the problem's own).
+    """
+    tensor = problem.grid if problem.grid is not None else TensorGrid.uniform(problem.pitch_mm * 1e-3, (problem.rows, problem.columns))
+    pitch_m = problem.pitch_mm * 1e-3 if problem.pitch_mm is not None else None
+    sheet_layers = []
+    filament_of: dict[str, tuple[int, ...]] = {}
+    cuts = _filament_cuts(
+        problem.layers, problem.frequency_hz if frequency_hz is None else frequency_hz, settings
+    )
+    for layer in problem.layers:
+        cut = cuts[layer.name]
         indices = tuple(
             range(len(sheet_layers), len(sheet_layers) + len(cut))
         )
