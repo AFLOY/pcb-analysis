@@ -22,6 +22,11 @@ Versions before 0.7.0 were not tagged; see the Git history.
   `solve_sheet_case(s)(keep_terminal_components=True)` keeps the conductors
   a 0 A terminal touches, so the open-port voltages across conductors are
   read; the default is unchanged.
+- `BoardNetwork` solves copper (`Z(f)` per frequency) with every part that
+  joins its nets, by modified nodal analysis. Each part keeps its own current
+  spectrum.
+  - Parts: `Part` with `SeriesRLC`, `TabulatedImpedance` or `Tie`.
+  - Sources: `CurrentSource` and `VoltageSource`.
 - `realize_port_network` takes a reference pad per conductor. Breaking against
   the first version: `PortNetwork.reference_pad` is now a property of
   `references`. Resistors stay within a conductor, inductors couple across

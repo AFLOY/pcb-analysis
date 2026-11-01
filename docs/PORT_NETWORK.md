@@ -103,6 +103,44 @@ its mounting (`capacitor(c, esr, esl)`).  `C = 0` means no capacitor.
   `R + jωL` from one solve, which holds where one filament through the foil
   describes it.
 
+## Copper and parts solved together (`parts.py`, `assembly.py`)
+
+`BoardNetwork(copper, parts, ground, current_sources=, voltage_sources=)`
+solves the copper with every part that joins its nets, at each frequency
+the copper has a matrix for.  Every part stays its own element between its
+own pads, so its current is a result at every frequency.  The share of the
+ripple each decoupling capacitor shunts is what shows its filtering, and a
+reduction that merged the parts would lose it.
+
+- Nodes are pads.  The copper enters as `Bᵀ Z(f)⁻¹ B`: `B` is the port
+  incidence, `+1` at a port pad and `-1` at its conductor's reference pad.
+  Copper in several conductors (from `solve_port_impedance`) couples
+  through the cross terms of `Z`.
+- `Part(name, a, b, model)` is stamped between pads `a` and `b`.  The model
+  is anything with `impedance(omega)`:
+  - `SeriesRLC`
+  - `TabulatedImpedance`: a measured or simulated curve, such as a capacitor
+    at its DC bias or a power inductor, interpolated as `log|Z|` and phase
+    in `log f`; it refuses outside its table
+  - `Tie`: an ideal connection, solved as a 0 V branch so its current is
+    reported
+- `CurrentSource` (for example a switch's current spectrum) and
+  `VoltageSource` are given as phasors per frequency.  A voltage source's
+  current is a result.
+- The solve is modified nodal analysis, dense, one complex solve per
+  frequency.  The result `NetworkSolution` holds:
+  - pad voltages against the ground pad
+  - each part's current (from `a` to `b`)
+  - each voltage source's current
+  - the current into each copper port
+- A frequency without a copper matrix is refused, not interpolated.  A pad
+  or a conductor with no path to the ground pad is reported as singular.
+
+On two strips (VIN over PGND, a switch at one end, a capacitor of 1 uF /
+2 mOhm / 0.5 nH at the middle and one at the far end;
+`tests/test_board_network.py`), the switch current closes through the two
+capacitors.  The nearer one takes 0.50 of it at 100 kHz and 0.81 at 10 MHz.
+
 ## Port moments (`moments.py`)
 
 The copper is linear, so for any port-current waveforms the time-averaged
