@@ -7,6 +7,13 @@ reference, every other pad is a terminal of 0 A, and the mean potential
 over every port pad less its reference's is column ``k`` of the impedance:
 ``z[j, k]`` = V(port j) − V(reference of j) for 1 A through port ``k``.
 
+A pad may cover cells on several layers (a plated pin, or several pins
+taken as one port with :func:`merge_pads`).  Its current is spread evenly
+over all its cells on the conductor and its voltage is the mean over the
+same cells, the convention a one-layer ``Terminal`` already follows, so the
+matrix stays reciprocal.  Merging the pins of one part on one net keeps the
+part's current and loses only how it divides between those pins.
+
 The conductors that carry no current in an excitation are kept
 (``keep_terminal_components``), so the voltage the driven copper induces
 on them is read: the matrix couples ports on different conductors through
@@ -19,7 +26,7 @@ Nothing here reads a board.  The caller states the pads as mesh cells.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -29,11 +36,51 @@ from .sheet_peec import Cell, SheetMesh, Terminal, solve_sheet_cases
 
 @dataclass(frozen=True)
 class PortPad:
-    """One pad: its cells on one layer of the mesh."""
+    """One pad: its cells on one layer of the mesh, and on others if it spans them.
+
+    ``other_layers`` lists ``(layer, cells)`` for every further layer the pad
+    covers, such as the annular rings of a plated pin.
+    """
 
     name: str
     layer: int
     cells: tuple[Cell, ...]
+    other_layers: tuple[tuple[int, tuple[Cell, ...]], ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "cells", tuple((int(r), int(c)) for r, c in self.cells))
+        object.__setattr__(
+            self,
+            "other_layers",
+            tuple((int(layer), tuple((int(r), int(c)) for r, c in cells)) for layer, cells in self.other_layers),
+        )
+        layers = [self.layer, *(layer for layer, _ in self.other_layers)]
+        if len(set(layers)) != len(layers):
+            raise ValueError(f"pad {self.name} lists a layer twice")
+        if not any(cells for _, cells in self.footprint):
+            raise ValueError(f"pad {self.name} covers no cells")
+
+    @property
+    def footprint(self) -> tuple[tuple[int, tuple[Cell, ...]], ...]:
+        """``(layer, cells)`` for every layer the pad covers, its first layer first."""
+        return ((self.layer, self.cells), *self.other_layers)
+
+
+def merge_pads(name: str, pads: Iterable[PortPad]) -> PortPad:
+    """One pad covering the union of ``pads``' cells (the pins of one part on one net, say)."""
+    by_layer: dict[int, dict[Cell, None]] = {}
+    for pad in pads:
+        for layer, cells in pad.footprint:
+            by_layer.setdefault(layer, {}).update(dict.fromkeys(cells))
+    if not by_layer:
+        raise ValueError(f"no pads to merge into {name}")
+    layers = list(by_layer)
+    return PortPad(
+        name,
+        layers[0],
+        tuple(by_layer[layers[0]]),
+        tuple((layer, tuple(by_layer[layer])) for layer in layers[1:]),
+    )
 
 
 @dataclass(frozen=True)
@@ -47,18 +94,26 @@ class SheetPortImpedance:
     frequency_hz: float
     converged: tuple[bool, ...]
     iterations: tuple[int, ...]
-
     @property
     def reference_pads(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys(self.references[p] for p in self.ports))
 
-
-def _mean_voltage(mesh: SheetMesh, voltage: np.ndarray, pad: PortPad) -> complex:
-    nodes = [mesh.node_index[(pad.layer, row, col)] for row, col in pad.cells
-             if (pad.layer, row, col) in mesh.node_index]
+def _pad_nodes(mesh: SheetMesh, pad: PortPad) -> list[int]:
+    nodes = [mesh.node_index[(layer, row, col)] for layer, cells in pad.footprint for row, col in cells
+             if (layer, row, col) in mesh.node_index]
     if not nodes:
         raise ValueError(f"pad {pad.name} has no cell on the conductor")
-    return complex(np.mean(voltage[nodes]))
+    return nodes
+
+
+def _pad_terminals(mesh: SheetMesh, pad: PortPad, current: float) -> list[Terminal]:
+    """One terminal per layer, carrying that layer's share of the pad's cells on the conductor."""
+    usable = {layer: sum((layer, r, c) in mesh.node_index for r, c in cells) for layer, cells in pad.footprint}
+    total = sum(usable.values())
+    if total == 0:
+        raise ValueError(f"pad {pad.name} has no cell on the conductor")
+    return [Terminal(pad.name, layer, cells, current * usable[layer] / total)
+            for layer, cells in pad.footprint if usable[layer]]
 
 
 def solve_port_impedance(
@@ -93,12 +148,13 @@ def solve_port_impedance(
         raise ValueError("a reference pad cannot also be a port")
     if not ports:
         raise ValueError("no ports")
+    nodes = {pad.name: _pad_nodes(mesh, pad) for pad in pads}
 
     def excitation(port: str) -> list[Terminal]:
         current = {name: 0.0 for name in by_name}
         current[port] = 1.0
         current[references[port]] = -1.0
-        return [Terminal(pad.name, pad.layer, pad.cells, current[pad.name]) for pad in pads]
+        return [terminal for pad in pads for terminal in _pad_terminals(mesh, pad, current[pad.name])]
 
     solutions = solve_sheet_cases(
         mesh, operator, [excitation(port) for port in ports], frequency_hz=frequency_hz, tolerance=tolerance,
@@ -108,8 +164,8 @@ def solve_port_impedance(
     z = np.zeros((len(ports), len(ports)), dtype=complex)
     for k, solution in enumerate(solutions):
         for j, port in enumerate(ports):
-            z[j, k] = (_mean_voltage(mesh, solution.node_voltage, by_name[port])
-                       - _mean_voltage(mesh, solution.node_voltage, by_name[references[port]]))
+            z[j, k] = (complex(np.mean(solution.node_voltage[nodes[port]]))
+                       - complex(np.mean(solution.node_voltage[nodes[references[port]]])))
     return SheetPortImpedance(
         ports=ports,
         references=dict(references),
@@ -120,4 +176,4 @@ def solve_port_impedance(
     )
 
 
-__all__ = ["PortPad", "SheetPortImpedance", "solve_port_impedance"]
+__all__ = ["PortPad", "SheetPortImpedance", "merge_pads", "solve_port_impedance"]

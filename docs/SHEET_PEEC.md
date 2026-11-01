@@ -789,5 +789,25 @@ on another conductor is refused by the solve's per-component closure.
 `electrical.port_network.realize_port_network` turns the result into a
 circuit (docs/PORT_NETWORK.md).
 
+A `PortPad` may cover cells on several layers (`other_layers`, the rings of a
+plated pin).  Its current is spread evenly over all its cells on the
+conductor and its voltage is the mean over the same cells, so the matrix
+stays reciprocal; a one-layer pad gives the same bits as before.
+`merge_pads(name, pads)` makes one port of several pads, such as the pins of
+one part on one net.  The part's current is kept; what is lost is how it
+divides between the pins.  Against the same pins as separate ports tied
+together outside the copper (`tests/test_sheet_ports.py`, the 5 x 40 strip
+above, 1 MHz):
+
+| pins | merged R / L | tied R / L | difference |
+|---|---:|---:|---:|
+| side by side across the path (1 and 3 cells, one column) | 4.1713 mOhm / 5.0312 nH | 4.1698 mOhm / 5.0297 nH | 0.04 % / 0.03 % |
+| 1 mm apart along the path | 3.8884 mOhm / 4.5682 nH | 4.1380 mOhm / 4.2075 nH | -6.0 % / +8.6 % |
+
+Tied pins 1 mm apart along the path short the copper between them, which
+then carries a circulating current an even spread cannot represent.  Merging
+is meant for a package's leads, not for pins spread along the copper.  The
+default keeps every pad its own port.
+
 Measured device acceptance and CPU comparisons are in
 `docs/SHEET_CUDA_RESULTS.md`.

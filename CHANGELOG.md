@@ -22,6 +22,9 @@ Versions before 0.7.0 were not tagged; see the Git history.
   `solve_sheet_case(s)(keep_terminal_components=True)` keeps the conductors
   a 0 A terminal touches, so the open-port voltages across conductors are
   read; the default is unchanged.
+  - A `PortPad` may cover cells on several layers (`other_layers`), and
+    `merge_pads` makes one port of several pads (the pins of one part on one
+    net). A one-layer pad gives the same bits as before.
 - `BoardNetwork` solves copper (`Z(f)` per frequency) with every part that
   joins its nets, by modified nodal analysis. Each part keeps its own current
   spectrum.

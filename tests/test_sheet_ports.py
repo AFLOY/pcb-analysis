@@ -14,6 +14,7 @@ from electrical.sheet_peec import (
     SheetStackup,
     Terminal,
     ViaBranch,
+    merge_pads,
     solve_port_impedance,
     solve_sheet_case,
 )
@@ -110,3 +111,54 @@ def test_the_solved_matrix_realizes_as_a_circuit_of_two_conductors() -> None:
     assert loop_rebuilt.imag == pytest.approx(loop.imag, rel=1e-9)
     assert loop_rebuilt.real - loop.real == pytest.approx(2 * z[0, 1].real, rel=1e-9)
     assert subckt_text(network, "strips").splitlines()[1] == ".subckt strips top_far bottom_far top_near bottom_near"
+
+
+def _pins(rows, col):
+    return tuple((row, col) for row in rows)
+
+
+def test_merged_pins_lose_only_the_division_between_them() -> None:
+    # one strip, its return across the far end; a part's two pins on one net at the near end
+    mesh, shape = _mesh()
+    operator = SheetInductanceOperator(shape, PITCH_M, _stackup())
+    far = PortPad("far", 0, _cells(LENGTH))
+
+    def merged_and_tied(pin_a, pin_b):
+        split = solve_port_impedance(mesh, operator, [pin_a, pin_b, far], {pin_a.name: "far", pin_b.name: "far"},
+                                     frequency_hz=FREQUENCY)
+        merged = solve_port_impedance(mesh, operator, [merge_pads("q1_s", [pin_a, pin_b]), far], {"q1_s": "far"},
+                                      frequency_hz=FREQUENCY)
+        # the pins tied together outside the copper: the split matrix's ports in parallel
+        return merged.z_ohm[0, 0], 1.0 / np.linalg.inv(split.z_ohm).sum()
+
+    # pins side by side across the current's path, as a package's leads are: the
+    # even spread over their cells is the division they take when tied (3e-4 here)
+    pin_a, pin_b = PortPad("q1_s1", 0, _pins((1,), 1)), PortPad("q1_s2", 0, _pins((3, 4, 5), 1))
+    assert merge_pads("q1_s", [pin_a, pin_b]).cells == pin_a.cells + pin_b.cells
+    merged, tied = merged_and_tied(pin_a, pin_b)
+    assert merged.real == pytest.approx(tied.real, rel=1e-3)
+    assert merged.imag == pytest.approx(tied.imag, rel=1e-3)
+    # pins 1 mm apart along the path: tied, the copper between them carries a
+    # circulating current that merging cannot represent (6 % in R, 9 % in L here)
+    merged, tied = merged_and_tied(PortPad("q1_s1", 0, _pins((1,), 1)), PortPad("q1_s2", 0, _pins((5,), 6)))
+    assert abs(merged.imag / tied.imag - 1.0) > 0.03
+
+
+def test_a_pad_over_two_layers() -> None:
+    # the strips joined by vias across both ends: one conductor; a plated pad over
+    # both layers at the near end, the far end of the top strip its return
+    ends = tuple(ViaBranch(row, col, 1, 0, 1e-6) for col in (2, LENGTH - 1) for row, _ in _cells(col))
+    mesh, shape = _mesh(ends)
+    operator = SheetInductanceOperator(shape, PITCH_M, _stackup(), vertical_levels=mesh.vertical_levels)
+    plated = PortPad("j1", 0, _cells(1), ((1, _cells(1)),))
+    pads = [plated, PortPad("mid", 1, _cells(LENGTH // 2)), PortPad("far", 0, _cells(LENGTH))]
+    result = solve_port_impedance(mesh, operator, pads, {"j1": "far", "mid": "far"}, frequency_hz=FREQUENCY)
+    assert all(result.converged)
+    np.testing.assert_allclose(result.z_ohm, result.z_ohm.T, rtol=1e-6)
+
+
+def test_a_pad_lists_each_layer_once() -> None:
+    with pytest.raises(ValueError, match="twice"):
+        PortPad("x", 0, _cells(1), ((0, _cells(2)),))
+    with pytest.raises(ValueError, match="no cells"):
+        PortPad("x", 0, ())
