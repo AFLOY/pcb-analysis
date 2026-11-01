@@ -205,13 +205,17 @@ def dipoles_from_sheet_peec(mesh, solution) -> CurrentDipoles:
     """Branch currents of a sheet-PEEC solve as current elements.
 
     ``mesh`` is a ``SheetMesh`` and ``solution`` a ``SheetSolution`` from
-    ``electrical.sheet_peec.sheet_peec``.  An in-plane branch is one pitch
-    long between cell centres; its element sits midway, on the layer's
-    ``z_m``.  A via branch spans the two layers' heights.  Branch currents
-    are positive from the leaving node to the entering node, which is ``+x``,
-    ``+y``, and lower-to-upper respectively.
+    ``electrical.sheet_peec.sheet_peec``.  An in-plane branch runs between
+    two cell centres (one pitch on a uniform grid, the centres' distance on a
+    graded one); its element sits midway, on the layer's ``z_m``.  A via
+    branch spans the two layers' heights at its cell's centre.  Positions are
+    in the grid's frame.  Branch currents are positive from the leaving node
+    to the entering node, which is ``+x``, ``+y``, and lower-to-upper
+    respectively.
     """
 
+    if mesh.pitch_m is None:
+        return _dipoles_on_graded_grid(mesh, solution)
     pitch = float(mesh.pitch_m)
     heights = np.asarray([layer.z_m for layer in mesh.stackup.layers], dtype=np.float64)
     current = np.asarray(solution.branch_current, dtype=np.complex128)
@@ -242,5 +246,37 @@ def dipoles_from_sheet_peec(mesh, solution) -> CurrentDipoles:
     positions[count_x + count_y :] = np.column_stack(
         ((vias[:, 3] + 0.5) * pitch, (vias[:, 2] + 0.5) * pitch, 0.5 * (lower + upper))
     )
+    moments[count_x + count_y :, 2] = current[count_x + count_y :] * (upper - lower)
+    return CurrentDipoles(positions, moments)
+
+
+def _dipoles_on_graded_grid(mesh, solution) -> CurrentDipoles:
+    """:func:`dipoles_from_sheet_peec` on a tensor grid of unequal cells."""
+
+    grid = mesh.grid
+    xc = 0.5 * (np.asarray(grid.x_edges_m[:-1]) + np.asarray(grid.x_edges_m[1:]))
+    yc = 0.5 * (np.asarray(grid.y_edges_m[:-1]) + np.asarray(grid.y_edges_m[1:]))
+    heights = np.asarray([layer.z_m for layer in mesh.stackup.layers], dtype=np.float64)
+    current = np.asarray(solution.branch_current, dtype=np.complex128)
+    if current.shape != (mesh.branch_count,):
+        raise ValueError("solution.branch_current must hold one value per branch")
+    branch_x = np.asarray(mesh.branch_x, dtype=np.int64).reshape(-1, 3)
+    branch_y = np.asarray(mesh.branch_y, dtype=np.int64).reshape(-1, 3)
+    vias = np.asarray(
+        [(via.lower_layer, via.upper_layer, via.row, via.col) for via in mesh.via_branches], dtype=np.int64
+    ).reshape(-1, 4)
+    count_x, count_y = branch_x.shape[0], branch_y.shape[0]
+    positions = np.empty((mesh.branch_count, 3), dtype=np.float64)
+    moments = np.zeros((mesh.branch_count, 3), dtype=np.complex128)
+    left, right = xc[branch_x[:, 2]], xc[branch_x[:, 2] + 1]
+    positions[:count_x] = np.column_stack((0.5 * (left + right), yc[branch_x[:, 1]], heights[branch_x[:, 0]]))
+    moments[:count_x, 0] = current[:count_x] * (right - left)
+    low, high = yc[branch_y[:, 1]], yc[branch_y[:, 1] + 1]
+    positions[count_x : count_x + count_y] = np.column_stack(
+        (xc[branch_y[:, 2]], 0.5 * (low + high), heights[branch_y[:, 0]])
+    )
+    moments[count_x : count_x + count_y, 1] = current[count_x : count_x + count_y] * (high - low)
+    lower, upper = heights[vias[:, 0]], heights[vias[:, 1]]
+    positions[count_x + count_y :] = np.column_stack((xc[vias[:, 3]], yc[vias[:, 2]], 0.5 * (lower + upper)))
     moments[count_x + count_y :, 2] = current[count_x + count_y :] * (upper - lower)
     return CurrentDipoles(positions, moments)

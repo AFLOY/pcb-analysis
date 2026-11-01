@@ -190,3 +190,23 @@ def test_cuda_backend_matches_numpy() -> None:
     gpu_pattern = far_field_pattern(sources, 200e6, backend="cuda")
     np.testing.assert_allclose(gpu_pattern.magnitude_v_per_m, cpu_pattern.magnitude_v_per_m, rtol=1e-10)
     assert gpu_pattern.radiated_power_w == pytest.approx(cpu_pattern.radiated_power_w, rel=1e-10)
+
+
+def test_sheet_dipoles_on_a_graded_grid_are_the_uniform_ones_when_the_cells_are_equal() -> None:
+    from electrical.matrix_free_mpir_fem.grid import TensorGrid
+    from emc.tiled_dipole_superposition import dipoles_from_sheet_peec
+    from electrical.sheet_peec import (
+        SheetInductanceOperator, SheetLayer, SheetMesh, SheetStackup, Terminal, ViaBranch, solve_sheet_case,
+    )
+
+    stackup = SheetStackup((SheetLayer("F", 0.0, 3.5e-5, 1.724e-8), SheetLayer("B", -2e-4, 3.5e-5, 1.724e-8)))
+    occupancy = np.ones((2, 6, 9), bool)
+    vias = (ViaBranch(2, 7, 1, 0, 1e-6),)
+    uniform = SheetMesh((6, 9), 2e-4, stackup, occupancy, vias=vias)
+    graded = SheetMesh((6, 9), None, stackup, occupancy, vias=vias, grid=TensorGrid.uniform(2e-4, (6, 9)))
+    operator = SheetInductanceOperator((6, 9), 2e-4, stackup, vertical_levels=uniform.vertical_levels)
+    solution = solve_sheet_case(uniform, operator, [Terminal("a", 0, ((0, 0),), 1.0), Terminal("b", 1, ((5, 0),), -1.0)],
+                                frequency_hz=1e6)
+    a, b = dipoles_from_sheet_peec(uniform, solution), dipoles_from_sheet_peec(graded, solution)
+    np.testing.assert_allclose(b.position_m, a.position_m, rtol=0, atol=1e-18)
+    np.testing.assert_allclose(b.moment_a_m, a.moment_a_m, rtol=1e-12, atol=1e-25)
