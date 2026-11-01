@@ -480,20 +480,37 @@ def _components(incidence: sp.csr_matrix, node_count: int) -> tuple[int, np.ndar
 
 
 def _components_with_terminals(
-    labels: np.ndarray, components: int, injected: np.ndarray
+    labels: np.ndarray, components: int, injected: np.ndarray, touched: np.ndarray | None = None
 ) -> set[int]:
     """Name the components a case actually drives.
 
     A component with no terminal carries no current in this case.  It is
     reported and left out rather than solved: including it would leave its
     potential undetermined, and refusing the whole case would refuse a plane
-    that shaping merely left an island on.
+    that shaping merely left an island on.  ``touched`` (a node mask) adds the
+    components a terminal touches whatever its current: those are solved too,
+    each on its own gauge with no net current, which is what reading the
+    voltage induced on an open port needs.
     """
-    return {
+    driven = {
         int(component)
         for component in range(components)
         if np.abs(injected[labels == component]).sum() > 0.0
     }
+    if touched is not None:
+        driven |= {int(component) for component in np.unique(labels[touched])}
+    return driven
+
+
+def _terminal_nodes(mesh: SheetMesh, terminals: Sequence[Terminal]) -> np.ndarray:
+    """Mask of the mesh nodes the terminals' pads cover."""
+    mask = np.zeros(mesh.node_count, dtype=bool)
+    for terminal in terminals:
+        for row, col in terminal.cells:
+            index = mesh.node_index.get((terminal.layer, row, col))
+            if index is not None:
+                mask[index] = True
+    return mask
 
 
 def _source_vector(mesh: SheetMesh, terminals: Sequence[Terminal]) -> np.ndarray:
@@ -535,6 +552,7 @@ def solve_sheet_case(
     restart: int = 60,
     preconditioner: str = "auto",
     near_tiles: int | None = None,
+    keep_terminal_components: bool = False,
 ) -> SheetSolution:
     """Solve one excitation of the mesh.
 
@@ -567,6 +585,7 @@ def solve_sheet_case(
     return solve_sheet_cases(
         mesh, operator, [terminals], frequency_hz=frequency_hz, tolerance=tolerance,
         max_iterations=max_iterations, restart=restart, preconditioner=preconditioner, near_tiles=near_tiles,
+        keep_terminal_components=keep_terminal_components,
     )[0]
 
 
@@ -581,6 +600,7 @@ def solve_sheet_cases(
     restart: int = 60,
     preconditioner: str = "auto",
     near_tiles: int | None = None,
+    keep_terminal_components: bool = False,
 ) -> list[SheetSolution]:
     """Solve several excitations of one mesh, in the order given.
 
@@ -593,6 +613,13 @@ def solve_sheet_cases(
     per excitation.  Each lockstep solve is the restarted GMRES that
     :func:`solve_sheet_case` runs, step for step; an excitation alone in its
     group is solved exactly as :func:`solve_sheet_case` solves it.
+
+    ``keep_terminal_components``: a component that a terminal touches is
+    solved even when the excitation puts no current into it (a terminal of
+    ``0`` A), on its own gauge and closing its own (zero) current.  The
+    voltages on it are then those induced by the driven copper: the
+    open-port voltages a multi-port impedance is read from.  Off by default,
+    when such a component is left out like any undriven island.
     """
     if preconditioner not in ("auto", "near", "block", "diagonal"):
         raise ValueError("preconditioner must be 'auto', 'near', 'block' or 'diagonal'")
@@ -614,7 +641,8 @@ def solve_sheet_cases(
         injected = _source_vector(mesh, terminals)
         if frequency_hz == 0.0 and float(np.max(np.abs(injected.imag))) > 1e-15:
             raise ValueError("DC terminal currents must be real")
-        cases.append((injected, _reduce(mesh, incidence, injected)))
+        touched = _terminal_nodes(mesh, terminals) if keep_terminal_components else None
+        cases.append((injected, _reduce(mesh, incidence, injected, touched)))
     if frequency_hz == 0.0:
         return [_solve_dc(mesh, resistance, reduction, injected) for injected, reduction in cases]
 
@@ -645,14 +673,16 @@ class _Reduction:
     reduced: sp.csr_matrix
 
 
-def _reduce(mesh: SheetMesh, incidence: sp.csr_matrix, injected: np.ndarray) -> _Reduction:
+def _reduce(
+    mesh: SheetMesh, incidence: sp.csr_matrix, injected: np.ndarray, touched: np.ndarray | None = None
+) -> _Reduction:
     # Potential is defined up to a constant per connected component, so each
     # component needs its own gauge.  Grounding one node and hoping the
     # conductor is one piece made the system exactly singular the moment it was
     # not: shaping cuts islands off a plane, and a mesh with two components
     # returned NaN with a warning rather than saying so.
     components, labels = _components(incidence, mesh.node_count)
-    carried = _components_with_terminals(labels, components, injected)
+    carried = _components_with_terminals(labels, components, injected, touched)
     if not carried:
         raise ValueError("no connected component of the conductor carries a terminal")
     kept_nodes = np.isin(labels, list(carried))

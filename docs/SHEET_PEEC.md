@@ -750,5 +750,33 @@ operator to induce current in a component with no closure equation. The
 returned current of every omitted branch is zero and `undriven_node_count`
 records its size.
 
+`keep_terminal_components=True` (`solve_sheet_case`, `solve_sheet_cases`)
+keeps every component a terminal touches, a terminal of `0` A included.
+Each such component gets its own gauge, its KCL columns and KVL rows, and
+closes its own zero current.  The voltages on it are then the ones the
+driven copper induces: the open-port voltages a multi-port impedance across
+conductors (a commutation loop's go and return) is read from.  Every
+excitation that lists the same terminals keeps the same components, so the
+excitations of one port matrix solve in one lockstep group.  The default is
+off, and an undriven island is omitted as above.  The CUDA path does not
+take the option.
+
+Measured (`tests/test_sheet_peec.py::CrossConductorPortTests`): two 5 x 40
+cell strips (0.2 mm cells, 35 um copper) on F.Cu and on In1.Cu 0.2 mm below,
+at 1 MHz.  The loop assembled from their 2 x 2 port matrix,
+`Z11 - Z12 - Z21 + Z22`, against the same loop closed by vias at the far
+end:
+
+| | from the port matrix | closed loop |
+|---|---:|---:|
+| L | 2.168 nH | 2.186 nH |
+| R | 11.727 mOhm | 11.729 mOhm |
+
+These figures are from a 60-cell strip, and the test uses 40 cells with a
+2 % / 1 % tolerance.  The partial self inductance of each strip is 8.51 nH
+and their mutual inductance 7.43 nH, so a matrix per conductor would
+overstate this loop eightfold.  Part of the 0.8 % in L is the vias' own
+modelling: a vertical branch couples to no other vertical branch.
+
 Measured device acceptance and CPU comparisons are in
 `docs/SHEET_CUDA_RESULTS.md`.

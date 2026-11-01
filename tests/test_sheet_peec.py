@@ -669,6 +669,121 @@ class ConnectedComponentTests(unittest.TestCase):
         self.assertEqual(solution.undriven_nodes, 0)
 
 
+class OpenPortTests(unittest.TestCase):
+    """A component a 0 A terminal touches can be kept, to read the voltage induced on it."""
+
+    def _two_islands(self):
+        stackup = one_layer()
+        occupancy = np.zeros((1, 3, 7), dtype=bool)
+        occupancy[0, :, 0:3] = True
+        occupancy[0, :, 4:7] = True
+        mesh = SheetMesh((3, 7), PITCH_M, stackup, occupancy)
+        operator = SheetInductanceOperator((3, 7), PITCH_M, stackup)
+        terminals = [
+            Terminal("in", 0, ((1, 0),), 1.0),
+            Terminal("out", 0, ((1, 2),), -1.0),
+            Terminal("open_a", 0, ((1, 4),), 0.0),
+            Terminal("open_b", 0, ((1, 6),), 0.0),
+        ]
+        return mesh, operator, terminals
+
+    def test_by_default_a_zero_current_terminal_leaves_its_island_out(self):
+        mesh, operator, terminals = self._two_islands()
+        solution = solve_sheet_case(mesh, operator, terminals, frequency_hz=3e5)
+        self.assertEqual(solution.undriven_nodes, 9)
+
+    def test_a_kept_island_closes_its_own_zero_current_and_carries_an_induced_voltage(self):
+        mesh, operator, terminals = self._two_islands()
+        for frequency in (0.0, 3e5):
+            with self.subTest(frequency=frequency):
+                solution = solve_sheet_case(
+                    mesh, operator, terminals, frequency_hz=frequency, keep_terminal_components=True
+                )
+                self.assertTrue(solution.converged)
+                self.assertEqual(solution.undriven_nodes, 0)
+                injected = np.zeros(mesh.node_count, dtype=np.complex128)
+                injected[mesh.node_index[(0, 1, 0)]] = 1.0
+                injected[mesh.node_index[(0, 1, 2)]] = -1.0
+                closure = mesh.incidence().T @ solution.branch_current - injected
+                self.assertLess(float(np.abs(closure).max()), 1e-8)
+                a = solution.node_voltage[mesh.node_index[(0, 1, 4)]]
+                b = solution.node_voltage[mesh.node_index[(0, 1, 6)]]
+                if frequency == 0.0:
+                    self.assertLess(abs(a - b), 1e-15)
+                else:
+                    # the driven bar induces an EMF along the open one, as large as its partial mutual
+                    self.assertGreater(abs(a - b), 0.0)
+
+
+class CrossConductorPortTests(unittest.TestCase):
+    """The loop of two conductors assembled from their port matrix equals the loop solved closed."""
+
+    LENGTH, WIDTH, FREQUENCY = 40, 5, 1e6
+
+    def _stackup(self):
+        return SheetStackup(
+            (
+                SheetLayer("F.Cu", 0.0, COPPER_M, RESISTIVITY),
+                SheetLayer("In1.Cu", -2e-4, COPPER_M, RESISTIVITY),
+            )
+        )
+
+    def _mesh(self, vias=()):
+        stackup = self._stackup()
+        rows, cols = self.WIDTH + 2, self.LENGTH + 3
+        occupancy = np.zeros((2, rows, cols), dtype=bool)
+        occupancy[:, 1:1 + self.WIDTH, 1:1 + self.LENGTH] = True
+        return SheetMesh((rows, cols), PITCH_M, stackup, occupancy, vias=vias), stackup, (rows, cols)
+
+    def _cells(self, col):
+        return tuple((row, col) for row in range(1, 1 + self.WIDTH))
+
+    def _mean(self, mesh, solution, layer, col):
+        return np.mean([solution.node_voltage[mesh.node_index[(layer, row, col)]] for row, _ in self._cells(col)])
+
+    def test_the_port_matrix_carries_the_mutual_inductance_between_conductors(self):
+        near, far = 1, self.LENGTH
+        mesh, stackup, shape = self._mesh()
+        operator = SheetInductanceOperator(shape, PITCH_M, stackup)
+
+        def ports(top, bottom):
+            return [
+                Terminal("top_near", 0, self._cells(near), top),
+                Terminal("top_far", 0, self._cells(far), -top),
+                Terminal("bottom_near", 1, self._cells(near), bottom),
+                Terminal("bottom_far", 1, self._cells(far), -bottom),
+            ]
+
+        solutions = solve_sheet_cases(
+            mesh, operator, [ports(1.0, 0.0), ports(0.0, 1.0)], frequency_hz=self.FREQUENCY,
+            keep_terminal_components=True,
+        )
+        z = np.zeros((2, 2), dtype=complex)
+        for k, solution in enumerate(solutions):
+            self.assertEqual(solution.lockstep_columns, 2)
+            self.assertEqual(solution.undriven_nodes, 0)
+            for j, layer in enumerate((0, 1)):
+                z[j, k] = self._mean(mesh, solution, layer, near) - self._mean(mesh, solution, layer, far)
+        self.assertLess(abs(z[0, 1] - z[1, 0]) / abs(z[0, 1]), 1e-6)
+        omega = 2 * np.pi * self.FREQUENCY
+        self.assertGreater(z[0, 1].imag / omega, 0.8 * z[0, 0].imag / omega)  # strongly coupled
+        loop_from_ports = z[0, 0] - z[0, 1] - z[1, 0] + z[1, 1]
+
+        vias = tuple(ViaBranch(row, far, 1, 0, 1e-6) for row, _ in self._cells(far))
+        closed_mesh, _, _ = self._mesh(vias)
+        closed_operator = SheetInductanceOperator(
+            shape, PITCH_M, stackup, vertical_levels=closed_mesh.vertical_levels
+        )
+        closed = solve_sheet_case(
+            closed_mesh, closed_operator,
+            [Terminal("top_near", 0, self._cells(near), 1.0), Terminal("bottom_near", 1, self._cells(near), -1.0)],
+            frequency_hz=self.FREQUENCY,
+        )
+        loop_closed = self._mean(closed_mesh, closed, 0, near) - self._mean(closed_mesh, closed, 1, near)
+        self.assertAlmostEqual(loop_from_ports.imag / loop_closed.imag, 1.0, delta=0.02)
+        self.assertAlmostEqual(loop_from_ports.real / loop_closed.real, 1.0, delta=0.01)
+
+
 class MixedThicknessTests(unittest.TestCase):
     """A filament stack makes layers of unequal thickness the normal case."""
 
