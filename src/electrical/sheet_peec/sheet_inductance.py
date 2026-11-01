@@ -395,6 +395,31 @@ def filament_mutual_inductance(length_m: float, separation_m: float) -> float:
     )
 
 
+def barrel_geometric_mean_distance(outer_radius_m: float, inner_radius_m: float = 0.0) -> float:
+    """The geometric mean distance of a tube's cross-section from itself (Grover).
+
+    ``ln g = ln r2 - r1^4 ln(r2/r1) / (r2^2 - r1^2)^2 + (3 r1^2 - r2^2) / (4 (r2^2 - r1^2))``
+    for a tube of inner radius ``r1`` and outer ``r2``: ``r2 e^(-1/4)`` for a
+    solid pin, tending to ``r2`` as the wall thins.
+    """
+    r2, r1 = float(outer_radius_m), float(inner_radius_m)
+    if not (r2 > 0.0) or not (0.0 <= r1 < r2):
+        raise ValueError("a barrel needs 0 <= inner radius < outer radius")
+    if r1 == 0.0:
+        return r2 * math.exp(-0.25)
+    area = r2 * r2 - r1 * r1
+    return math.exp(math.log(r2) - r1**4 * math.log(r2 / r1) / (area * area) + (3.0 * r1 * r1 - r2 * r2) / (4.0 * area))
+
+
+def barrel_self_inductance(length_m: float, outer_radius_m: float, inner_radius_m: float = 0.0) -> float:
+    """The partial self inductance of a straight plated barrel (or a solid pin when the bore is 0).
+
+    The two-filament formula at the cross-section's geometric mean distance
+    from itself, exact for a long conductor up to ``O(r^2 / l^2)``.
+    """
+    return filament_mutual_inductance(length_m, barrel_geometric_mean_distance(outer_radius_m, inner_radius_m))
+
+
 def bar_self_inductance(length_m: float, width_m: float, thickness_m: float) -> float:
     """Give Grover's self partial inductance of a rectangular bar.
 

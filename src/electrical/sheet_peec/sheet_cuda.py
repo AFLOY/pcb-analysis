@@ -410,6 +410,11 @@ def solve_sheet_case_cuda(
         raise ValueError("the operator and the mesh must share a shape")
     if len(operator.stackup) != len(mesh.stackup):
         raise ValueError("the operator and the mesh must share a stackup")
+    if any(via.barrel_radius_m is not None for via in mesh.via_branches):
+        raise ValueError(
+            "the CUDA sheet solve does not take barrel vias yet (ViaBranch.barrel_radius_m); "
+            "solve on the CPU or leave the barrels out"
+        )
     if preconditioner == "auto":
         # The contract's default.  The CUDA path has no block form, so the
         # choice auto makes on the CPU by size does not arise: it is near.

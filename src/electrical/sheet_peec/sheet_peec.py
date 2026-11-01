@@ -43,8 +43,10 @@ from electrical.threads import thread_budget
 import scipy.sparse as sp
 import scipy.sparse.csgraph as csgraph
 import scipy.sparse.linalg as spla
+from scipy.spatial import cKDTree
 from scipy.linalg import get_lapack_funcs
 
+from .sheet_inductance import barrel_self_inductance
 from .sheet_operator import (
     COPPER_RESISTIVITY_OHM_M,
     SheetInductanceOperator,
@@ -75,6 +77,14 @@ class ViaBranch:
     The branch is a column of one cell's cross section, so its self
     inductance follows the cell size, not the drill of a barrel.
 
+    ``barrel_radius_m`` (with ``barrel_bore_radius_m``, 0 for a solid pin)
+    states the plated barrel the branch is: its own inductance is then the
+    barrel's (:func:`~electrical.sheet_peec.sheet_inductance.barrel_self_inductance`
+    over the level's span) in place of the column's, while its couplings to
+    other vertical branches stay the operator's -- beyond a cell or two they
+    do not depend on the cross-section.  Left out, the branch is the column,
+    which is what a skin-filament link is.
+
     ``inductance_h`` does not enter a solved result.  The preconditioner
     falls back to it as the self term only when the operator has no vertical
     kernels for the mesh's levels, which the AC solve refuses.
@@ -86,15 +96,22 @@ class ViaBranch:
     upper_layer: int
     resistance_ohm: float
     inductance_h: float = 0.0
+    barrel_radius_m: float | None = None
+    barrel_bore_radius_m: float = 0.0
 
     def __post_init__(self) -> None:
         if self.lower_layer == self.upper_layer:
             raise ValueError("a via has to join two different layers")
-        for name in ("resistance_ohm", "inductance_h"):
+        for name in ("resistance_ohm", "inductance_h", "barrel_bore_radius_m"):
             value = float(getattr(self, name))
             if not math.isfinite(value) or value < 0.0:
                 raise ValueError(f"{name} must be finite and non-negative")
             object.__setattr__(self, name, value)
+        if self.barrel_radius_m is not None:
+            radius = float(self.barrel_radius_m)
+            if not math.isfinite(radius) or radius <= 0.0 or self.barrel_bore_radius_m >= radius:
+                raise ValueError("a barrel needs 0 <= bore radius < radius")
+            object.__setattr__(self, "barrel_radius_m", radius)
 
 
 @dataclass(frozen=True)
@@ -602,6 +619,94 @@ def _source_vector(mesh: SheetMesh, terminals: Sequence[Terminal]) -> np.ndarray
     return injected
 
 
+class _BarrelSelf:
+    """An inductance operator whose barrel vias carry the barrel's own inductance.
+
+    Each vertical branch with a barrel adds ``L_barrel - L_column`` on its own
+    diagonal: in every product, in the near-field matrix and in the self terms
+    the preconditioners read.  Everything else is the wrapped operator's.
+    """
+
+    def __init__(self, base: Any, mesh: "SheetMesh", delta: np.ndarray) -> None:
+        self._base = base
+        self._delta_branch = delta
+        rows, cols = mesh.shape
+        index_of = {key: position for position, key in enumerate(mesh.vertical_levels)}
+        grid = np.zeros((len(mesh.vertical_levels), rows, cols), dtype=np.float64)
+        for via, value in zip(mesh.via_branches, delta):
+            grid[index_of[(via.lower_layer, via.upper_layer)], via.row, via.col] = value
+        self._delta_grid = grid
+        self._via_offset = len(mesh.branch_x) + len(mesh.branch_y)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._base, name)
+
+    def apply(self, currents_x: np.ndarray, currents_y: np.ndarray, currents_z: np.ndarray | None = None):
+        if currents_z is None:
+            return self._base.apply(currents_x, currents_y)
+        flux_x, flux_y, flux_z = self._base.apply(currents_x, currents_y, currents_z)
+        return flux_x, flux_y, flux_z + self._delta_grid * currents_z
+
+    def apply_many(self, currents: Sequence[tuple[np.ndarray, np.ndarray, np.ndarray | None]]) -> list:
+        if hasattr(self._base, "apply_many"):
+            applied = self._base.apply_many(currents)
+        else:
+            applied = [self._base.apply(x, y, z) if z is not None else self._base.apply(x, y) for x, y, z in currents]
+        out = []
+        for result, (_, _, currents_z) in zip(applied, currents):
+            if currents_z is not None and len(result) == 3:
+                result = (result[0], result[1], result[2] + self._delta_grid * currents_z)
+            out.append(result)
+        return out
+
+    def near_inductance(self, mesh: "SheetMesh", *args: Any, **kwargs: Any) -> sp.csr_matrix:
+        near = self._base.near_inductance(mesh, *args, **kwargs).tocsr()
+        index = self._via_offset + np.arange(len(self._delta_branch))
+        return (near + sp.csr_matrix((self._delta_branch, (index, index)), shape=near.shape)).tocsr()
+
+    def vertical_self_inductance(self, mesh: "SheetMesh") -> np.ndarray:
+        return _vertical_self_inductance(mesh, self._base) + self._delta_branch
+
+
+def _barrel_span(mesh: "SheetMesh", via: ViaBranch) -> float:
+    return abs(mesh.stackup.layers[via.upper_layer].z_m - mesh.stackup.layers[via.lower_layer].z_m)
+
+
+def _check_barrels_apart(mesh: "SheetMesh", barrels: list[int]) -> None:
+    """Refuse two barrels whose circles overlap over a common height: one conductor, not two."""
+    grid = mesh.grid
+    assert grid is not None
+    xc = 0.5 * (grid.x_edges_m[:-1] + grid.x_edges_m[1:])
+    yc = 0.5 * (grid.y_edges_m[:-1] + grid.y_edges_m[1:])
+    vias = [mesh.via_branches[k] for k in barrels]
+    points = np.array([(xc[v.col], yc[v.row]) for v in vias])
+    radii = np.array([v.barrel_radius_m for v in vias])
+    z = np.array([sorted((mesh.stackup.layers[v.lower_layer].z_m, mesh.stackup.layers[v.upper_layer].z_m)) for v in vias])
+    for i, j in sorted(cKDTree(points).query_pairs(2.0 * float(radii.max()))):
+        apart = float(np.hypot(*(points[i] - points[j])))
+        common = min(z[i, 1], z[j, 1]) - max(z[i, 0], z[j, 0])
+        if apart < radii[i] + radii[j] and common > 1e-12:
+            a, b = vias[i], vias[j]
+            raise ValueError(
+                f"the barrels of the vias at cells {(a.row, a.col)} and {(b.row, b.col)} overlap "
+                f"({apart * 1e3:.3f} mm apart, radii {radii[i] * 1e3:.3f} and {radii[j] * 1e3:.3f} mm)"
+            )
+
+
+def _with_barrels(mesh: "SheetMesh", operator: Any) -> Any:
+    """The operator itself, or wrapped so that barrel vias carry their own inductance."""
+    barrels = [k for k, via in enumerate(mesh.via_branches) if via.barrel_radius_m is not None]
+    if not barrels:
+        return operator
+    _check_barrels_apart(mesh, barrels)
+    column = _vertical_self_inductance(mesh, operator)
+    delta = np.zeros(len(mesh.via_branches), dtype=np.float64)
+    for k in barrels:
+        via = mesh.via_branches[k]
+        delta[k] = barrel_self_inductance(_barrel_span(mesh, via), via.barrel_radius_m, via.barrel_bore_radius_m) - column[k]
+    return _BarrelSelf(operator, mesh, delta)
+
+
 def solve_sheet_case(
     mesh: SheetMesh,
     operator: SheetInductanceOperator,
@@ -707,6 +812,9 @@ def solve_sheet_cases(
     if frequency_hz == 0.0:
         return [_solve_dc(mesh, resistance, reduction, injected) for injected, reduction in cases]
 
+    levels = mesh.vertical_levels
+    if not levels or tuple(levels) == tuple(operator.vertical_levels):  # else _solve_ac refuses the mesh
+        operator = _with_barrels(mesh, operator)
     groups: dict[tuple[int, ...], list[int]] = {}
     for index, (_, reduction) in enumerate(cases):
         groups.setdefault(reduction.carried, []).append(index)
