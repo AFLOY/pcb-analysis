@@ -59,7 +59,7 @@ jobs:
             openmp: "ON"
             march: native
           - name: macos-arm64-clang
-            os: macos-14
+            os: macos-15
             cc: clang
             cxx: clang++
             openmp: "ON"
