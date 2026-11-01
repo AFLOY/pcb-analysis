@@ -170,8 +170,10 @@ class SheetMesh:
         self.shape = (rows, cols)
         self.occupancy = occupancy
 
+        # The C++ topology joins every pair of neighbours; cell regions are
+        # built here, in Python.
         core = _backend.core()
-        if core is not None:
+        if core is not None and self.region is None:
             via_cells = np.asarray(
                 [(via.lower_layer, via.upper_layer, via.row, via.col) for via in self.vias], dtype=np.int64
             ).reshape(-1, 4)
