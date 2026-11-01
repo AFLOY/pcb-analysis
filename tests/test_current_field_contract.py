@@ -283,3 +283,28 @@ def test_cell_regions_keep_two_adjacent_nets_apart() -> None:
     value["cell_regions"] = {"F.Cu": [{"x": 0, "y": 1, "region": 1}]}
     with pytest.raises(ValueError, match="off the conductor"):
         CurrentFieldProblem.from_mapping(value)
+
+
+def test_a_connection_s_barrel_gives_its_vias_the_barrel_s_own_inductance() -> None:
+    from electrical.sheet_peec.current_field_contract import _sheet_geometry
+
+    value = _problem(frequency_hz=1e6)
+    for connection in value["vertical_connections"]:
+        # as geometry.cad_import writes it from the STEP solid
+        connection["barrel"] = {"outer_diameter_mm": 0.3, "drill_diameter_mm": 0.25, "solid_pin": False}
+    problem = CurrentFieldProblem.from_mapping(value)
+    segment = problem.vertical_segments[0][2]
+    assert (segment.barrel_outer_diameter_mm, segment.barrel_drill_diameter_mm) == (0.3, 0.25)
+    mesh, _operator, _ = _sheet_geometry(problem, {"maximum_filaments": 1})
+    barrels = [via for via in mesh.via_branches if via.barrel_radius_m is not None]
+    assert barrels and all(via.barrel_radius_m == pytest.approx(0.15e-3) and
+                           via.barrel_bore_radius_m == pytest.approx(0.125e-3) for via in barrels)
+    columns, _operator, _ = _sheet_geometry(problem, {"maximum_filaments": 1, "via_self_inductance": "column"})
+    assert all(via.barrel_radius_m is None for via in columns.via_branches)
+    # the solved field moves with the via model, and both solve
+    with_barrels = solve_current_field_problem(value, {"maximum_filaments": 1})
+    as_columns = solve_current_field_problem(value, {"maximum_filaments": 1, "via_self_inductance": "column"})
+    assert with_barrels.voltage_phasor != as_columns.voltage_phasor
+    value["vertical_connections"][0]["barrel"] = {"outer_diameter_mm": 0.3, "drill_diameter_mm": 0.3}
+    with pytest.raises(ValueError, match="drill_diameter_mm"):
+        CurrentFieldProblem.from_mapping(value)

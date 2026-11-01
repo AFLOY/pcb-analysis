@@ -93,6 +93,11 @@ class CurrentFieldVerticalSegment:
     lower_layer: str
     resistance_ohm: float
     length_mm: float
+    # The plated barrel of the connection, when the mapping states one
+    # (``barrel``: ``outer_diameter_mm`` and ``drill_diameter_mm``, as
+    # geometry.cad_import writes it from the STEP solid).
+    barrel_outer_diameter_mm: float | None = None
+    barrel_drill_diameter_mm: float = 0.0
 
 
 def _parse_geometry(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -162,6 +167,16 @@ def _parse_geometry(value: Mapping[str, Any]) -> dict[str, Any]:
     for connection in value.get("vertical_connections") or []:
         cell_value = connection.get("cell") or {}
         cell = (int(cell_value["x"]), int(cell_value["y"]))
+        barrel = connection.get("barrel") or {}
+        outer = barrel.get("outer_diameter_mm")
+        drill = 0.0 if barrel.get("solid_pin") else float(barrel.get("drill_diameter_mm") or 0.0)
+        if outer is not None:
+            outer = float(outer)
+            if not math.isfinite(outer) or outer <= 0.0 or not (0.0 <= drill < outer):
+                raise ValueError(
+                    f"vertical connection {connection.get('name')}: a barrel needs "
+                    "0 <= drill_diameter_mm < outer_diameter_mm"
+                )
         for segment in connection.get("segments") or []:
             upper = str(segment["upper_layer"])
             lower = str(segment["lower_layer"])
@@ -203,6 +218,8 @@ def _parse_geometry(value: Mapping[str, Any]) -> dict[str, Any]:
                         lower_layer=lower,
                         resistance_ohm=resistance,
                         length_mm=length,
+                        barrel_outer_diameter_mm=outer,
+                        barrel_drill_diameter_mm=drill if outer is not None else 0.0,
                     ),
                 )
             )
@@ -466,6 +483,12 @@ def _sheet_geometry(
                 )
             )
     layer_by_name = {layer.name: layer for layer in problem.layers}
+    # A connection's barrel gives its own inductance (``barrel``, the default);
+    # ``column`` keeps every vertical branch the cell's column.
+    via_model = str(settings.get("via_self_inductance", "barrel"))
+    if via_model not in {"barrel", "column"}:
+        raise ValueError("via_self_inductance must be 'barrel' or 'column'")
+    use_barrels = via_model == "barrel"
     seen: set[tuple[int, int, int, int]] = set()
     for _, (x, y), segment in problem.vertical_segments:
         upper_indices = filament_of[segment.upper_layer]
@@ -484,6 +507,7 @@ def _sheet_geometry(
         if key in seen:
             continue
         seen.add(key)
+        barrel = use_barrels and segment.barrel_outer_diameter_mm is not None
         vias.append(
             ViaBranch(
                 row=y,
@@ -491,6 +515,8 @@ def _sheet_geometry(
                 lower_layer=lower,
                 upper_layer=upper,
                 resistance_ohm=segment.resistance_ohm,
+                barrel_radius_m=0.5e-3 * segment.barrel_outer_diameter_mm if barrel else None,
+                barrel_bore_radius_m=0.5e-3 * segment.barrel_drill_diameter_mm if barrel else 0.0,
             )
         )
     mesh = SheetMesh(
