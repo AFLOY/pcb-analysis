@@ -21,12 +21,12 @@ from .sheet_peec import (
     SheetMesh,
     SheetSolution,
     Terminal,
-    _components,
-    _components_with_terminals,
     _inline_self_inductance,
     _near_impedance,
     _self_inductance,
+    _reduce,
     _source_vector,
+    _terminal_nodes,
     _vertical_self_inductance,
     _BarrelSelf,
     _with_barrels,
@@ -415,8 +415,45 @@ def solve_sheet_case_cuda(
     device_id: int = 0,
     cupy_module: Any | None = None,
     preconditioner: str = "near",
+    keep_terminal_components: bool = False,
+    initial: SheetSolution | None = None,
 ) -> tuple[SheetSolution, CudaSheetTelemetry]:
     """Solve one sheet case with cuFFT, CuPy sparse algebra, and CUDA GMRES."""
+    return solve_sheet_cases_cuda(
+        mesh, operator, [terminals], frequency_hz=frequency_hz, tolerance=tolerance,
+        max_iterations=max_iterations, restart=restart, device_id=device_id, cupy_module=cupy_module,
+        preconditioner=preconditioner, keep_terminal_components=keep_terminal_components,
+        initial=None if initial is None else [initial],
+    )[0]
+
+
+def solve_sheet_cases_cuda(
+    mesh: SheetMesh,
+    operator: SheetInductanceOperator,
+    terminal_sets: Sequence[Sequence[Terminal]],
+    *,
+    frequency_hz: float = 0.0,
+    tolerance: float = 1e-10,
+    max_iterations: int = 400,
+    restart: int = 60,
+    device_id: int = 0,
+    cupy_module: Any | None = None,
+    preconditioner: str = "near",
+    keep_terminal_components: bool = False,
+    initial: Sequence[SheetSolution | None] | None = None,
+) -> list[tuple[SheetSolution, CudaSheetTelemetry]]:
+    """Solve several excitations of one mesh on the device, in the order given.
+
+    The options are :func:`~electrical.sheet_peec.sheet_peec.solve_sheet_cases`'.
+    The operator moves to the device once; excitations that drive the same
+    components share the reduced system and its factored preconditioner and
+    are then solved one after another (no lockstep).  ``keep_terminal_components``
+    solves a component a terminal touches even when it carries no current, and
+    ``initial`` starts an excitation's Krylov solve from its solution at another
+    frequency (the least-residual mix of its parts), as on the CPU.  Each
+    excitation gets its own telemetry; ``prepare_ms`` counts the shared
+    preparation and its group's factorisation.
+    """
     cp = cupy_module if cupy_module is not None else _import_cupy()
     try:
         import cupyx.scipy.sparse as csp
@@ -447,43 +484,27 @@ def solve_sheet_case_cuda(
     device_id = int(device_id)
     if device_id < 0:
         raise ValueError("device_id must be non-negative")
+    if initial is not None and len(initial) != len(terminal_sets):
+        raise ValueError("initial needs one entry (or None) per excitation")
+    given_list = list(initial) if initial is not None else [None] * len(terminal_sets)
+    for given in given_list:
+        if given is not None and (given.branch_current.shape != (mesh.branch_count,)
+                                  or given.node_voltage.shape != (mesh.node_count,)):
+            raise ValueError("an initial solution is not of this mesh")
 
     incidence = mesh.incidence()
     resistance = mesh.resistances()
-    injected = _source_vector(mesh, terminals)
-    if frequency_hz == 0.0 and float(np.max(np.abs(injected.imag))) > 1e-15:
-        raise ValueError("DC terminal currents must be real")
-    components, labels = _components(incidence, mesh.node_count)
-    carried = _components_with_terminals(labels, components, injected)
-    if not carried:
-        raise ValueError(
-            "no connected component of the conductor carries a terminal"
-        )
-    kept_nodes = np.isin(labels, list(carried))
-    dropped = int(mesh.node_count - kept_nodes.sum())
-    for component in sorted(carried):
-        total = complex(injected[labels == component].sum())
-        scale = float(np.abs(injected[labels == component]).sum())
-        if abs(total) > 1e-9 * max(1.0, scale):
-            raise ValueError(
-                f"connected component {component} is given a net "
-                f"{total:.6g} A; each isolated component has to close its own "
-                "current"
-            )
-    keep = kept_nodes.copy()
-    grounded_nodes = []
-    for component in sorted(carried):
-        first = int(np.flatnonzero(labels == component)[0])
-        keep[first] = False
-        grounded_nodes.append(first)
-    grounded = grounded_nodes[0]
-    driven_endpoint_count = np.asarray(
-        abs(incidence) @ kept_nodes.astype(np.int8)
-    ).reshape(-1)
-    active_branches = driven_endpoint_count == 2
-    active_incidence = incidence[active_branches]
-    active_resistance = resistance[active_branches]
-    reduced_cpu = active_incidence[:, keep]
+    cases = []
+    for terminals in terminal_sets:
+        injected = _source_vector(mesh, terminals)
+        if frequency_hz == 0.0 and float(np.max(np.abs(injected.imag))) > 1e-15:
+            raise ValueError("DC terminal currents must be real")
+        touched = _terminal_nodes(mesh, terminals) if keep_terminal_components else None
+        cases.append((injected, _reduce(mesh, incidence, injected, touched)))
+    groups: dict[tuple[int, ...], list[int]] = {}
+    for index, (_, reduction) in enumerate(cases):
+        groups.setdefault(reduction.carried, []).append(index)
+    solved: list[dict[str, Any] | None] = [None] * len(cases)
 
     total_started = time.perf_counter()
     device = None
@@ -502,10 +523,6 @@ def solve_sheet_case_cuda(
             free_before, _ = cp.cuda.runtime.memGetInfo()
             with cp.cuda.using_allocator(pool.malloc):
                 prepare_started = time.perf_counter()
-                reduced = csp.csr_matrix(reduced_cpu)
-                injected_device = cp.asarray(injected)
-                resistance_device = cp.asarray(active_resistance)
-                active_branches_device = cp.asarray(active_branches)
                 if isinstance(operator, _BarrelSelf):
                     cuda_operator = _CudaBarrelSelf(
                         cuda_inductance_operator(operator._base, cp), cp.asarray(operator._delta_grid)
@@ -514,271 +531,13 @@ def solve_sheet_case_cuda(
                     cuda_operator = cuda_inductance_operator(operator, cp)
                 indices = _branch_indices(mesh, cp)
                 cp.cuda.get_current_stream().synchronize()
-                prepare_ms = (
-                    time.perf_counter() - prepare_started
-                ) * 1000.0
-
-                solve_started = time.perf_counter()
-                if frequency_hz == 0.0:
-                    admittance = csp.diags(1.0 / resistance_device)
-                    system = (reduced.T @ admittance @ reduced).tocsr()
-                    solved_voltage = csl.spsolve(
-                        system, injected_device[keep].real
+                shared_prepare_ms = (time.perf_counter() - prepare_started) * 1000.0
+                for members in groups.values():
+                    _solve_group_cuda(
+                        cp, csp, csl, mesh, operator, cuda_operator, indices, resistance, cases, members,
+                        given_list, solved, frequency_hz, tolerance, max_iterations, restart, preconditioner,
+                        shared_prepare_ms,
                     )
-                    voltage_device = cp.zeros(
-                        mesh.node_count, dtype=cp.complex128
-                    )
-                    voltage_device[keep] = solved_voltage
-                    active_current_device = admittance @ (
-                        reduced @ solved_voltage
-                    )
-                    current_device = cp.zeros(
-                        mesh.branch_count, dtype=cp.complex128
-                    )
-                    current_device[active_branches_device] = (
-                        active_current_device
-                    )
-                    residual_device = (
-                        cp.linalg.norm(
-                            reduced.T @ active_current_device
-                            - injected_device[keep].real
-                        )
-                        / max(
-                            float(
-                                cp.linalg.norm(
-                                    injected_device[keep].real
-                                ).get()
-                            ),
-                            1e-30,
-                        )
-                    )
-                    residual = float(residual_device.get())
-                    iterations = 1
-                    converged = residual < 1e-8
-                    factor_backend = "cusolver_sparse_qr"
-                else:
-                    levels = mesh.vertical_levels
-                    if tuple(levels) != tuple(operator.vertical_levels):
-                        raise ValueError(
-                            "the mesh and operator vertical levels differ"
-                        )
-                    has_vertical = bool(levels)
-                    inline_count = len(mesh.branch_x) + len(mesh.branch_y)
-                    branches = int(active_branches.sum())
-                    unknowns = int(keep.sum())
-                    size = branches + unknowns
-                    omega = 2.0 * math.pi * frequency_hz
-
-                    def _flux(currents: Any) -> Any:
-                        rows, cols = mesh.shape
-                        full_currents = cp.zeros(
-                            mesh.branch_count, dtype=cp.float64
-                        )
-                        full_currents[active_branches_device] = currents
-                        grid_x = cp.zeros(
-                            (len(mesh.stackup), rows, cols),
-                            dtype=cp.float64,
-                        )
-                        grid_y = cp.zeros_like(grid_x)
-                        x_count = len(mesh.branch_x)
-                        y_count = len(mesh.branch_y)
-                        grid_x[
-                            indices.x_layer,
-                            indices.x_row,
-                            indices.x_col,
-                        ] = full_currents[:x_count]
-                        grid_y[
-                            indices.y_layer,
-                            indices.y_row,
-                            indices.y_col,
-                        ] = full_currents[x_count : x_count + y_count]
-                        if has_vertical:
-                            grid_z = cp.zeros(
-                                (len(levels), rows, cols),
-                                dtype=cp.float64,
-                            )
-                            grid_z[
-                                indices.z_level,
-                                indices.z_row,
-                                indices.z_col,
-                            ] = full_currents[x_count + y_count :]
-                            flux_x, flux_y, flux_z = cuda_operator.apply(
-                                grid_x, grid_y, grid_z
-                            )
-                        else:
-                            flux_x, flux_y = cuda_operator.apply(
-                                grid_x, grid_y
-                            )
-                            flux_z = None
-                        full_output = cp.zeros(
-                            mesh.branch_count, dtype=cp.float64
-                        )
-                        full_output[:x_count] = flux_x[
-                            indices.x_layer,
-                            indices.x_row,
-                            indices.x_col,
-                        ]
-                        full_output[x_count : x_count + y_count] = flux_y[
-                            indices.y_layer,
-                            indices.y_row,
-                            indices.y_col,
-                        ]
-                        if flux_z is not None:
-                            full_output[x_count + y_count :] = flux_z[
-                                indices.z_level,
-                                indices.z_row,
-                                indices.z_col,
-                            ]
-                        return full_output[active_branches_device]
-
-                    def impedance(currents: Any) -> Any:
-                        flux = _flux(currents.real).astype(cp.complex128)
-                        flux += 1j * _flux(currents.imag)
-                        return (
-                            resistance_device * currents
-                            + 1j * omega * flux
-                        )
-
-                    def saddle(vector: Any) -> Any:
-                        currents = vector[:branches]
-                        voltages = vector[branches:]
-                        return cp.concatenate(
-                            [
-                                impedance(currents) - reduced @ voltages,
-                                reduced.T @ currents,
-                            ]
-                        )
-
-                    if preconditioner == "near" and hasattr(operator, "near_inductance"):
-                        # Sparse near-field impedance in the saddle-point
-                        # matrix, factored once (SciPy SuperLU factors, CUDA
-                        # triangular solves as for the Schur complement).
-                        import scipy.sparse as sp
-
-                        near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
-                        saddle_cpu = sp.bmat([[near_cpu, -reduced_cpu], [reduced_cpu.T, None]], format="csc")
-                        factored = csl.splu(csp.csc_matrix(saddle_cpu))
-
-                        def precondition(vector: Any) -> Any:
-                            return factored.solve(vector)
-
-                    else:
-                        full_diagonal_cpu = resistance + 1j * omega * np.concatenate(
-                            [
-                                _inline_self_inductance(mesh, operator),
-                                _vertical_self_inductance(mesh, operator),
-                            ]
-                        )
-                        diagonal = cp.asarray(
-                            full_diagonal_cpu[active_branches]
-                        )
-                        schur = (
-                            reduced.T @ csp.diags(1.0 / diagonal) @ reduced
-                        ).tocsc()
-                        factored = csl.splu(schur)
-
-                        def precondition(vector: Any) -> Any:
-                            rhs_current = vector[:branches]
-                            rhs_node = vector[branches:]
-                            node = factored.solve(
-                                rhs_node
-                                + reduced.T @ (rhs_current / diagonal)
-                            )
-                            current = (
-                                rhs_current + reduced @ node
-                            ) / diagonal
-                            return cp.concatenate([current, node])
-
-                    right_hand_side = cp.concatenate(
-                        [
-                            cp.zeros(branches, dtype=cp.complex128),
-                            injected_device[keep],
-                        ]
-                    )
-                    # CuPy's ``M=`` path implements a right-preconditioned
-                    # variable, unlike SciPy's left-preconditioned GMRES used
-                    # by the CPU reference.  Build M^-1 A and M^-1 b
-                    # explicitly so both paths solve the same Krylov system
-                    # and the reference-node closure does not accumulate the
-                    # residual left at every other node.
-                    def left_preconditioned_saddle(vector: Any) -> Any:
-                        return precondition(saddle(vector))
-
-                    linear_system = csl.LinearOperator(
-                        (size, size),
-                        matvec=left_preconditioned_saddle,
-                        dtype=cp.complex128,
-                    )
-                    left_right_hand_side = precondition(right_hand_side)
-                    counter = {"restarts": 0}
-
-                    def count(_value: Any) -> None:
-                        counter["restarts"] += 1
-
-                    # GMRES is run one restart cycle at a time and the public
-                    # saddle-point residual is checked between cycles, so the
-                    # solve stops when the requested tolerance is met and
-                    # ``max_iterations`` counts cycles as on the CPU path.
-                    # Aiming CuPy's own (left-preconditioned) criterion three
-                    # decades below the tolerance ran every solve to its cap.
-                    effective_restart = min(restart, size)
-                    rhs_norm = float(cp.linalg.norm(right_hand_side).get())
-                    left_norm = float(cp.linalg.norm(left_right_hand_side).get())
-                    result = cp.zeros(size, dtype=cp.complex128)
-                    residual = 1.0 if rhs_norm > 0.0 else 0.0
-                    cycles = 0
-                    floor = 100.0 * np.finfo(np.float64).eps
-                    while residual > tolerance and cycles < max_iterations:
-                        # Cycles grow from ten inner iterations towards ``restart``:
-                        # a well-preconditioned solve converges in a few tens of
-                        # iterations and must not pay for a full cycle to find out.
-                        cycle_length = min(effective_restart, 10 * 2**cycles)
-                        # CuPy judges the left-preconditioned residual; scale its
-                        # target by the current ratio of the two residuals so that
-                        # meeting it brings the saddle-point residual to the
-                        # requested tolerance, and stop when that target falls
-                        # below what float64 can resolve.
-                        raw = saddle(result) - right_hand_side
-                        preconditioned = float(cp.linalg.norm(precondition(raw)).get()) / max(left_norm, 1e-30)
-                        ratio = preconditioned / max(residual, 1e-300) if residual > 0.0 else 1.0
-                        target = 0.5 * tolerance * ratio
-                        if target < floor:
-                            break
-                        result, _info = csl.gmres(
-                            linear_system,
-                            left_right_hand_side,
-                            x0=result,
-                            rtol=target,
-                            restart=cycle_length,
-                            maxiter=cycle_length,
-                            callback=count,
-                            callback_type="pr_norm",
-                        )
-                        cycles += 1
-                        residual = float(
-                            (cp.linalg.norm(saddle(result) - right_hand_side)).get()
-                        ) / max(rhs_norm, 1e-30)
-                    info = 0 if residual <= tolerance else 1
-                    current_device = cp.zeros(
-                        mesh.branch_count, dtype=cp.complex128
-                    )
-                    current_device[active_branches_device] = result[:branches]
-                    voltage_device = cp.zeros(
-                        mesh.node_count, dtype=cp.complex128
-                    )
-                    voltage_device[keep] = result[branches:]
-                    iterations = counter["restarts"]
-                    converged = info == 0
-                    factor_backend = (
-                        "scipy_superlu_factor_cupy_triangular_solve"
-                    )
-
-                cp.cuda.get_current_stream().synchronize()
-                solve_ms = (time.perf_counter() - solve_started) * 1000.0
-                voltage = cp.asnumpy(voltage_device)
-                current = cp.asnumpy(current_device).astype(
-                    np.complex128, copy=False
-                )
                 pool_peak = int(pool.total_bytes())
                 free_after, _ = cp.cuda.runtime.memGetInfo()
     except CudaSheetUnavailableError:
@@ -796,33 +555,242 @@ def solve_sheet_case_cuda(
                 pool.free_all_blocks()
 
     total_ms = (time.perf_counter() - total_started) * 1000.0
-    telemetry = CudaSheetTelemetry(
-        resolved_backend=f"cupy-sheet-peec:{device_id}",
-        device_id=device_id,
-        device_name=identity["device_name"],
-        compute_capability=identity["compute_capability"],
-        driver_version=identity["driver_version"],
-        runtime_version=identity["runtime_version"],
-        cupy_version=identity["cupy_version"],
-        prepare_ms=prepare_ms,
-        solve_ms=solve_ms,
-        total_ms=total_ms,
-        krylov_relative_tolerance=tolerance,
-        memory_pool_peak_bytes=pool_peak,
-        free_memory_before_bytes=int(free_before),
-        free_memory_after_bytes=int(free_after),
-        preconditioner_factorization_backend=factor_backend,
-    )
-    return (
-        SheetSolution(
-            node_voltage=voltage,
-            branch_current=current,
-            frequency_hz=frequency_hz,
-            iterations=iterations,
-            residual=residual,
-            converged=converged,
-            grounded_node=grounded,
-            undriven_nodes=dropped,
-        ),
-        telemetry,
-    )
+    out = []
+    for record in solved:
+        assert record is not None
+        telemetry = CudaSheetTelemetry(
+            resolved_backend=f"cupy-sheet-peec:{device_id}",
+            device_id=device_id,
+            device_name=identity["device_name"],
+            compute_capability=identity["compute_capability"],
+            driver_version=identity["driver_version"],
+            runtime_version=identity["runtime_version"],
+            cupy_version=identity["cupy_version"],
+            prepare_ms=record["prepare_ms"],
+            solve_ms=record["solve_ms"],
+            total_ms=total_ms,
+            krylov_relative_tolerance=tolerance,
+            memory_pool_peak_bytes=pool_peak,
+            free_memory_before_bytes=int(free_before),
+            free_memory_after_bytes=int(free_after),
+            preconditioner_factorization_backend=record["factor_backend"],
+        )
+        out.append((record["solution"], telemetry))
+    return out
+
+
+def _solve_group_cuda(
+    cp: Any, csp: Any, csl: Any, mesh: SheetMesh, operator: Any, cuda_operator: Any, indices: "_BranchIndices",
+    resistance: np.ndarray, cases: list, members: list[int], given_list: list, solved: list,
+    frequency_hz: float, tolerance: float, max_iterations: int, restart: int, preconditioner: str,
+    shared_prepare_ms: float,
+) -> None:
+    """The excitations ``members`` of one reduction: their system prepared once, each solved in turn."""
+    group_started = time.perf_counter()
+    reduction = cases[members[0]][1]
+    keep, grounded, dropped = reduction.keep, reduction.grounded, reduction.dropped
+    active_branches = reduction.active_branches
+    reduced_cpu = reduction.reduced
+    active_resistance = resistance[active_branches]
+    reduced = csp.csr_matrix(reduced_cpu)
+    resistance_device = cp.asarray(active_resistance)
+    active_branches_device = cp.asarray(active_branches)
+
+    def finish(index: int, voltage_device: Any, current_device: Any, iterations: int, residual: float,
+               converged: bool, factor_backend: str, prepare_ms: float, solve_started: float) -> None:
+        cp.cuda.get_current_stream().synchronize()
+        solve_ms = (time.perf_counter() - solve_started) * 1000.0
+        solved[index] = {
+            "solution": SheetSolution(
+                node_voltage=cp.asnumpy(voltage_device),
+                branch_current=cp.asnumpy(current_device).astype(np.complex128, copy=False),
+                frequency_hz=frequency_hz,
+                iterations=iterations,
+                residual=residual,
+                converged=converged,
+                grounded_node=grounded,
+                undriven_nodes=dropped,
+            ),
+            "prepare_ms": prepare_ms,
+            "solve_ms": solve_ms,
+            "factor_backend": factor_backend,
+        }
+
+    if frequency_hz == 0.0:
+        admittance = csp.diags(1.0 / resistance_device)
+        system = (reduced.T @ admittance @ reduced).tocsr()
+        prepare_ms = shared_prepare_ms + (time.perf_counter() - group_started) * 1000.0
+        for index in members:
+            solve_started = time.perf_counter()
+            injected_device = cp.asarray(cases[index][0])
+            solved_voltage = csl.spsolve(system, injected_device[keep].real)
+            voltage_device = cp.zeros(mesh.node_count, dtype=cp.complex128)
+            voltage_device[keep] = solved_voltage
+            active_current_device = admittance @ (reduced @ solved_voltage)
+            current_device = cp.zeros(mesh.branch_count, dtype=cp.complex128)
+            current_device[active_branches_device] = active_current_device
+            residual = float((
+                cp.linalg.norm(reduced.T @ active_current_device - injected_device[keep].real)
+                / max(float(cp.linalg.norm(injected_device[keep].real).get()), 1e-30)
+            ).get())
+            finish(index, voltage_device, current_device, 1, residual, residual < 1e-8, "cusolver_sparse_qr",
+                   prepare_ms, solve_started)
+        return
+
+    levels = mesh.vertical_levels
+    if tuple(levels) != tuple(operator.vertical_levels):
+        raise ValueError("the mesh and operator vertical levels differ")
+    has_vertical = bool(levels)
+    branches = int(active_branches.sum())
+    unknowns = int(keep.sum())
+    size = branches + unknowns
+    omega = 2.0 * math.pi * frequency_hz
+
+    def _flux(currents: Any) -> Any:
+        rows, cols = mesh.shape
+        full_currents = cp.zeros(mesh.branch_count, dtype=cp.float64)
+        full_currents[active_branches_device] = currents
+        grid_x = cp.zeros((len(mesh.stackup), rows, cols), dtype=cp.float64)
+        grid_y = cp.zeros_like(grid_x)
+        x_count = len(mesh.branch_x)
+        y_count = len(mesh.branch_y)
+        grid_x[indices.x_layer, indices.x_row, indices.x_col] = full_currents[:x_count]
+        grid_y[indices.y_layer, indices.y_row, indices.y_col] = full_currents[x_count : x_count + y_count]
+        if has_vertical:
+            grid_z = cp.zeros((len(levels), rows, cols), dtype=cp.float64)
+            grid_z[indices.z_level, indices.z_row, indices.z_col] = full_currents[x_count + y_count :]
+            flux_x, flux_y, flux_z = cuda_operator.apply(grid_x, grid_y, grid_z)
+        else:
+            flux_x, flux_y = cuda_operator.apply(grid_x, grid_y)
+            flux_z = None
+        full_output = cp.zeros(mesh.branch_count, dtype=cp.float64)
+        full_output[:x_count] = flux_x[indices.x_layer, indices.x_row, indices.x_col]
+        full_output[x_count : x_count + y_count] = flux_y[indices.y_layer, indices.y_row, indices.y_col]
+        if flux_z is not None:
+            full_output[x_count + y_count :] = flux_z[indices.z_level, indices.z_row, indices.z_col]
+        return full_output[active_branches_device]
+
+    def impedance(currents: Any) -> Any:
+        flux = _flux(currents.real).astype(cp.complex128)
+        flux += 1j * _flux(currents.imag)
+        return resistance_device * currents + 1j * omega * flux
+
+    def saddle(vector: Any) -> Any:
+        currents = vector[:branches]
+        voltages = vector[branches:]
+        return cp.concatenate([impedance(currents) - reduced @ voltages, reduced.T @ currents])
+
+    if preconditioner == "near" and hasattr(operator, "near_inductance"):
+        # Sparse near-field impedance in the saddle-point matrix, factored
+        # once (SciPy SuperLU factors, CUDA triangular solves as for the
+        # Schur complement).
+        import scipy.sparse as sp
+
+        near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
+        saddle_cpu = sp.bmat([[near_cpu, -reduced_cpu], [reduced_cpu.T, None]], format="csc")
+        factored = csl.splu(csp.csc_matrix(saddle_cpu))
+
+        def precondition(vector: Any) -> Any:
+            return factored.solve(vector)
+
+    else:
+        full_diagonal_cpu = resistance + 1j * omega * np.concatenate(
+            [_inline_self_inductance(mesh, operator), _vertical_self_inductance(mesh, operator)]
+        )
+        diagonal = cp.asarray(full_diagonal_cpu[active_branches])
+        schur = (reduced.T @ csp.diags(1.0 / diagonal) @ reduced).tocsc()
+        factored = csl.splu(schur)
+
+        def precondition(vector: Any) -> Any:
+            rhs_current = vector[:branches]
+            rhs_node = vector[branches:]
+            node = factored.solve(rhs_node + reduced.T @ (rhs_current / diagonal))
+            current = (rhs_current + reduced @ node) / diagonal
+            return cp.concatenate([current, node])
+
+    # CuPy's ``M=`` path implements a right-preconditioned variable, unlike
+    # SciPy's left-preconditioned GMRES used by the CPU reference.  Build
+    # M^-1 A and M^-1 b explicitly so both paths solve the same Krylov system
+    # and the reference-node closure does not accumulate the residual left
+    # at every other node.
+    def left_preconditioned_saddle(vector: Any) -> Any:
+        return precondition(saddle(vector))
+
+    linear_system = csl.LinearOperator((size, size), matvec=left_preconditioned_saddle, dtype=cp.complex128)
+    cp.cuda.get_current_stream().synchronize()
+    prepare_ms = shared_prepare_ms + (time.perf_counter() - group_started) * 1000.0
+    effective_restart = min(restart, size)
+    floor = 100.0 * np.finfo(np.float64).eps
+
+    for index in members:
+        solve_started = time.perf_counter()
+        injected_device = cp.asarray(cases[index][0])
+        right_hand_side = cp.concatenate([cp.zeros(branches, dtype=cp.complex128), injected_device[keep]])
+        left_right_hand_side = precondition(right_hand_side)
+        counter = {"restarts": 0}
+
+        def count(_value: Any) -> None:
+            counter["restarts"] += 1
+
+        rhs_norm = float(cp.linalg.norm(right_hand_side).get())
+        left_norm = float(cp.linalg.norm(left_right_hand_side).get())
+        given = given_list[index]
+        if given is not None:
+            result = _cuda_start(cp, saddle, given, mesh, active_branches, keep, branches, unknowns, right_hand_side)
+            residual = float(cp.linalg.norm(saddle(result) - right_hand_side).get()) / max(rhs_norm, 1e-30)
+        else:
+            result = cp.zeros(size, dtype=cp.complex128)
+            residual = 1.0 if rhs_norm > 0.0 else 0.0
+        # GMRES is run one restart cycle at a time and the public saddle-point
+        # residual is checked between cycles, so the solve stops when the
+        # requested tolerance is met and ``max_iterations`` counts cycles as on
+        # the CPU path.  Aiming CuPy's own (left-preconditioned) criterion
+        # three decades below the tolerance ran every solve to its cap.
+        cycles = 0
+        while residual > tolerance and cycles < max_iterations:
+            # Cycles grow from ten inner iterations towards ``restart``: a
+            # well-preconditioned solve converges in a few tens of iterations
+            # and must not pay for a full cycle to find out.
+            cycle_length = min(effective_restart, 10 * 2**cycles)
+            # CuPy judges the left-preconditioned residual; scale its target by
+            # the current ratio of the two residuals so that meeting it brings
+            # the saddle-point residual to the requested tolerance, and stop
+            # when that target falls below what float64 can resolve.
+            raw = saddle(result) - right_hand_side
+            preconditioned = float(cp.linalg.norm(precondition(raw)).get()) / max(left_norm, 1e-30)
+            ratio = preconditioned / max(residual, 1e-300) if residual > 0.0 else 1.0
+            target = 0.5 * tolerance * ratio
+            if target < floor:
+                break
+            result, _info = csl.gmres(
+                linear_system, left_right_hand_side, x0=result, rtol=target, restart=cycle_length,
+                maxiter=cycle_length, callback=count, callback_type="pr_norm",
+            )
+            cycles += 1
+            residual = float((cp.linalg.norm(saddle(result) - right_hand_side)).get()) / max(rhs_norm, 1e-30)
+        current_device = cp.zeros(mesh.branch_count, dtype=cp.complex128)
+        current_device[active_branches_device] = result[:branches]
+        voltage_device = cp.zeros(mesh.node_count, dtype=cp.complex128)
+        voltage_device[keep] = result[branches:]
+        finish(index, voltage_device, current_device, counter["restarts"], residual, residual <= tolerance,
+               "scipy_superlu_factor_cupy_triangular_solve", prepare_ms, solve_started)
+
+
+def _cuda_start(
+    cp: Any, saddle: Any, given: SheetSolution, mesh: SheetMesh, active_branches: np.ndarray, keep: np.ndarray,
+    branches: int, unknowns: int, right_hand_side: Any,
+) -> Any:
+    """The least-residual mix of a solution's real and imaginary currents and potentials (``initial``)."""
+    current = cp.asarray(given.branch_current[active_branches])
+    voltage = cp.asarray(given.node_voltage[keep])
+    no_current = cp.zeros(branches, dtype=cp.complex128)
+    no_voltage = cp.zeros(unknowns, dtype=cp.complex128)
+    basis = cp.stack([
+        cp.concatenate([current.real.astype(cp.complex128), no_voltage]),
+        cp.concatenate([current.imag.astype(cp.complex128), no_voltage]),
+        cp.concatenate([no_current, voltage.real.astype(cp.complex128)]),
+        cp.concatenate([no_current, voltage.imag.astype(cp.complex128)]),
+    ], axis=1)
+    images = cp.stack([saddle(basis[:, k]) for k in range(4)], axis=1)
+    coefficients = cp.linalg.lstsq(images, right_hand_side, rcond=None)[0]
+    return basis @ coefficients

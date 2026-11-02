@@ -30,6 +30,7 @@ from .sheet_cuda import (
     CudaSheetTelemetry,
     CudaSheetUnavailableError,
     solve_sheet_case_cuda,
+    solve_sheet_cases_cuda,
 )
 from .sheet_inductance import (
     CellGeometry,
@@ -109,6 +110,7 @@ __all__ = [
     "solve_current_field_problem",
     "solve_sheet_case",
     "solve_sheet_case_cuda",
+    "solve_sheet_cases_cuda",
     "via_resistance",
     "vertical_currents",
 ]
