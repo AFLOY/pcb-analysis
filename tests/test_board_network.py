@@ -109,9 +109,19 @@ def test_what_the_network_refuses() -> None:
     copper = Copper(("A.2",), {"A.2": "A.1"}, np.array([[1e-3 + 0j]]), 1e3)
     with pytest.raises(ValueError, match="no copper matrix"):
         BoardNetwork([copper], [Part("R", "A.2", "A.1", SeriesRLC(1.0))], ground="A.1").solve(2e3)
-    floating = BoardNetwork([copper], [Part("R", "B.1", "B.2", SeriesRLC(1.0))], ground="A.1")
+    floating = BoardNetwork([copper], [Part("R", "B.1", "B.2", SeriesRLC(1.0)), Part("C", "B.1", "B.2", SeriesRLC(2.0))],
+                            ground="A.1")
     with pytest.raises(np.linalg.LinAlgError, match="no path"):
         floating.solve(1e3)
+    # a pad off the copper with one element: the element would carry nothing
+    with pytest.raises(ValueError, match=r"join one element only.*A:2 \[R\] \(the copper has \['A.2', 'A.1'\]\)"):
+        BoardNetwork([copper], [Part("R", "A:2", "A.1", SeriesRLC(1.0))], ground="A.1")
+    with pytest.raises(ValueError, match=r"B.1 \[R\]; B.2 \[R\]"):
+        BoardNetwork([copper], [Part("R", "B.1", "B.2", SeriesRLC(1.0))], ground="A.1")
+    # a node of the parts alone (a source behind its series resistor) is a node like any other
+    inner = BoardNetwork([copper], [Part("Rs", "S.1", "A.2", SeriesRLC(1.0))], ground="A.1",
+                         voltage_sources=[VoltageSource("V", "S.1", "A.1", {1e3: 1.0})]).solve(1e3)
+    assert inner.part_current_a["Rs"] == pytest.approx(1.0 / (1.0 + 1e-3))
     with pytest.raises(ValueError, match="names used twice"):
         BoardNetwork([copper], [Part("R", "A.2", "A.1", SeriesRLC(1.0)), Part("R", "A.1", "A.2", SeriesRLC(1.0))],
                      ground="A.1")

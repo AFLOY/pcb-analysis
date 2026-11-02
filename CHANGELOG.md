@@ -16,6 +16,12 @@ Fixes from Kicad_PowerOpt's review of 0.12.0.
   ones do, and `SheetMesh` refuses a `pitch_m` its grid's cells do not all
   have. The fault predates 0.12.0; every port-impedance solve on such a
   grid moves.
+- `BoardNetwork` refuses a pad that is neither a copper port nor a reference
+  and joins one element only: that element carried no current (1e-17 A)
+  without a word, as when a part was stamped on `C2.1` where `merge_pins`
+  names the copper's pad `C2:VIN`. The message names the copper's pads of
+  the same part. A pad of the parts alone joined by two or more elements is
+  a node as before.
 ## 0.12.0
 
 Copper's pad-port matrix over a band from a few solves

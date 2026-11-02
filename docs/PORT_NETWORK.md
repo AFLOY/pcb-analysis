@@ -116,6 +116,12 @@ reduction that merged the parts would lose it.
   incidence, `+1` at a port pad and `-1` at its conductor's reference pad.
   Copper in several conductors (from `solve_port_impedance`) couples
   through the cross terms of `Z`.
+- A pad that is neither a copper port nor a reference is a node of the
+  parts alone (between a source and its series resistor, say).  Joined by
+  one element only it is a dead end whose element carries no current, and
+  the network refuses it, naming the copper's pads of the same part: with
+  `merge_pins` the copper's pad is `C2:VIN`, and a part stamped on `C2.1`
+  would otherwise carry 1e-17 A without a word.
 - `Part(name, a, b, model)` is stamped between pads `a` and `b`.  The model
   is anything with `impedance(omega)`:
   - `SeriesRLC`

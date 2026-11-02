@@ -110,13 +110,33 @@ class BoardNetwork:
         duplicate = sorted({n for n in names if names.count(n) > 1})
         if duplicate:
             raise ValueError(f"names used twice: {duplicate}")
-        pads = list(dict.fromkeys([*self.ports, *(self.references[p] for p in self.ports)]))
+        on_copper = list(dict.fromkeys([*self.ports, *(self.references[p] for p in self.ports)]))
+        pads = list(on_copper)
+        touching: dict[str, list[str]] = {}
         for item in (*self.parts, *self.current_sources, *self.voltage_sources):
             for pad in (item.a, item.b):
+                touching.setdefault(pad, []).append(item.name)
                 if pad not in pads:
                     pads.append(pad)
         if ground not in pads:
             raise ValueError(f"ground pad {ground} is not a node of the network")
+        # A pad off the copper is a node of the parts alone (between a source
+        # and its series part, say).  Joined by one element only, it is a dead
+        # end: that element carries no current, which is never what was meant
+        # -- usually the pad was named otherwise than the copper's ports
+        # (``C2.1`` where merged pins make the port ``C2:VIN``).
+        dead = sorted(pad for pad in pads if pad not in on_copper and len(touching.get(pad, ())) < 2)
+        if dead:
+            hints = []
+            for pad in dead:
+                part = pad.replace(":", ".").split(".")[0]
+                similar = [name for name in on_copper if name.replace(":", ".").split(".")[0] == part]
+                hint = f" (the copper has {similar})" if similar else ""
+                hints.append(f"{pad} [{', '.join(touching.get(pad, ()))}]{hint}")
+            raise ValueError(
+                "pads that are neither a copper port nor a reference and join one element only, "
+                f"which would carry no current: {'; '.join(hints)}"
+            )
         self.ground = ground
         self.pads = tuple(pads)
         self._index = {pad: i for i, pad in enumerate(p for p in self.pads if p != ground)}

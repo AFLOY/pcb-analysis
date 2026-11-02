@@ -189,6 +189,9 @@ def test_merged_pins_are_one_port_named_by_part_and_net() -> None:
     # the pins side by side: merged, the port is the split ports in parallel within 0.1 %
     together = 1.0 / np.linalg.inv(split.at(1e6).z_ohm).sum()
     assert merged.at(1e6).z_ohm[0, 0] == pytest.approx(together, rel=1e-3)
+    # a part on a stated pin's name, where the merged port is named by part and net, would carry nothing
+    with pytest.raises(ValueError, match=r"Q1\.1 \[C\] \(the copper has \['Q1:VIN'\]\)"):
+        BoardNetwork(merged.impedances, [Part("C", "Q1.1", "C1:VIN", capacitor(1e-6, 1e-2, 1e-9))], ground="C1:VIN")
 
 
 def test_oblong_cells_are_solved_as_oblong() -> None:
