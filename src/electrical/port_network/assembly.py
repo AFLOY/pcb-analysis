@@ -26,6 +26,7 @@ its copper was solved or interpolated.
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass
 from typing import Mapping, Protocol, Sequence
 
@@ -33,7 +34,7 @@ import numpy as np
 
 from .frequency import distinct_frequencies, match_frequency
 from .parts import CurrentSource, Part, Tie, VoltageSource, _phasor
-from .sweep import PortImpedanceSweep
+from .sweep import PortImpedanceSweep, _point_converged
 
 
 class CopperPorts(Protocol):
@@ -62,6 +63,8 @@ class NetworkSolution:
     """Largest entry of the linear system's residual, for checking."""
     copper_interpolated: bool = False
     """The copper's matrix at this frequency came from a sweep's interpolation, not a solve."""
+    copper_converged: bool | None = None
+    """Every port solve behind the copper's matrix converged (``None``: the copper does not say)."""
 
 
 @dataclass(frozen=True)
@@ -172,6 +175,14 @@ class BoardNetwork:
             interpolated = copper.interpolated
         if copper is None:
             raise ValueError(f"no copper matrix at {frequency_hz:g} Hz (have {sorted(self.copper)})")
+        converged = _point_converged(copper)
+        if converged is False:
+            warnings.warn(
+                f"the copper's matrix at {frequency_hz:g} Hz rests on port solves that did not converge; "
+                "its solution is marked copper_converged=False",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         omega = 2.0 * math.pi * frequency_hz
         n, m = len(self._index), len(self._branches)
         a = np.zeros((n + m, n + m), dtype=complex)
@@ -261,6 +272,7 @@ class BoardNetwork:
             copper_port_current_a=port_current,
             solve_residual=residual,
             copper_interpolated=interpolated,
+            copper_converged=converged,
         )
         self._transfers[frequency_hz] = transfer
         return transfer
@@ -339,6 +351,8 @@ class NetworkTransfer:
     """Largest entry of the factorised system's residual over the unit columns."""
     copper_interpolated: bool = False
     """The copper's matrix came from a sweep's interpolation, not a solve."""
+    copper_converged: bool | None = None
+    """Every port solve behind the copper's matrix converged (``None``: the copper does not say)."""
 
     def excitation_vector(self, phasors: Mapping[str, complex]) -> np.ndarray:
         unknown = sorted(set(phasors) - set(self.sources))
@@ -372,6 +386,7 @@ class NetworkTransfer:
                 copper_port_current_a={name: complex(port[i, c]) for i, name in enumerate(self.ports)},
                 solve_residual=self.solve_residual,
                 copper_interpolated=self.copper_interpolated,
+                copper_converged=self.copper_converged,
             )
             for c in range(drive.shape[1])
         ]

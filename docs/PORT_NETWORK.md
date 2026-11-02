@@ -184,6 +184,8 @@ and answers any frequency inside their band by interpolation, entry by entry
 
 `sweep.at(f)` returns the solved matrix at a solved frequency and an
 interpolated one (`interpolated=True`) inside the band; outside it refuses.
+`SweepPoint.converged` carries the port solves' flags (for an interpolated
+matrix, those of every point solved).
 
 Frequencies are matched within `FREQUENCY_RTOL` (1e-9 relative,
 `match_frequency`), not to the bit: a geometric midpoint, a harmonic
@@ -206,6 +208,10 @@ The port-impedance contract runs it with
 `BoardNetwork(sweep, ...)` takes a sweep as its copper: a frequency the
 copper was not solved at is served by the interpolation and the solution
 says so (`NetworkSolution.copper_interpolated`, also on `NetworkTransfer`).
+`copper_converged` says likewise whether the port solves behind the copper's
+matrix converged (`None` when the copper carries no flags), and a matrix
+from solves that did not converge raises a `RuntimeWarning` once per
+frequency.
 Copper given as matrices still refuses a frequency it has no matrix for.
 `PortImpedanceSweep.to_mapping()` / `from_mapping()` serialise a sweep with
 its checks and forms (`port-impedance-sweep/v1`).

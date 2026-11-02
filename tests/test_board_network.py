@@ -230,3 +230,22 @@ def test_a_source_at_its_frequency_within_rounding_drives_the_network() -> None:
     spectra = rounded.solve_cases({"run": {"I": {3e6: 1.0}}})
     assert spectra["run"].frequency_hz == (f * 1e7,)
     assert spectra["run"].solutions[0].part_current_a["R"] == pytest.approx(exact.part_current_a["R"])
+
+
+def test_copper_from_solves_that_did_not_converge_is_flagged() -> None:
+    @dataclass(frozen=True)
+    class Flagged(Copper):
+        converged: tuple = (True,)
+
+    parts = [Part("R", "A.2", "A.1", SeriesRLC(1.0))]
+    sources = [CurrentSource("I", "A.1", "A.2", {1e3: 1.0})]
+    good = Flagged(("A.2",), {"A.2": "A.1"}, np.array([[1e-3 + 0j]]), 1e3, (True,))
+    assert BoardNetwork([good], parts, ground="A.1", current_sources=sources).solve(1e3).copper_converged is True
+    plain = Copper(("A.2",), {"A.2": "A.1"}, np.array([[1e-3 + 0j]]), 1e3)
+    assert BoardNetwork([plain], parts, ground="A.1", current_sources=sources).solve(1e3).copper_converged is None
+    bad = Flagged(("A.2",), {"A.2": "A.1"}, np.array([[1e-3 + 0j]]), 1e3, (False,))
+    network = BoardNetwork([bad], parts, ground="A.1", current_sources=sources)
+    with pytest.warns(RuntimeWarning, match="did not converge"):
+        solution = network.solve(1e3)
+    assert solution.copper_converged is False
+    assert network.solve_cases({"run": {"I": {1e3: 2.0}}})["run"].solutions[0].copper_converged is False

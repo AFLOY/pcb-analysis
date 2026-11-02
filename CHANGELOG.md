@@ -36,6 +36,10 @@ Fixes from Kicad_PowerOpt's review of 0.12.0.
   sources' spectra (a missed key carried 0 A without a word), `BoardNetwork`'s
   copper and its cases, `PortImpedanceSweep.at`, `PortImpedanceResult.at`
   and `network_emission`. A solution reports the copper's own frequency.
+- `NetworkSolution.copper_converged` (also on `NetworkTransfer` and
+  `SweepPoint.converged`) says whether the port solves behind the copper's
+  matrix converged; a matrix from solves that did not converge raises a
+  `RuntimeWarning` once per frequency. `None` where the copper has no flags.
 
 ## 0.12.0
 

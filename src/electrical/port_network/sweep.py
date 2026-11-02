@@ -57,6 +57,18 @@ class SweepPoint:
     z_ohm: np.ndarray
     frequency_hz: float
     interpolated: bool
+    converged: bool | None = None
+    """The solve's ``converged`` flags (interpolated: those of every point solved), ``None`` where a point has none."""
+
+
+def _point_converged(point: Any) -> bool | None:
+    """Whether a matrix's port solves converged: its ``converged`` flag(s), ``None`` when it has none."""
+    flags = getattr(point, "converged", None)
+    if flags is None:
+        return None
+    if isinstance(flags, (bool, np.bool_)):
+        return bool(flags)
+    return all(bool(flag) for flag in flags)
 
 
 @dataclass(frozen=True)
@@ -168,11 +180,15 @@ class PortImpedanceSweep:
         solved = match_frequency(f, self.solved_frequencies_hz)
         if solved is not None:
             point = self.points[self.solved_frequencies_hz.index(solved)]
-            return SweepPoint(self.ports, dict(self.references), np.asarray(point.z_ohm, dtype=complex), solved, False)
+            return SweepPoint(self.ports, dict(self.references), np.asarray(point.z_ohm, dtype=complex), solved, False,
+                              _point_converged(point))
         low, high = self.band_hz
         if not (low <= f <= high):
             raise ValueError(f"{f:g} Hz is outside the solved band [{low:g}, {high:g}] Hz")
-        return SweepPoint(self.ports, dict(self.references), _interpolate(self.points, f, self.forms), f, True)
+        flags = [_point_converged(p) for p in self.points]
+        converged = None if None in flags else all(flags)
+        return SweepPoint(self.ports, dict(self.references), _interpolate(self.points, f, self.forms), f, True,
+                          converged)
 
     def worst_check(self) -> tuple[float, float]:
         """The largest R and L errors among the accepted checks (0 without checks)."""

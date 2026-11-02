@@ -156,3 +156,18 @@ def test_frequencies_match_within_their_rounding_not_to_the_bit() -> None:
     middle = sweep.solved_frequencies_hz[1]  # a geometric midpoint, sqrt(low * high)
     near = sweep.at(middle * (1 + 1e-13))
     assert not near.interpolated and near.frequency_hz == middle
+
+
+def test_an_interpolated_matrix_says_whether_its_solves_converged() -> None:
+    @dataclass(frozen=True)
+    class Flagged(Copper):
+        converged: tuple = (True, True)
+
+    def solve(f):
+        c = _synthetic(f)
+        return Flagged(c.ports, c.references, c.z_ohm, f, (True, f < 5e7))
+
+    sweep = refine_frequencies(solve, [1e4, 1e8], tolerance=1e-2)
+    assert sweep.at(1e4).converged is True and sweep.at(1e8).converged is False
+    assert sweep.at(3.3e5).interpolated and sweep.at(3.3e5).converged is False
+    assert refine_frequencies(_synthetic, [1e4, 1e8], tolerance=1e-2).at(3.3e5).converged is None
