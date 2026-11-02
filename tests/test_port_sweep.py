@@ -143,3 +143,16 @@ def test_the_contract_refines_the_band_of_two_strips_and_the_unsolved_points_hol
     assert again.refinement == refinement
     with pytest.raises(ValueError, match="frequency_refinement takes"):
         solve_port_impedance_problem(_problem(frequencies=(1e5, 1e8)), {"frequency_refinement": {"tol": 0.1}})
+
+
+def test_frequencies_match_within_their_rounding_not_to_the_bit() -> None:
+    from electrical.port_network import FREQUENCY_RTOL, distinct_frequencies, match_frequency
+
+    f = 1e6
+    assert match_frequency(f * (1 + 1e-13), [1e5, f, 1e7]) == f
+    assert match_frequency(f * (1 + 10 * FREQUENCY_RTOL), [f]) is None
+    assert distinct_frequencies([3e6, 1e6 * (1 + 1e-14), 1e6, 2e6]) == [1e6 * (1 + 1e-14), 2e6, 3e6]
+    sweep = refine_frequencies(_synthetic, [1e4, 1e8], tolerance=1e-2)
+    middle = sweep.solved_frequencies_hz[1]  # a geometric midpoint, sqrt(low * high)
+    near = sweep.at(middle * (1 + 1e-13))
+    assert not near.interpolated and near.frequency_hz == middle

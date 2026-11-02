@@ -185,6 +185,13 @@ and answers any frequency inside their band by interpolation, entry by entry
 `sweep.at(f)` returns the solved matrix at a solved frequency and an
 interpolated one (`interpolated=True`) inside the band; outside it refuses.
 
+Frequencies are matched within `FREQUENCY_RTOL` (1e-9 relative,
+`match_frequency`), not to the bit: a geometric midpoint, a harmonic
+`k * f0` or a JSON round trip can bring a frequency back with its last bits
+changed.  This holds for the sweep's solved points, `BoardNetwork`'s copper,
+the sources' spectra (where a missed key used to carry 0 A without a
+word), `PortImpedanceResult.at` and `network_emission`.
+
 `refine_frequencies(solve, frequencies, tolerance=0.01, maximum_solves=24,
 minimum_ratio=1.05)` chooses the solves.  Each interval between solved points
 is checked at its geometric midpoint: the copper is solved there and compared

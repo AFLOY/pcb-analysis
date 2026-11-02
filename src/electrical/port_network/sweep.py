@@ -43,6 +43,8 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 import numpy as np
 from scipy.interpolate import PchipInterpolator
 
+from .frequency import distinct_frequencies, match_frequency
+
 PORT_IMPEDANCE_SWEEP_SCHEMA = "port-impedance-sweep/v1"
 
 
@@ -137,7 +139,7 @@ class PortImpedanceSweep:
         if len(ordered) < 2:
             raise ValueError("a sweep needs at least two solved frequencies")
         frequencies = [float(p.frequency_hz) for p in ordered]
-        if frequencies[0] <= 0.0 or len(set(frequencies)) != len(frequencies):
+        if frequencies[0] <= 0.0 or len(distinct_frequencies(frequencies)) != len(frequencies):
             raise ValueError("solved frequencies must be positive and distinct")
         self.ports = tuple(ordered[0].ports)
         self.references = dict(ordered[0].references)
@@ -161,11 +163,12 @@ class PortImpedanceSweep:
         return self.solved_frequencies_hz[0], self.solved_frequencies_hz[-1]
 
     def at(self, frequency_hz: float) -> SweepPoint:
-        """The matrix at ``frequency_hz``: the solved one, or interpolated inside the band."""
+        """The matrix at ``frequency_hz``: the solved one (within ``FREQUENCY_RTOL``), or interpolated inside the band."""
         f = float(frequency_hz)
-        for point in self.points:
-            if float(point.frequency_hz) == f:
-                return SweepPoint(self.ports, dict(self.references), np.asarray(point.z_ohm, dtype=complex), f, False)
+        solved = match_frequency(f, self.solved_frequencies_hz)
+        if solved is not None:
+            point = self.points[self.solved_frequencies_hz.index(solved)]
+            return SweepPoint(self.ports, dict(self.references), np.asarray(point.z_ohm, dtype=complex), solved, False)
         low, high = self.band_hz
         if not (low <= f <= high):
             raise ValueError(f"{f:g} Hz is outside the solved band [{low:g}, {high:g}] Hz")

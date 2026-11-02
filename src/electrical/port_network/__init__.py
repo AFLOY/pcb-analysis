@@ -18,6 +18,7 @@ No solver of the copper lives here, and no circuit simulator is run.
 """
 
 from .assembly import BoardNetwork, CopperPorts, NetworkSolution, NetworkSpectrum, NetworkTransfer
+from .frequency import FREQUENCY_RTOL, distinct_frequencies, match_frequency
 from .loops import loop_impedance, mesh_matrices
 from .lumped import SeriesRLC, capacitor
 from .moments import WindowMoments, close_kcl, port_block, window_moments
@@ -40,6 +41,9 @@ from .sweep import (
 )
 
 __all__ = [
+    "FREQUENCY_RTOL",
+    "distinct_frequencies",
+    "match_frequency",
     "PORT_IMPEDANCE_SWEEP_SCHEMA",
     "FrequencyCheck",
     "PortImpedanceSweep",

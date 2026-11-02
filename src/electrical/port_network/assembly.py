@@ -31,7 +31,8 @@ from typing import Mapping, Protocol, Sequence
 
 import numpy as np
 
-from .parts import CurrentSource, Part, Tie, VoltageSource
+from .frequency import distinct_frequencies, match_frequency
+from .parts import CurrentSource, Part, Tie, VoltageSource, _phasor
 from .sweep import PortImpedanceSweep
 
 
@@ -157,11 +158,13 @@ class BoardNetwork:
         (:meth:`NetworkTransfer.apply`).  Kept per frequency.
         """
         frequency_hz = float(frequency_hz)
+        if frequency_hz <= 0.0:
+            raise ValueError("solve at a positive frequency")
+        # the copper's own frequency when it has one within FREQUENCY_RTOL
+        frequency_hz = match_frequency(frequency_hz, self.copper) or frequency_hz
         cached = self._transfers.get(frequency_hz)
         if cached is not None:
             return cached
-        if frequency_hz <= 0.0:
-            raise ValueError("solve at a positive frequency")
         copper = self.copper.get(frequency_hz)
         interpolated = False
         if copper is None and self.sweep is not None:
@@ -270,8 +273,9 @@ class BoardNetwork:
 
     def solve_spectrum(self, frequencies_hz: Sequence[float] | None = None) -> NetworkSpectrum:
         """Every frequency asked for (default: every frequency the copper has)."""
-        frequencies = tuple(sorted(float(f) for f in (frequencies_hz if frequencies_hz is not None else self.copper)))
-        return NetworkSpectrum(frequencies, tuple(self.solve(f) for f in frequencies))
+        asked = distinct_frequencies(frequencies_hz if frequencies_hz is not None else self.copper)
+        solutions = tuple(self.solve(f) for f in asked)
+        return NetworkSpectrum(tuple(s.frequency_hz for s in solutions), solutions)
 
     def solve_cases(
         self,
@@ -293,9 +297,9 @@ class BoardNetwork:
             if unknown:
                 raise ValueError(f"case {name} drives sources the network does not have: {unknown}")
         if frequencies_hz is None:
-            frequencies = sorted({float(f) for spectra in cases.values() for spectrum in spectra.values() for f in spectrum})
+            frequencies = distinct_frequencies(f for spectra in cases.values() for spectrum in spectra.values() for f in spectrum)
         else:
-            frequencies = sorted(float(f) for f in frequencies_hz)
+            frequencies = distinct_frequencies(frequencies_hz)
         names = list(cases)
         by_case: dict[str, list[NetworkSolution]] = {name: [] for name in names}
         for frequency in frequencies:
@@ -307,14 +311,8 @@ class BoardNetwork:
                 )
             for column, solution in enumerate(transfer.apply_matrix(drive)):
                 by_case[names[column]].append(solution)
-        return {name: NetworkSpectrum(tuple(frequencies), tuple(by_case[name])) for name in names}
-
-
-def _phasor(spectrum: Mapping[float, complex], frequency_hz: float) -> complex:
-    value = spectrum.get(frequency_hz)
-    if value is None:
-        value = {float(f): v for f, v in spectrum.items()}.get(frequency_hz, 0.0)
-    return complex(value)
+        return {name: NetworkSpectrum(tuple(s.frequency_hz for s in by_case[name]), tuple(by_case[name]))
+                for name in names}
 
 
 @dataclass(frozen=True)

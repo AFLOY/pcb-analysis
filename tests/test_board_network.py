@@ -211,3 +211,22 @@ def test_a_solution_reports_every_source_s_current(strips) -> None:
     run = network.solve_cases({"run": {"Q": {1e6: 0.4 - 0.1j}, "VIN": {1e6: 1e-3}}})["run"].solutions[0]
     assert run.source_current_a["Q"] == 0.4 - 0.1j  # a current source carries its own, per case
     assert "VIN" in run.source_current_a            # a voltage source's is solved
+
+
+def test_a_source_at_its_frequency_within_rounding_drives_the_network() -> None:
+    # A spectrum keyed by a harmonic computed one way and copper solved at it
+    # computed another: the last bits differ, the source still drives.
+    f = 0.1 * 3  # 0.30000000000000004
+    copper = Copper(("A.2",), {"A.2": "A.1"}, np.array([[1e-3 + 0j]]), f * 1e7)
+    parts = [Part("R", "A.2", "A.1", SeriesRLC(1.0))]
+    exact = BoardNetwork([copper], parts, ground="A.1",
+                         current_sources=[CurrentSource("I", "A.1", "A.2", {f * 1e7: 1.0})]).solve(f * 1e7)
+    rounded = BoardNetwork([copper], parts, ground="A.1",
+                           current_sources=[CurrentSource("I", "A.1", "A.2", {3e6: 1.0})])
+    assert 3e6 != f * 1e7
+    solution = rounded.solve(3e6)
+    assert solution.frequency_hz == f * 1e7 and solution.part_current_a["R"] == pytest.approx(exact.part_current_a["R"])
+    assert abs(solution.part_current_a["R"]) > 1e-4
+    spectra = rounded.solve_cases({"run": {"I": {3e6: 1.0}}})
+    assert spectra["run"].frequency_hz == (f * 1e7,)
+    assert spectra["run"].solutions[0].part_current_a["R"] == pytest.approx(exact.part_current_a["R"])

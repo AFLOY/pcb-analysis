@@ -31,6 +31,8 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from electrical.port_network import match_frequency
+
 from .far_field import SphereSampling, db_microvolt_per_m, far_field_pattern
 from .fields import CurrentDipoles, evaluate_fields
 from .limits import EmissionLimit, EmissionMargin, emission_margin
@@ -74,7 +76,7 @@ def network_dipoles(
         raise ValueError(f"the copper at {frequency:g} Hz was interpolated: its current needs a solve there")
     if copper.solutions is None:
         raise ValueError("the copper's port solves were not kept; solve with keep_solutions=True")
-    if float(copper.frequency_hz) != frequency:
+    if match_frequency(frequency, [float(copper.frequency_hz)]) is None:
         raise ValueError(f"the copper was solved at {float(copper.frequency_hz):g} Hz, the network at {frequency:g} Hz")
     if tuple(copper.ports) != tuple(network.ports):
         raise ValueError("the copper's ports are not the network's")
@@ -136,15 +138,17 @@ def network_emission(
     out = []
     for solution in solutions:
         frequency = float(solution.frequency_hz)
-        if frequency not in coppers:
+        copper_key = match_frequency(frequency, coppers)
+        if copper_key is None:
             raise ValueError(f"no copper solve at {frequency:g} Hz (have {sorted(coppers)})")
         if isinstance(meshes, Mapping):
-            if frequency not in meshes:
+            mesh_key = match_frequency(frequency, meshes)
+            if mesh_key is None:
                 raise ValueError(f"no mesh at {frequency:g} Hz (have {sorted(meshes)})")
-            mesh = meshes[frequency]
+            mesh = meshes[mesh_key]
         else:
             mesh = meshes
-        dipoles = network_dipoles(network, solution, coppers[frequency], mesh, pad_positions_m)
+        dipoles = network_dipoles(network, solution, coppers[copper_key], mesh, pad_positions_m)
         pattern = far_field_pattern(dipoles, frequency, distance_m=distance_m, sampling=sampling)
         margin = None
         if limit is not None:

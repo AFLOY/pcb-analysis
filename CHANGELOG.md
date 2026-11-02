@@ -31,6 +31,11 @@ Fixes from Kicad_PowerOpt's review of 0.12.0.
   frequency; `PortImpedanceResult.meshes_by_frequency` gives the mapping.
   Its docstring named `PortImpedanceResult.meshes`, a tuple without
   frequencies that then failed; that tuple is now refused with a pointer.
+- Frequencies are matched within `FREQUENCY_RTOL` (1e-9 relative,
+  `electrical.port_network.match_frequency`), not to the bit: by the
+  sources' spectra (a missed key carried 0 A without a word), `BoardNetwork`'s
+  copper and its cases, `PortImpedanceSweep.at`, `PortImpedanceResult.at`
+  and `network_emission`. A solution reports the copper's own frequency.
 
 ## 0.12.0
 

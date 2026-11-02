@@ -18,6 +18,8 @@ from typing import Protocol
 
 import numpy as np
 
+from .frequency import match_frequency
+
 
 class ImpedanceModel(Protocol):
     def impedance(self, omega: float) -> complex: ...
@@ -98,10 +100,10 @@ class CurrentSource:
     a: str
     b: str
     spectrum: dict[float, complex]
-    """Phasor per frequency (Hz).  A frequency it does not list carries no current."""
+    """Phasor per frequency (Hz), matched within ``FREQUENCY_RTOL``.  A frequency it does not list carries no current."""
 
     def at(self, frequency_hz: float) -> complex:
-        return complex(self.spectrum.get(float(frequency_hz), 0.0))
+        return _phasor(self.spectrum, frequency_hz)
 
 
 @dataclass(frozen=True)
@@ -112,9 +114,16 @@ class VoltageSource:
     a: str
     b: str
     spectrum: dict[float, complex]
+    """Phasor per frequency (Hz), matched within ``FREQUENCY_RTOL``; 0 V at a frequency it does not list."""
 
     def at(self, frequency_hz: float) -> complex:
-        return complex(self.spectrum.get(float(frequency_hz), 0.0))
+        return _phasor(self.spectrum, frequency_hz)
+
+
+def _phasor(spectrum, frequency_hz: float) -> complex:
+    """``spectrum``'s phasor at ``frequency_hz`` (keys matched within ``FREQUENCY_RTOL``), 0 where it has none."""
+    key = match_frequency(frequency_hz, spectrum)
+    return 0j if key is None else complex(spectrum[key])  # an int or numpy key equal to ``key`` is found too
 
 
 __all__ = ["CurrentSource", "ImpedanceModel", "Part", "TabulatedImpedance", "Tie", "VoltageSource"]

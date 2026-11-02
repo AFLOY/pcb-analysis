@@ -53,6 +53,7 @@ import numpy as np
 
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
 from electrical.port_network.sweep import FrequencyCheck, PortImpedanceSweep, refine_frequencies
+from electrical.port_network.frequency import match_frequency
 
 from .current_field_contract import (
     CurrentFieldLayer,
@@ -247,8 +248,10 @@ class PortImpedanceResult:
         return tuple(z.frequency_hz for z in self.impedances)
 
     def at(self, frequency_hz: float) -> SheetPortImpedance:
+        """The matrix at ``frequency_hz``, matched within ``electrical.port_network.FREQUENCY_RTOL``."""
+        found = match_frequency(frequency_hz, self.frequencies_hz)
         for impedance in self.impedances:
-            if impedance.frequency_hz == float(frequency_hz):
+            if found is not None and impedance.frequency_hz == found:
                 return impedance
         raise ValueError(f"no matrix at {frequency_hz:g} Hz (have {list(self.frequencies_hz)})")
 
