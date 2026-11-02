@@ -4,7 +4,15 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
-## Unreleased
+## 0.12.0
+
+Copper's pad-port matrix over a band from a few solves
+(`PortImpedanceSweep`), a solved board network as radiating current elements
+(`network_emission`), and port solves at a placement candidate's size: each
+frequency starts from the nearest one solved, `auto` keeps the near
+preconditioner up to 400,000 unknowns, and the port solve runs on CUDA.
+Solved matrices move within the solver tolerance (warm start, the `auto`
+switch) and where the skin filaments' middle was thinner than their faces.
 
 - The port-impedance contract starts each frequency from the port solves of
   the nearest frequency solved on its mesh (`settings["warm_start"]`, on by
