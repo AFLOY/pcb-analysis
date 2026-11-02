@@ -1009,7 +1009,9 @@ keys and defaults (`relative_tolerance` 1e-9, `maximum_iterations` 200,
   agrees with the CPU and is not faster: on a T4 the device triangular solves
   of the near LU dominate (`SHEET_CUDA_RESULTS.md`).
 - `keep_solutions=True` keeps each port's solve and its mesh
-  (`PortImpedanceResult.meshes`) for `SheetPortImpedance.superpose`.
+  (`PortImpedanceResult.meshes`, in the order of the matrices;
+  `meshes_by_frequency` keys them by frequency, as `network_emission` takes
+  them) for `SheetPortImpedance.superpose`.
 - `settings["frequency_refinement"]` (`relative_tolerance` 0.01,
   `maximum_solves` 24, `minimum_ratio` 1.05) solves the stated frequencies
   and then the midpoints `electrical.port_network.refine_frequencies` needs

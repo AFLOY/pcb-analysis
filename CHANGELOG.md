@@ -22,6 +22,11 @@ Fixes from Kicad_PowerOpt's review of 0.12.0.
   names the copper's pad `C2:VIN`. The message names the copper's pads of
   the same part. A pad of the parts alone joined by two or more elements is
   a node as before.
+- `network_emission` takes the meshes as one `SheetMesh` or a mapping by
+  frequency; `PortImpedanceResult.meshes_by_frequency` gives the mapping.
+  Its docstring named `PortImpedanceResult.meshes`, a tuple without
+  frequencies that then failed; that tuple is now refused with a pointer.
+
 ## 0.12.0
 
 Copper's pad-port matrix over a band from a few solves

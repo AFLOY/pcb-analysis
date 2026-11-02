@@ -163,3 +163,12 @@ def test_a_graded_board_through_the_contract_closes_its_loops() -> None:
     assert mesh.pitch_m is None
     dipoles = network_dipoles(network, solution, result.impedances[0], mesh, positions)
     assert np.abs(dipoles.moment_a_m.sum(axis=0)).max() < 1e-7 * np.abs(dipoles.moment_a_m).sum()
+    # the result's meshes by frequency are what network_emission takes; its tuple names no frequency
+    assert result.meshes_by_frequency == {30e6: mesh}
+    coppers = {30e6: result.impedances[0]}
+    emission = network_emission(network, [solution], coppers, result.meshes_by_frequency, positions)
+    assert emission[0].far_field_v_per_m == pytest.approx(far_field_pattern(dipoles, 30e6, distance_m=3.0).max_field_v_per_m)
+    with pytest.raises(TypeError, match="meshes_by_frequency"):
+        network_emission(network, [solution], coppers, result.meshes, positions)
+    with pytest.raises(ValueError, match="no mesh at"):
+        network_emission(network, [solution], coppers, {1e6: mesh}, positions)

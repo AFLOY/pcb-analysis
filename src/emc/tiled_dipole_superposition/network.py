@@ -121,16 +121,29 @@ def network_emission(
 
     ``coppers`` maps each frequency to its ``SheetPortImpedance`` (kept
     solves); ``meshes`` is one ``SheetMesh`` or a mapping by frequency (the
-    port contract's ``PortImpedanceResult.meshes``).  ``limit`` adds the
+    port contract's ``PortImpedanceResult.meshes_by_frequency``; its
+    ``meshes`` tuple holds no frequencies and is refused).  ``limit`` adds the
     margin where the line has a value; ``scan_points_m`` (n, 3) adds the
     largest near-field |H| over them.
     """
+    if isinstance(meshes, Mapping):
+        meshes = {float(f): mesh for f, mesh in meshes.items()}
+    elif not hasattr(meshes, "branch_count"):
+        raise TypeError(
+            "meshes must be one SheetMesh or a mapping by frequency "
+            "(PortImpedanceResult.meshes_by_frequency, not its meshes tuple)"
+        )
     out = []
     for solution in solutions:
         frequency = float(solution.frequency_hz)
         if frequency not in coppers:
             raise ValueError(f"no copper solve at {frequency:g} Hz (have {sorted(coppers)})")
-        mesh = meshes[frequency] if isinstance(meshes, Mapping) else meshes
+        if isinstance(meshes, Mapping):
+            if frequency not in meshes:
+                raise ValueError(f"no mesh at {frequency:g} Hz (have {sorted(meshes)})")
+            mesh = meshes[frequency]
+        else:
+            mesh = meshes
         dipoles = network_dipoles(network, solution, coppers[frequency], mesh, pad_positions_m)
         pattern = far_field_pattern(dipoles, frequency, distance_m=distance_m, sampling=sampling)
         margin = None

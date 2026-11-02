@@ -230,7 +230,8 @@ class PortImpedanceResult:
     impedances: tuple[SheetPortImpedance, ...]
     metrics: dict[str, Any] = field(default_factory=dict)
     meshes: tuple[SheetMesh, ...] | None = field(default=None, repr=False, compare=False)
-    """The mesh each frequency was solved on, with ``keep_solutions`` (for superposed fields)."""
+    """The mesh each frequency was solved on, in the order of ``impedances``, with ``keep_solutions``
+    (for superposed fields; :attr:`meshes_by_frequency` keys them by frequency)."""
     refinement: dict[str, Any] | None = None
     """With ``frequency_refinement``: the tolerance, whether it was met, the frequencies asked for, and every midpoint check."""
 
@@ -250,6 +251,13 @@ class PortImpedanceResult:
             if impedance.frequency_hz == float(frequency_hz):
                 return impedance
         raise ValueError(f"no matrix at {frequency_hz:g} Hz (have {list(self.frequencies_hz)})")
+
+    @property
+    def meshes_by_frequency(self) -> dict[float, SheetMesh]:
+        """The mesh of each frequency, by frequency (what ``emc``'s ``network_emission`` takes as ``meshes``)."""
+        if self.meshes is None:
+            raise ValueError("the meshes were not kept; solve with keep_solutions=True")
+        return {float(z.frequency_hz): mesh for z, mesh in zip(self.impedances, self.meshes)}
 
     def to_mapping(self) -> dict[str, Any]:
         return {

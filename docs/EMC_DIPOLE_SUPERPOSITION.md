@@ -94,7 +94,8 @@ every loop and their moments sum to zero: no star-point closure is needed.
 A frequency whose copper was interpolated, or solved without its port
 solves, is refused: the current distribution is needed there.
 `network_emission(network, solutions, coppers, meshes, pad_positions_m,
-distance_m=, limit=, scan_points_m=)` returns, per frequency, the largest
+distance_m=, limit=, scan_points_m=)` takes one mesh or a mapping by
+frequency (`PortImpedanceResult.meshes_by_frequency`) and returns, per frequency, the largest
 far-zone field over the sphere, the radiated power, the margin where the
 limit line has a value (`None` elsewhere, as CISPR 32 below 30 MHz), and the
 largest near-field |H| over the scan points.
