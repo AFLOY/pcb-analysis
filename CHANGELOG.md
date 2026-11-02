@@ -4,6 +4,18 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
+## Unreleased
+
+Fixes from Kicad_PowerOpt's review of 0.12.0.
+
+- Equal oblong cells (`x_edges_mm` and `y_edges_mm` at different pitches,
+  0.2 x 0.4 mm say) were solved as squares of their x pitch: the 5 x 40 cell
+  strips' inductance was 4.98 nH, 3.99 nH as oblong cells (3.97 nH on the
+  same copper in 0.2 mm squares). `TensorGrid.is_uniform` now asks for one
+  square cell, so such grids take the pFFT operator and schema v2 as graded
+  ones do, and `SheetMesh` refuses a `pitch_m` its grid's cells do not all
+  have. The fault predates 0.12.0; every port-impedance solve on such a
+  grid moves.
 ## 0.12.0
 
 Copper's pad-port matrix over a band from a few solves

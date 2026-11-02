@@ -184,6 +184,8 @@ class SheetMesh:
                 raise ValueError(f"grid shape {self.grid.shape} does not match {(rows, cols)}")
             if self.pitch_m is None:
                 self.pitch_m = float(self.grid.pitch_x_m[0]) if self.grid.is_uniform else None
+            elif not (self.grid.is_uniform and np.isclose(float(self.pitch_m), float(self.grid.pitch_x_m[0]))):
+                raise ValueError("pitch_m names one square cell; this grid's cells are not all that square (pass pitch_m=None)")
         self.shape = (rows, cols)
         self.occupancy = occupancy
 

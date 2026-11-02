@@ -191,6 +191,31 @@ def test_merged_pins_are_one_port_named_by_part_and_net() -> None:
     assert merged.at(1e6).z_ohm[0, 0] == pytest.approx(together, rel=1e-3)
 
 
+def test_oblong_cells_are_solved_as_oblong() -> None:
+    # Equal 0.2 x 0.4 mm cells, against the same copper on 0.2 mm squares: the
+    # convolution operator takes one pitch, so these go the graded way (the
+    # inductance was 4.98 nH when they were taken as 0.2 mm squares).
+    def strip(row_mm, rows_per_cell):
+        width = WIDTH * rows_per_cell
+        value = _problem()
+        cells = [{"x": x, "y": y} for y in range(1, 1 + width) for x in range(1, 1 + LENGTH)]
+        value["copper_by_layer"] = {"F.Cu": cells, "In1.Cu": cells}
+        value["grid"] = {"rows": width + 2, "columns": COLUMNS,
+                         "x_edges_mm": (np.arange(COLUMNS + 1) * PITCH_MM).tolist(),
+                         "y_edges_mm": (np.arange(width + 3) * row_mm).tolist()}
+        for pad in value["pads"]:
+            pad["cells"] = _cells(pad["cells"][0]["layer"], pad["cells"][0]["x"], rows=range(1, 1 + width))
+        problem = PortImpedanceProblem.from_mapping(value)
+        return problem, solve_port_impedance_problem(problem, ONE_FILAMENT).at(1e6).z_ohm[0, 0]
+
+    oblong, z_oblong = strip(0.4, 1)
+    square, z_square = strip(0.2, 2)
+    assert oblong.pitch_mm is None and square.pitch_mm == pytest.approx(0.2)
+    henry = lambda z: z.imag / (2 * np.pi * 1e6)
+    assert henry(z_oblong) == pytest.approx(henry(z_square), rel=0.01)
+    assert z_oblong.real == pytest.approx(z_square.real, rel=0.05)
+
+
 def test_frequencies_that_cut_the_copper_differently_get_their_own_mesh() -> None:
     result = solve_port_impedance_problem(_problem(frequencies=(1e6, 3e7)), {"maximum_filaments": 8})
     records = result.metrics["frequencies"]

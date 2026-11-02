@@ -104,6 +104,12 @@ def test_pfft_matches_the_direct_pair_sum_on_a_graded_mesh() -> None:
     rows, cols = grid.shape
     mesh = SheetMesh((rows, cols), None, STACKUP, np.ones((2, rows, cols), bool), grid=grid)
     assert not mesh.is_uniform and mesh.pitch_m is None
+    with pytest.raises(ValueError, match="one square cell"):
+        SheetMesh((rows, cols), 0.1e-3, STACKUP, np.ones((2, rows, cols), bool), grid=grid)
+    oblong = TensorGrid.uniform((0.2e-3, 0.4e-3), (rows, cols))
+    with pytest.raises(ValueError, match="one square cell"):
+        SheetMesh((rows, cols), 0.2e-3, STACKUP, np.ones((2, rows, cols), bool), grid=oblong)
+    assert SheetMesh((rows, cols), None, STACKUP, np.ones((2, rows, cols), bool), grid=oblong).pitch_m is None
     operator = PfftSheetInductanceOperator(mesh, order=3, near_radius_cells=4)
     for axis in ("x", "y"):
         mask = _real_branch_mask(mesh, axis)
@@ -176,16 +182,22 @@ def test_ac_loop_impedance_on_a_graded_grid_agrees_with_the_uniform_fine_grid() 
     assert graded == pytest.approx(fine, rel=5e-2)
 
 
-def _graded_problem(frequency_hz: float, *, uniform: bool = False) -> dict:
-    """A current-field v2 problem: a 0.2 mm wide F.Cu trace returning on B.Cu, graded along x."""
+def _graded_problem(frequency_hz: float, *, uniform: bool = False, oblong: bool = False) -> dict:
+    """A current-field v2 problem: a 0.2 mm wide F.Cu trace returning on B.Cu, graded along x.
+
+    ``uniform``: 0.2 mm square cells (0.4 mm wide then); ``oblong``: equal 0.2 x 0.1 mm cells.
+    """
 
     from electrical.sheet_peec.current_field_contract import CURRENT_FIELD_PROBLEM_SCHEMA_V2
 
+    y_edges = np.array([0.0, 0.1, 0.2])
     if uniform:
+        x_edges = np.linspace(0.0, 6.0, 31)
+        y_edges = np.array([0.0, 0.2, 0.4])
+    elif oblong:
         x_edges = np.linspace(0.0, 6.0, 31)
     else:
         x_edges = graded_edges(0.0, 6e-3, coarse_pitch_m=0.4e-3, fine_pitch_m=0.1e-3, refine_m=[(2.5e-3, 3.5e-3)], margin_m=0.3e-3) * 1e3
-    y_edges = np.array([0.0, 0.1, 0.2])
     cols, rows = x_edges.size - 1, y_edges.size - 1
     layers = [
         {"name": "F.Cu", "order": 0, "center_z_mm": 0.0, "thickness_mm": 0.035, "resistivity_ohm_m": 1.724e-8},
@@ -228,6 +240,12 @@ def test_current_field_schema_v2_solves_graded_grids_with_the_pfft_operator() ->
     assert isinstance(operator_u, SheetInductanceOperator)
     forced = build_current_field_sheet_inputs(uniform, {"operator": "pfft"})[1]
     assert isinstance(forced, PfftSheetInductanceOperator)
+    # Equal oblong cells are no one pitch: they go the graded way, and fft refuses them.
+    oblong = CurrentFieldProblem.from_mapping(_graded_problem(1.0e6, oblong=True))
+    assert not oblong.is_uniform and oblong.pitch_mm is None
+    assert isinstance(build_current_field_sheet_inputs(oblong)[1], PfftSheetInductanceOperator)
+    with pytest.raises(ValueError, match="uniform grid"):
+        build_current_field_sheet_inputs(oblong, {"operator": "fft"})
     with pytest.raises(ValueError, match="uniform grid"):
         build_current_field_sheet_inputs(problem, {"operator": "fft"})
 

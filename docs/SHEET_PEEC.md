@@ -381,6 +381,15 @@ current-field contract gained schema `v2` whose `grid` carries `x_edges_mm` and
 pFFT operator for a graded grid, `operator="pfft"` forces it), and the CUDA
 solve has the same operator on the device (`CudaPfftSheetInductanceOperator`).
 
+A grid is uniform only when every cell is the same square: the convolution
+operator and `pitch_mm` take one pitch for both axes.  Equal oblong cells
+(0.2 x 0.4 mm, say) go the graded way, and `SheetMesh` refuses a `pitch_m`
+its grid's cells do not all have.  Until 0.12.1 such cells were taken as
+squares of their x pitch: a 5 x 40 cell strip pair
+(`tests/test_port_impedance_contract.py`) on 0.2 x 0.4 mm cells had 4.98 nH,
+against 3.99 nH as oblong cells and 3.97 nH on the same copper in 0.2 mm
+squares.
+
 Measured (`SHEET_PFFT_RESULTS.json`, `experiments/sheet_pfft_acceptance.py`,
 Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz). Operator accuracy as the relative Frobenius error of the dense
 in-plane operator (x / y) against the convolution operator on a uniform

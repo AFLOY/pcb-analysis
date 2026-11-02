@@ -51,6 +51,8 @@ def test_graded_edges_are_fine_where_asked_and_grow_gently() -> None:
     uniform = TensorGrid.uniform(0.5e-3, (4, 6), origin_m=(1.0, 2.0))
     assert uniform.is_uniform and uniform.shape == (4, 6) and uniform.origin_m == (1.0, 2.0)
     np.testing.assert_allclose(uniform.cell_area_m2, 0.25e-6)
+    # equal oblong cells are no one pitch
+    assert not TensorGrid.uniform((0.2e-3, 0.4e-3), (4, 6)).is_uniform
     row, col = grid.cell_of(np.array([21e-3]), np.array([11e-3]))
     assert grid.x_edges_m[col[0]] <= 21e-3 < grid.x_edges_m[col[0] + 1]
     assert grid.cell_mask(20e-3, 24e-3, 10e-3, 14e-3).sum() == pytest.approx(40 * 40, rel=0.1)

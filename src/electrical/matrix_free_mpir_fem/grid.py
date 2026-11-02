@@ -75,7 +75,17 @@ class TensorGrid:
 
     @property
     def is_uniform(self) -> bool:
-        return bool(np.allclose(self.pitch_x_m, self.pitch_x_m[0]) and np.allclose(self.pitch_y_m, self.pitch_y_m[0]))
+        """Every cell the same square: what one pitch describes.
+
+        Equal but oblong cells (0.2 x 0.4 mm, say) are not uniform: the sheet
+        convolution operator and schema v1's ``pitch_mm`` take one pitch for
+        both axes, so such a grid goes the graded way.
+        """
+        return bool(
+            np.allclose(self.pitch_x_m, self.pitch_x_m[0])
+            and np.allclose(self.pitch_y_m, self.pitch_y_m[0])
+            and np.isclose(self.pitch_x_m[0], self.pitch_y_m[0])
+        )
 
     @property
     def cell_area_m2(self) -> np.ndarray:
