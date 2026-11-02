@@ -4,9 +4,11 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
-## Unreleased
+## 0.12.1
 
-Fixes from Kicad_PowerOpt's review of 0.12.0.
+Fixes from Kicad_PowerOpt's review of 0.12.0. Port-impedance solves on a
+grid of oblong cells move, and `refine_frequencies` may take more solves
+where the ports differ in size, its tolerance now being per entry.
 
 - Equal oblong cells (`x_edges_mm` and `y_edges_mm` at different pitches,
   0.2 x 0.4 mm say) were solved as squares of their x pitch: the 5 x 40 cell
