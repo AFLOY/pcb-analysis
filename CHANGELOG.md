@@ -43,6 +43,13 @@ Fixes from Kicad_PowerOpt's review of 0.12.0.
 - `refine_frequencies` no longer reports a sweep unconverged because two
   frequencies asked for are closer than `minimum_ratio`; a split that gets
   that narrow still does.
+- The refinement's tolerance is per entry against the entry's own ports,
+  `|dX_ij| / sqrt(X_ii X_jj)` (`relative_errors`, public), not against the
+  largest entry of the matrix, where a small port was checked against the
+  largest one. `FrequencyCheck` errors are on this measure. Measured again
+  (`docs/PORT_SWEEP_RESULTS.json`): the default forms stay; on the two
+  coppers measured only the strips' `pchip-sqrt` rows moved (31 to 33 solves
+  at 0.2 %, 0.58 % to 0.59 % in R at 1 %).
 
 ## 0.12.0
 

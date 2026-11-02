@@ -10,6 +10,11 @@ checks, but at validation frequencies solved directly.  Two coppers:
   F.Cu over In1.Cu, 0.2 mm cells) with up to 6 skin filaments per layer,
   0.1..100 MHz, 30 validation points solved by the contract.
 
+The error at a validation point is ``relative_errors``: each entry's miss
+over its ports' ``sqrt(X_ii X_jj)``, in R and in L, the measure the
+refinement checks with.  The first run (0.12.0) measured against the
+largest entry of each matrix.
+
 Writes a JSON with ``environment`` and ``decision``.
 
     .venv/bin/python experiments/port_sweep_benchmark.py --out docs/PORT_SWEEP_RESULTS.json
@@ -54,7 +59,7 @@ def main() -> None:
 
     import scipy
 
-    from electrical.port_network import refine_frequencies
+    from electrical.port_network import refine_frequencies, relative_errors
     from electrical.sheet_peec import solve_port_impedance_problem
     from test_port_impedance_contract import _problem
     from test_port_sweep import _synthetic
@@ -84,9 +89,8 @@ def main() -> None:
                                            forms=forms)
                 worst_r = worst_l = 0.0
                 for f, z in exact.items():
-                    guess = sweep.at(f).z_ohm
-                    worst_r = max(worst_r, float(np.abs(guess.real - z.real).max() / np.abs(z.real).max()))
-                    worst_l = max(worst_l, float(np.abs(guess.imag - z.imag).max() / np.abs(z.imag).max()))
+                    r_error, l_error = relative_errors(sweep.at(f).z_ohm, z, f)
+                    worst_r, worst_l = max(worst_r, r_error), max(worst_l, l_error)
                 rows.append({
                     "copper": name, "band_hz": list(band), "resistance_form": forms[0], "inductance_form": forms[1],
                     "tolerance": tolerance, "solves": len(sweep.points), "converged": sweep.converged,
@@ -114,7 +118,8 @@ def main() -> None:
         "environment": {"cpu": _cpu_model(), "cpu_count": os.cpu_count(), "platform": platform.platform(),
                         "python": platform.python_version(), "numpy": np.__version__, "scipy": scipy.__version__,
                         "device": "CPU"},
-        "settings": {"two_strips": settings, "minimum_ratio": 1.05, "maximum_solves": args.maximum_solves,
+        "settings": {"error_measure": "per entry, over sqrt(X_ii X_jj) of the solved R or L (relative_errors)",
+                     "two_strips": settings, "minimum_ratio": 1.05, "maximum_solves": args.maximum_solves,
                      "two_strips_mean_solve_s": float(np.mean(solve_seconds)) if solve_seconds else None},
         "rows": rows,
         "decision": {

@@ -38,6 +38,7 @@ from .sweep import (
     PortImpedanceSweep,
     SweepPoint,
     refine_frequencies,
+    relative_errors,
 )
 
 __all__ = [
@@ -49,6 +50,7 @@ __all__ = [
     "PortImpedanceSweep",
     "SweepPoint",
     "refine_frequencies",
+    "relative_errors",
     "VoltageSource",
     "Tie",
     "TabulatedImpedance",

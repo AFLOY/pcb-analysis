@@ -170,6 +170,20 @@ def test_narrow_intervals_asked_for_leave_the_sweep_converged() -> None:
     assert tight.converged is False and len(tight.points) == 5
 
 
+def test_each_entry_is_checked_against_its_own_ports() -> None:
+    from electrical.port_network import relative_errors
+
+    # port A 1 nH, port B 100 nH, coupled by 5 nH; A's self term 5 % off
+    omega = 2 * math.pi * 1e6
+    solved = 1j * omega * np.array([[1e-9, 5e-9], [5e-9, 100e-9]])
+    predicted = solved + 1j * omega * np.array([[0.05e-9, 0.0], [0.0, 0.0]])
+    assert relative_errors(predicted, solved, 1e6)[1] == pytest.approx(0.05)  # against the largest entry: 5e-4
+    coupled = solved + 1j * omega * np.array([[0.0, 0.1e-9], [0.1e-9, 0.0]])
+    assert relative_errors(coupled, solved, 1e6)[1] == pytest.approx(0.1 / math.sqrt(100))
+    one = np.array([[2e-3 + 1j * omega * 4e-9]])
+    assert relative_errors(one * 1.01, one, 1e6) == pytest.approx((0.01, 0.01))
+
+
 def test_an_interpolated_matrix_says_whether_its_solves_converged() -> None:
     @dataclass(frozen=True)
     class Flagged(Copper):

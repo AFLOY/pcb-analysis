@@ -197,10 +197,15 @@ word), `PortImpedanceResult.at` and `network_emission`.
 `refine_frequencies(solve, frequencies, tolerance=0.01, maximum_solves=24,
 minimum_ratio=1.05)` chooses the solves.  Each interval between solved points
 is checked at its geometric midpoint: the copper is solved there and compared
-with what the interpolation over the points solved so far predicted, R and L
-each against the largest entry of its own matrix.  An interval that misses is
-split and its halves checked in turn.  The checks (`FrequencyCheck`) are kept
-with the sweep, and `converged` says whether every interval met the tolerance before a split got narrower than
+with what the interpolation over the points solved so far predicted.  The
+miss is taken entry by entry against the entry's own ports,
+`|dX_ij| / sqrt(X_ii X_jj)` of the solved R (and L) matrix
+(`relative_errors`): a port's self term against itself, a coupling against
+the scale of its coupling coefficient.  Against the largest entry, as until
+0.12.1, a port with a small self impedance was checked against the largest
+port's.  An interval that misses is split and its halves checked in turn.
+The checks (`FrequencyCheck`) are kept with the sweep, and `converged` says
+whether every interval met the tolerance before a split got narrower than
 `minimum_ratio` or the solves ran out.  An interval between two frequencies
 asked for that is already that narrow is left unchecked and does not count
 against `converged`.
@@ -225,7 +230,12 @@ not at its own checks but at validation frequencies solved directly: a
 synthetic two-port (R from its DC value into `sqrt f` at 200 kHz, L falling
 from 12 to 9 nH around 1 MHz; 80 points over 10 kHz-100 MHz) and the
 contract's two strips with up to six skin filaments per layer (30 points over
-0.1-100 MHz; one solve 1.22 s on AMD Ryzen 7 9700X 8-Core Processor):
+0.1-100 MHz; one solve 1.24 s on AMD Ryzen 7 9700X 8-Core Processor).  Errors are
+`relative_errors`, each entry against its ports' `sqrt(X_ii X_jj)` as the
+refinement checks; the first run (0.12.0) took the largest entry of each
+matrix and differed only in the strips' `pchip-sqrt` rows (0.58 % in R at
+1 %, now 0.59 %; 31 solves at 0.2 %, now 33).  Both coppers have ports of
+like size, where the two measures nearly agree:
 
 | copper | R / L form | tolerance | solves | converged | worst R between checks | worst L between checks |
 |---|---|---:|---:|---|---:|---:|
@@ -239,8 +249,8 @@ contract's two strips with up to six skin filaments per layer (30 points over
 | synthetic | linear-log / linear-log | 0.002 | 80 | no | 0.06 % | 0.006 % |
 | two strips | linear-sqrt / pchip-log | 0.01 | 17 | yes | 1.92 % | 0.159 % |
 | two strips | linear-sqrt / pchip-log | 0.002 | 43 | yes | 0.12 % | 0.003 % |
-| two strips | pchip-sqrt / pchip-log | 0.01 | 15 | yes | 0.58 % | 0.019 % |
-| two strips | pchip-sqrt / pchip-log | 0.002 | 31 | no | 0.12 % | 0.002 % |
+| two strips | pchip-sqrt / pchip-log | 0.01 | 15 | yes | 0.59 % | 0.019 % |
+| two strips | pchip-sqrt / pchip-log | 0.002 | 33 | no | 0.12 % | 0.002 % |
 | two strips | pchip-log / pchip-log | 0.01 | 15 | yes | 0.84 % | 0.019 % |
 | two strips | pchip-log / pchip-log | 0.002 | 33 | no | 0.11 % | 0.002 % |
 | two strips | linear-log / linear-log | 0.01 | 27 | yes | 0.32 % | 0.062 % |

@@ -1,6 +1,6 @@
 {
  "benchmark": "port-impedance sweep: interpolation forms and frequency refinement",
- "measured_utc": "2026-11-01T16:48:37+00:00",
+ "measured_utc": "2026-11-02T10:50:33+00:00",
  "environment": {
   "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
   "cpu_count": 16,
@@ -11,13 +11,14 @@
   "device": "CPU"
  },
  "settings": {
+  "error_measure": "per entry, over sqrt(X_ii X_jj) of the solved R or L (relative_errors)",
   "two_strips": {
    "maximum_filaments": 6,
    "relative_tolerance": 1e-10
   },
   "minimum_ratio": 1.05,
   "maximum_solves": 80,
-  "two_strips_mean_solve_s": 1.2169579180571797
+  "two_strips_mean_solve_s": 1.2420053366810146
  },
  "rows": [
   {
@@ -33,7 +34,7 @@
    "converged": true,
    "validation_points": 80,
    "worst_validation_resistance_error": 0.0038018782036232436,
-   "worst_validation_inductance_error": 0.001137886526302693
+   "worst_validation_inductance_error": 0.0011378865263027749
   },
   {
    "copper": "synthetic",
@@ -47,8 +48,8 @@
    "solves": 33,
    "converged": true,
    "validation_points": 80,
-   "worst_validation_resistance_error": 0.00046450771764382795,
-   "worst_validation_inductance_error": 0.0004335057669181888
+   "worst_validation_resistance_error": 0.00046450771764388997,
+   "worst_validation_inductance_error": 0.0004335057669181901
   },
   {
    "copper": "synthetic",
@@ -62,8 +63,8 @@
    "solves": 9,
    "converged": true,
    "validation_points": 80,
-   "worst_validation_resistance_error": 0.0015034342555419935,
-   "worst_validation_inductance_error": 0.002106337920489814
+   "worst_validation_resistance_error": 0.0015034342555419933,
+   "worst_validation_inductance_error": 0.002106337920489864
   },
   {
    "copper": "synthetic",
@@ -77,8 +78,8 @@
    "solves": 15,
    "converged": true,
    "validation_points": 80,
-   "worst_validation_resistance_error": 0.0001770009077397325,
-   "worst_validation_inductance_error": 0.0004335057669181888
+   "worst_validation_resistance_error": 0.00017700090773973247,
+   "worst_validation_inductance_error": 0.0004335057669181901
   },
   {
    "copper": "synthetic",
@@ -92,8 +93,8 @@
    "solves": 15,
    "converged": true,
    "validation_points": 80,
-   "worst_validation_resistance_error": 0.003152205492267115,
-   "worst_validation_inductance_error": 0.0002777536242461939
+   "worst_validation_resistance_error": 0.0031522054922671146,
+   "worst_validation_inductance_error": 0.00027775362424613216
   },
   {
    "copper": "synthetic",
@@ -108,7 +109,7 @@
    "converged": true,
    "validation_points": 80,
    "worst_validation_resistance_error": 9.406098567141899e-05,
-   "worst_validation_inductance_error": 3.3379713880254844e-05
+   "worst_validation_inductance_error": 3.3379713880265936e-05
   },
   {
    "copper": "synthetic",
@@ -122,8 +123,8 @@
    "solves": 47,
    "converged": true,
    "validation_points": 80,
-   "worst_validation_resistance_error": 0.0024073516840249997,
-   "worst_validation_inductance_error": 0.0004413197480616505
+   "worst_validation_resistance_error": 0.002407351684025,
+   "worst_validation_inductance_error": 0.00044131974806159495
   },
   {
    "copper": "synthetic",
@@ -137,8 +138,8 @@
    "solves": 80,
    "converged": false,
    "validation_points": 80,
-   "worst_validation_resistance_error": 0.0006466960573122694,
-   "worst_validation_inductance_error": 6.47782001439002e-05
+   "worst_validation_resistance_error": 0.0006466960573124766,
+   "worst_validation_inductance_error": 6.477820014397635e-05
   },
   {
    "copper": "two strips",
@@ -152,8 +153,8 @@
    "solves": 17,
    "converged": true,
    "validation_points": 30,
-   "worst_validation_resistance_error": 0.01916455791481139,
-   "worst_validation_inductance_error": 0.0015947928220842822
+   "worst_validation_resistance_error": 0.01916475097341648,
+   "worst_validation_inductance_error": 0.0015947930041140719
   },
   {
    "copper": "two strips",
@@ -167,8 +168,8 @@
    "solves": 43,
    "converged": true,
    "validation_points": 30,
-   "worst_validation_resistance_error": 0.0011825523007586384,
-   "worst_validation_inductance_error": 2.5078031399818732e-05
+   "worst_validation_resistance_error": 0.0011825523007586382,
+   "worst_validation_inductance_error": 2.507827873175061e-05
   },
   {
    "copper": "two strips",
@@ -182,8 +183,8 @@
    "solves": 15,
    "converged": true,
    "validation_points": 30,
-   "worst_validation_resistance_error": 0.005834119924569811,
-   "worst_validation_inductance_error": 0.0001884029227693817
+   "worst_validation_resistance_error": 0.005858871361500049,
+   "worst_validation_inductance_error": 0.00018840292276928107
   },
   {
    "copper": "two strips",
@@ -194,11 +195,11 @@
    "resistance_form": "pchip-sqrt",
    "inductance_form": "pchip-log",
    "tolerance": 0.002,
-   "solves": 31,
+   "solves": 33,
    "converged": false,
    "validation_points": 30,
-   "worst_validation_resistance_error": 0.001155766550899432,
-   "worst_validation_inductance_error": 1.646919656213193e-05
+   "worst_validation_resistance_error": 0.0011557665508994317,
+   "worst_validation_inductance_error": 1.6469196562086033e-05
   },
   {
    "copper": "two strips",
@@ -212,8 +213,8 @@
    "solves": 15,
    "converged": true,
    "validation_points": 30,
-   "worst_validation_resistance_error": 0.00841602591353791,
-   "worst_validation_inductance_error": 0.0001884029227693817
+   "worst_validation_resistance_error": 0.008416025913537909,
+   "worst_validation_inductance_error": 0.00018840292276928107
   },
   {
    "copper": "two strips",
@@ -227,8 +228,8 @@
    "solves": 33,
    "converged": false,
    "validation_points": 30,
-   "worst_validation_resistance_error": 0.0011434163322129626,
-   "worst_validation_inductance_error": 1.646919656213193e-05
+   "worst_validation_resistance_error": 0.0011434163322129624,
+   "worst_validation_inductance_error": 1.6469196562086033e-05
   },
   {
    "copper": "two strips",
@@ -242,8 +243,8 @@
    "solves": 27,
    "converged": true,
    "validation_points": 30,
-   "worst_validation_resistance_error": 0.00321300314447163,
-   "worst_validation_inductance_error": 0.0006160129488987946
+   "worst_validation_resistance_error": 0.0032131301241602444,
+   "worst_validation_inductance_error": 0.000616012948898692
   },
   {
    "copper": "two strips",
@@ -257,8 +258,8 @@
    "solves": 71,
    "converged": false,
    "validation_points": 30,
-   "worst_validation_resistance_error": 0.0005198470678324607,
-   "worst_validation_inductance_error": 7.541873943543912e-05
+   "worst_validation_resistance_error": 0.0005198470678324608,
+   "worst_validation_inductance_error": 7.54187394353203e-05
   }
  ],
  "decision": {

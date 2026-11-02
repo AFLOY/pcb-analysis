@@ -26,8 +26,11 @@ extrapolated copper is a guess.
 solved points is checked at its geometric midpoint: the copper is solved
 there and compared with what the interpolation over the points solved so far
 predicted.  An interval whose prediction misses by more than the tolerance
-(in R or in L, each against the largest entry of its own matrix) is split and
-its halves checked in turn.  The checks are kept: they are the evidence that
+in R or in L is split and its halves checked in turn.  Each entry's miss is
+measured against its own ports' scale, ``sqrt(X_ii X_jj)`` of the solved R
+(or L) matrix (:func:`relative_errors`): a port's self term against itself
+and a coupling against what the coupling coefficient is measured on, so a
+port with a small self impedance is not checked against the largest one.  The checks are kept: they are the evidence that
 an interpolated value is good to the tolerance, measured before the checked
 point was added (after it is, the interpolation there is closer still).
 
@@ -79,9 +82,9 @@ class FrequencyCheck:
     high_hz: float
     frequency_hz: float
     resistance_error: float
-    """max |R_interpolated - R_solved| over max |R_solved|."""
+    """max over entries of |R_interpolated - R_solved| / sqrt(R_ii R_jj) (:func:`relative_errors`)."""
     inductance_error: float
-    """max |L_interpolated - L_solved| over max |L_solved|."""
+    """The same for L."""
     accepted: bool
 
 
@@ -118,14 +121,29 @@ def _interpolate(points: Sequence[Any], frequency_hz: float, forms: tuple[str, s
     return r.reshape(shape) + 1j * 2.0 * math.pi * f * l.reshape(shape)
 
 
-def _relative_errors(predicted: np.ndarray, solved: np.ndarray, frequency_hz: float) -> tuple[float, float]:
-    omega = 2.0 * math.pi * frequency_hz
-    r_scale = float(np.abs(solved.real).max()) or 1.0
-    l_scale = float(np.abs(solved.imag).max()) or 1.0
-    return (
-        float(np.abs(predicted.real - solved.real).max()) / r_scale,
-        float(np.abs(predicted.imag - solved.imag).max() / omega) / (l_scale / omega),
-    )
+def _entry_error(predicted: np.ndarray, solved: np.ndarray) -> float:
+    """max |predicted - solved| over each entry's ``sqrt(|s_ii s_jj|)`` (the largest |s| where that is 0)."""
+    diagonal = np.sqrt(np.abs(np.diagonal(solved)))
+    scale = np.outer(diagonal, diagonal)
+    fallback = float(np.abs(solved).max()) or 1.0
+    scale = np.where(scale > 0.0, scale, fallback)
+    return float((np.abs(predicted - solved) / scale).max())
+
+
+def relative_errors(predicted: np.ndarray, solved: np.ndarray, frequency_hz: float) -> tuple[float, float]:
+    """How far an interpolated impedance matrix is from the solved one, in R and in L.
+
+    Each entry's miss is divided by ``sqrt(X_ii X_jj)`` of the solved R (or
+    L) matrix and the largest ratio is returned: a self term relative to
+    itself, a coupling relative to the scale its coupling coefficient is
+    taken on (a passive matrix has ``|X_ij| <= sqrt(X_ii X_jj)``).  With
+    one port it is ``|dR| / R`` and ``|dL| / L``.
+    """
+    predicted = np.asarray(predicted, dtype=complex)
+    solved = np.asarray(solved, dtype=complex)
+    omega = 2.0 * math.pi * float(frequency_hz)
+    return (_entry_error(predicted.real, solved.real),
+            _entry_error(predicted.imag / omega, solved.imag / omega))
 
 
 class PortImpedanceSweep:
@@ -272,7 +290,7 @@ def refine_frequencies(
         predicted = _interpolate(points, middle, forms)
         actual = solve(middle)
         solved[middle] = actual
-        r_error, l_error = _relative_errors(predicted, np.asarray(actual.z_ohm, dtype=complex), middle)
+        r_error, l_error = relative_errors(predicted, np.asarray(actual.z_ohm, dtype=complex), middle)
         accepted = r_error <= tolerance and l_error <= tolerance
         checks.append(FrequencyCheck(low, high, middle, r_error, l_error, accepted))
         if not accepted:
@@ -287,4 +305,5 @@ __all__ = [
     "PortImpedanceSweep",
     "SweepPoint",
     "refine_frequencies",
+    "relative_errors",
 ]
