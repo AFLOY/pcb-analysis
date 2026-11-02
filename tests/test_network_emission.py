@@ -172,3 +172,32 @@ def test_a_graded_board_through_the_contract_closes_its_loops() -> None:
         network_emission(network, [solution], coppers, result.meshes, positions)
     with pytest.raises(ValueError, match="no mesh at"):
         network_emission(network, [solution], coppers, {1e6: mesh}, positions)
+
+
+def test_a_board_off_the_origin_radiates_as_the_same_board_at_it() -> None:
+    # Grid lines from a board frame (KiCad's, say): the copper's elements and
+    # the parts' must move together.  The moments' sum cannot see a shift of
+    # one set against the other; the positions and the field do.
+    emissions, dipoles = [], []
+    for origin_mm in (0.0, 50.0):
+        value = _problem(frequencies=(100e6,), vias=False)
+        value["grid"] = {"rows": 7, "columns": 43, "x_edges_mm": (origin_mm + np.arange(44) * 0.2).tolist(),
+                         "y_edges_mm": (origin_mm + np.arange(8) * 0.2).tolist()}
+        result = solve_port_impedance_problem(value, {"maximum_filaments": 1, "relative_tolerance": 1e-10},
+                                              keep_solutions=True)
+        problem = PortImpedanceProblem.from_mapping(value)
+        assert result.meshes[0].pitch_m == pytest.approx(2e-4) and result.meshes[0].grid.origin_m[0] == pytest.approx(origin_mm * 1e-3)
+        network = BoardNetwork(result.impedances,
+                               [Part("C1", "VIN.far", "GND.far", capacitor(1e-6, 2e-3, 0.5e-9))], ground="GND.near",
+                               current_sources=[CurrentSource("Q", "GND.near", "VIN.near", {100e6: 1.0})])
+        solution = network.solve(100e6)
+        emission = network_emission(network, [solution], {100e6: result.impedances[0]}, result.meshes_by_frequency,
+                                    problem.pad_positions_m())[0]
+        emissions.append(emission)
+        dipoles.append(emission.dipoles)
+    shift = np.array([50e-3, 50e-3, 0.0])
+    assert np.abs(dipoles[1].position_m - dipoles[0].position_m - shift).max() < 1e-12
+    # the two solves agree to the solver tolerance, not to the bit
+    assert np.abs(dipoles[1].moment_a_m - dipoles[0].moment_a_m).max() < 1e-7 * np.abs(dipoles[0].moment_a_m).max()
+    assert emissions[1].far_field_v_per_m == pytest.approx(emissions[0].far_field_v_per_m, rel=1e-6)
+    assert emissions[1].radiated_power_w == pytest.approx(emissions[0].radiated_power_w, rel=1e-6)

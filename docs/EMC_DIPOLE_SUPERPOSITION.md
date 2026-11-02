@@ -109,6 +109,14 @@ PGND, a switch current source and two capacitors):
 | superposed against the same port currents solved directly, 30 MHz: near-field H on a scan 3 mm above | 7.2e-13 relative |
 | the same, largest far field and radiated power at 3 m | 3.1e-14 / 2.8e-13 relative |
 | a graded board through the port contract (pFFT operator) | moments sum to zero (< 1e-7) |
+| the board on grid lines 50 mm off the origin, against it at the origin, 100 MHz | elements moved by the offset to 5.6e-17 m; far field 2.1e-12, power 6.4e-14 relative |
+
+The copper's elements and the pads' centres are in the grid's frame, from
+its first grid lines: a board stated in its own frame (`x_edges_mm` from the
+board's origin) radiates as the same board at the origin.  Until 0.12.1 a
+uniform grid's copper elements were placed from zero while the pads followed
+the grid lines, so the parts' elements sat off the copper by the grid's
+origin; the moments' sum cannot see such a shift, the positions can.
 
 The part path is a straight line between pad centres at the copper's
 heights: a component's own loop (its height, its leads) is not represented.

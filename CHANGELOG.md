@@ -22,6 +22,11 @@ Fixes from Kicad_PowerOpt's review of 0.12.0.
   names the copper's pad `C2:VIN`. The message names the copper's pads of
   the same part. A pad of the parts alone joined by two or more elements is
   a node as before.
+- `dipoles_from_sheet_peec` places a uniform grid's elements from its first
+  grid lines (`mesh.grid.origin_m`), as it did a graded grid's and as
+  `PortImpedanceProblem.pad_positions_m()` places the pads. A board stated
+  on grid lines off the origin had its parts' elements off the copper by
+  that origin in `network_dipoles` and `network_emission`.
 - `network_emission` takes the meshes as one `SheetMesh` or a mapping by
   frequency; `PortImpedanceResult.meshes_by_frequency` gives the mapping.
   Its docstring named `PortImpedanceResult.meshes`, a tuple without

@@ -209,7 +209,8 @@ def dipoles_from_sheet_peec(mesh, solution) -> CurrentDipoles:
     two cell centres (one pitch on a uniform grid, the centres' distance on a
     graded one); its element sits midway, on the layer's ``z_m``.  A via
     branch spans the two layers' heights at its cell's centre.  Positions are
-    in the grid's frame.  Branch currents are positive from the leaving node
+    in the grid's frame, counted from its first grid lines
+    (``mesh.grid.origin_m``) on a uniform grid as on a graded one.  Branch currents are positive from the leaving node
     to the entering node, which is ``+x``, ``+y``, and lower-to-upper
     respectively.
     """
@@ -217,6 +218,7 @@ def dipoles_from_sheet_peec(mesh, solution) -> CurrentDipoles:
     if mesh.pitch_m is None:
         return _dipoles_on_graded_grid(mesh, solution)
     pitch = float(mesh.pitch_m)
+    x0, y0 = mesh.grid.origin_m
     heights = np.asarray([layer.z_m for layer in mesh.stackup.layers], dtype=np.float64)
     current = np.asarray(solution.branch_current, dtype=np.complex128)
     if current.shape != (mesh.branch_count,):
@@ -235,16 +237,16 @@ def dipoles_from_sheet_peec(mesh, solution) -> CurrentDipoles:
     positions = np.empty((mesh.branch_count, 3), dtype=np.float64)
     moments = np.zeros((mesh.branch_count, 3), dtype=np.complex128)
     positions[:count_x] = np.column_stack(
-        ((branch_x[:, 2] + 1.0) * pitch, (branch_x[:, 1] + 0.5) * pitch, heights[branch_x[:, 0]])
+        (x0 + (branch_x[:, 2] + 1.0) * pitch, y0 + (branch_x[:, 1] + 0.5) * pitch, heights[branch_x[:, 0]])
     )
     moments[:count_x, 0] = current[:count_x] * pitch
     positions[count_x : count_x + count_y] = np.column_stack(
-        ((branch_y[:, 2] + 0.5) * pitch, (branch_y[:, 1] + 1.0) * pitch, heights[branch_y[:, 0]])
+        (x0 + (branch_y[:, 2] + 0.5) * pitch, y0 + (branch_y[:, 1] + 1.0) * pitch, heights[branch_y[:, 0]])
     )
     moments[count_x : count_x + count_y, 1] = current[count_x : count_x + count_y] * pitch
     lower, upper = heights[vias[:, 0]], heights[vias[:, 1]]
     positions[count_x + count_y :] = np.column_stack(
-        ((vias[:, 3] + 0.5) * pitch, (vias[:, 2] + 0.5) * pitch, 0.5 * (lower + upper))
+        (x0 + (vias[:, 3] + 0.5) * pitch, y0 + (vias[:, 2] + 0.5) * pitch, 0.5 * (lower + upper))
     )
     moments[count_x + count_y :, 2] = current[count_x + count_y :] * (upper - lower)
     return CurrentDipoles(positions, moments)
