@@ -1411,8 +1411,8 @@ NEAR_SOLVE_COLUMNS = 2
 # every size measured (0.30 to 0.53 of its time on a 33 x 30 mm two-layer
 # plane from 24k to 599k unknowns) and its peak RSS stays within 8 to 10 KB per
 # unknown; this is where that peak, at its largest per unknown, reaches 4 GB
-# (docs/SHEET_PRECONDITIONER_AUTO_RESULTS.json).  On four layers a tenth of a
-# millimetre apart block did not finish a 30-port solve of 83k unknowns in
+# (docs/SHEET_PRECONDITIONER_AUTO_RESULTS.json).  On four layers with 0.2 mm
+# between the outer pairs block did not finish a 30-port solve of 83k unknowns in
 # 15 minutes where near took 100 s (docs/PORT_IMPEDANCE_SCALE_RESULTS.json).
 # A fixed size rather than the memory free at the time keeps the choice, and
 # so the bits, the same on every machine.
