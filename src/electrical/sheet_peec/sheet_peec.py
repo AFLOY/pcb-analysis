@@ -1405,13 +1405,18 @@ def _near_impedance(
 NEAR_SOLVE_COLUMNS = 2
 
 
-# Above this many saddle-point unknowns (branches + nodes) the whole-matrix LU
-# of the near preconditioner costs more memory than the block elimination
-# saves in iterations: on a 33 x 30 mm two-layer plane at 800 kHz the near
-# variant needed 2.2 GB and 27 s at 64k branches where block needed 0.5 GB
-# and 21 s, while at 20k branches near was faster (2.1 s against 4.0 s) at
-# 0.3 GB (docs/SHEET_PRECONDITIONER_RESULTS.json).
-AUTO_BLOCK_FROM_UNKNOWNS = 60_000
+# From this many saddle-point unknowns (branches + nodes) ``auto`` takes the
+# block elimination instead of the near LU, for memory alone.  With the near
+# field kept on each branch's own layer the near LU is faster than block at
+# every size measured (0.30 to 0.53 of its time on a 33 x 30 mm two-layer
+# plane from 24k to 599k unknowns) and its peak RSS stays within 8 to 10 KB per
+# unknown; this is where that peak, at its largest per unknown, reaches 4 GB
+# (docs/SHEET_PRECONDITIONER_AUTO_RESULTS.json).  On four layers a tenth of a
+# millimetre apart block did not finish a 30-port solve of 83k unknowns in
+# 15 minutes where near took 100 s (docs/PORT_IMPEDANCE_SCALE_RESULTS.json).
+# A fixed size rather than the memory free at the time keeps the choice, and
+# so the bits, the same on every machine.
+AUTO_BLOCK_FROM_UNKNOWNS = 400_000
 
 # Strips the ``block`` preconditioner factors the near-field impedance in;
 # 1 factors it whole.  Four is the fastest on the preconditioner benchmark's
