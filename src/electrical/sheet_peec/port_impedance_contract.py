@@ -334,7 +334,8 @@ def solve_port_impedance_problem(
     (1e-9), ``maximum_iterations`` (200), ``restart`` (120),
     ``preconditioner`` (``auto``), ``near_tiles``, ``cells_per_skin_depth``,
     ``maximum_filaments``, ``operator`` and the ``pfft_*`` keys.
-    The solve runs on the CPU; ``execution_backend`` other than ``cpu`` is refused.
+    ``execution_backend`` ``cuda`` (with ``device_id``) solves on the device,
+    with no fallback to the CPU; the default is ``cpu``.
     ``keep_solutions`` keeps each port's solve and the mesh it is on, for
     :meth:`SheetPortImpedance.superpose`.
 
@@ -355,8 +356,9 @@ def solve_port_impedance_problem(
     ``result.sweep()``).  Without it only the frequencies stated are solved.
     """
     settings = dict(settings or {})
-    if str(settings.get("execution_backend", "cpu")) != "cpu":
-        raise ValueError("the port-impedance solve runs on the CPU only (execution_backend='cpu')")
+    backend = str(settings.get("execution_backend", "cpu"))
+    if backend not in {"cpu", "cuda"}:
+        raise ValueError("execution_backend must be 'cpu' or 'cuda'")
     if settings.get("fallback_backend") is not None:
         raise ValueError("port-impedance solves do not allow implicit backend fallback")
     problem = value if isinstance(value, PortImpedanceProblem) else PortImpedanceProblem.from_mapping(value)
@@ -367,6 +369,8 @@ def solve_port_impedance_problem(
         "restart": int(settings.get("restart", 120)),
         "preconditioner": str(settings.get("preconditioner", "auto")),
         "near_tiles": None if settings.get("near_tiles") is None else int(settings["near_tiles"]),
+        "backend": backend,
+        "device_id": int(settings.get("device_id", 0)),
     }
 
     warm_start = bool(settings.get("warm_start", True))
@@ -440,7 +444,7 @@ def solve_port_impedance_problem(
         impedances=tuple(impedances),
         metrics={
             "backend": "sheet_peec",
-            "execution_backend": "cpu",
+            "execution_backend": backend,
             "meshes_built": len(built),
             "relative_tolerance": solve_arguments["tolerance"],
             "frequencies": records,

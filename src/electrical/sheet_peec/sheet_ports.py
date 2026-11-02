@@ -173,6 +173,8 @@ def solve_port_impedance(
     near_tiles: int | None = None,
     keep_solutions: bool = False,
     initial: SheetPortImpedance | None = None,
+    backend: str = "cpu",
+    device_id: int = 0,
 ) -> SheetPortImpedance:
     """The impedance matrix between the ports ``references`` names (port -> its reference pad).
 
@@ -183,6 +185,10 @@ def solve_port_impedance(
     ``initial``: the same ports on the same mesh solved at another frequency
     with their solves kept; each port's solve starts from its solve there
     (``solve_sheet_cases``' ``initial``).
+    ``backend="cuda"`` solves the ports on the device
+    (:func:`~electrical.sheet_peec.sheet_cuda.solve_sheet_cases_cuda`, one
+    after another, sharing the operator and the factored preconditioner);
+    ``near_tiles`` is the CPU's block preconditioner's and does not apply.
     """
     by_name = {pad.name: pad for pad in pads}
     if len(by_name) != len(pads):
@@ -212,11 +218,22 @@ def solve_port_impedance(
         current[references[port]] = -1.0
         return [terminal for pad in pads for terminal in _pad_terminals(mesh, pad, current[pad.name])]
 
-    solutions = solve_sheet_cases(
-        mesh, operator, [excitation(port) for port in ports], frequency_hz=frequency_hz, tolerance=tolerance,
-        max_iterations=max_iterations, restart=restart, preconditioner=preconditioner, near_tiles=near_tiles,
-        keep_terminal_components=True, initial=starts,
-    )
+    if backend == "cpu":
+        solutions = solve_sheet_cases(
+            mesh, operator, [excitation(port) for port in ports], frequency_hz=frequency_hz, tolerance=tolerance,
+            max_iterations=max_iterations, restart=restart, preconditioner=preconditioner, near_tiles=near_tiles,
+            keep_terminal_components=True, initial=starts,
+        )
+    elif backend == "cuda":
+        from .sheet_cuda import solve_sheet_cases_cuda
+
+        solutions = [solution for solution, _ in solve_sheet_cases_cuda(
+            mesh, operator, [excitation(port) for port in ports], frequency_hz=frequency_hz, tolerance=tolerance,
+            max_iterations=max_iterations, restart=restart, preconditioner=preconditioner, device_id=device_id,
+            keep_terminal_components=True, initial=starts,
+        )]
+    else:
+        raise ValueError("backend must be 'cpu' or 'cuda'")
     z = np.zeros((len(ports), len(ports)), dtype=complex)
     for k, solution in enumerate(solutions):
         for j, port in enumerate(ports):

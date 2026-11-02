@@ -93,3 +93,25 @@ def test_barrel_vias_solve_on_cuda_as_on_the_cpu() -> None:
         results[model] = cuda
     # the barrels move the field on the device as they do on the host
     assert results["barrel"].voltage_phasor != results["column"].voltage_phasor
+
+
+def test_port_impedance_on_cuda_as_on_the_cpu() -> None:
+    """The port matrix needs keep_terminal_components (undriven conductors solved) and warm starts on the device."""
+    _require_cuda_device()
+    from electrical.sheet_peec import solve_port_impedance_problem
+    from test_port_impedance_contract import _problem as _port_problem
+
+    problem = _port_problem(frequencies=(1e6, 1e7, 1e8))  # two strips, two conductors
+    common = {"maximum_filaments": 1, "relative_tolerance": 1e-10, "maximum_iterations": 240, "restart": 60}
+    cpu = solve_port_impedance_problem(problem, {**common, "warm_start": False})
+    cuda = solve_port_impedance_problem(problem, {**common, "execution_backend": "cuda", "device_id": 0})
+    assert cuda.metrics["execution_backend"] == "cuda"
+    assert [r["started_from_hz"] for r in cuda.metrics["frequencies"]] == [None, 1e6, 1e7]
+    for a, b in zip(cpu.impedances, cuda.impedances):
+        assert all(a.converged) and all(b.converged)
+        # the second conductor carries no net current in the first port's solve: its open voltage is read
+        assert abs(b.z_ohm[1, 0]) > 0.0
+        assert abs(b.z_ohm - a.z_ohm).max() < 1e-7 * abs(a.z_ohm).max()
+    cold = solve_port_impedance_problem(problem, {**common, "execution_backend": "cuda", "warm_start": False})
+    assert (sum(r["maximum_iterations"] for r in cuda.metrics["frequencies"][1:])
+            < sum(r["maximum_iterations"] for r in cold.metrics["frequencies"][1:]))

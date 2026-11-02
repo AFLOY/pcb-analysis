@@ -230,5 +230,5 @@ def test_bad_problems_are_refused() -> None:
     with pytest.raises(ValueError, match="merge into one pad"):
         PortImpedanceProblem.from_mapping(
             _problem(pads=same_part, ports=[{"pad": "U1.1", "reference": "U1.2"}], merge_pins=True))
-    with pytest.raises(ValueError, match="CPU only"):
-        solve_port_impedance_problem(_problem(), {"execution_backend": "cuda"})
+    with pytest.raises(ValueError, match="'cpu' or 'cuda'"):
+        solve_port_impedance_problem(_problem(), {"execution_backend": "rocm"})
