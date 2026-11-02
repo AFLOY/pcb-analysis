@@ -66,6 +66,33 @@ speedup on this GPU. Operator and sparse-factor reuse across cases, CUDA Graph
 capture, or a custom Krylov implementation are still needed before claiming a
 performance advantage.
 
+## Port impedance at a placement candidate's size (`SHEET_CUDA_PORT_T4_RESULTS.json`)
+
+The 30-port four-layer fixture of `SHEET_PEEC.md` (28,195 cells, 81,152
+unknowns in the near LU, 1/10/30/100 MHz, tolerance 1e-6, warm starts) on a
+Colab Tesla T4 (CuPy 14.0.1, two host CPUs, `_pcbcore_cuda` built for sm_75).
+The suite passed there (562 passed; the CUDA tests all ran), and the CUDA
+port matrix agrees with the CPU's to 1e-7 of its largest entry
+(`tests/test_sheet_cuda_device.py`).  The time does not:
+
+| Run | Result |
+|---|---|
+| CUDA, four frequencies | stopped after 2400 s, unfinished |
+| CPU on the same host, thread budget 2 | 1508 s (125 / 238 / 364 / 781 s; 37 / 67 / 101 / 271 iterations) |
+| CUDA, 3 ports at 1 MHz | 5.0 s preparation, then 40 s per port |
+| one near LU application on the device / one operator application | 486 ms / 5.4 ms |
+| near LU applied on the host instead (probe), 3 ports | 8 s per port at 1 MHz, 29 s at 30 MHz |
+
+The device triangular solves of the near LU take nearly all of it: one
+application costs 90 times the operator's.  Applying the same SuperLU
+factors on the host and copying the vectors was five times faster per port,
+and still slower than the CPU's lockstep solve of all 30 ports (the CPU path
+took 171 s on eight threads, `PORT_IMPEDANCE_SCALE_RESULTS.json`).
+**Decision:** the CUDA port path stays as a working path, not a faster one;
+the host-applied LU is measured, not adopted (one fixture, one device; the
+probe is not kept).  Solving the ports in lockstep on the device, or a
+preconditioner without triangular solves, would be the next candidates.
+
 ## Solver boundary
 
 The CUDA path keeps kernel spectra, batched FFTs, sparse incidence products,

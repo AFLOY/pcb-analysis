@@ -996,7 +996,9 @@ keys and defaults (`relative_tolerance` 1e-9, `maximum_iterations` 200,
 - `execution_backend="cuda"` solves the ports on the device one after
   another (`solve_sheet_cases_cuda`): the operator moves once, the near
   preconditioner is factored once per frequency, the undriven conductors are
-  kept (`keep_terminal_components`) and the warm start is the CPU's.
+  kept (`keep_terminal_components`) and the warm start is the CPU's.  It
+  agrees with the CPU and is not faster: on a T4 the device triangular solves
+  of the near LU dominate (`SHEET_CUDA_RESULTS.md`).
 - `keep_solutions=True` keeps each port's solve and its mesh
   (`PortImpedanceResult.meshes`) for `SheetPortImpedance.superpose`.
 - `settings["frequency_refinement"]` (`relative_tolerance` 0.01,

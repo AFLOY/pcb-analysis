@@ -1,0 +1,24 @@
+{
+ "benchmark": "port-impedance solve on CUDA at a placement candidate's size (Colab T4)",
+ "measured_utc": "2026-11-02",
+ "provenance": "transcribed from the run outputs printed on the Colab runtime, which was deleted afterwards; rows 'scale' come from experiments/port_impedance_scale_benchmark.py at ebc53b0, rows 'probe' from one-off probes not kept in the repository",
+ "environment": {"device": "Tesla T4 (15360 MiB)", "cupy": "14.0.1", "numpy": "2.1.3", "python": "3.13", "host_cpus": 2,
+                 "host_memory_gb": 12, "openblas_num_threads": "1", "native": "_pcbcore and _pcbcore_cuda built with PCB_NATIVE_CUDA=ON, CMAKE_CUDA_ARCHITECTURES=75"},
+ "fixture": {"name": "synthetic_boost_4layer", "cells": 28195, "ports": 30, "saddle_unknowns_near_lu": 81152,
+             "near_saddle_nnz": 681721, "frequencies_hz": [1e6, 1e7, 3e7, 1e8], "maximum_filaments": 1},
+ "tests": {"suite": "562 passed, 8 skipped (OCP/KiCad data only) at 780d5b0; tests/test_cuda_core.py, test_sheet_cuda_device.py, test_sheet_pfft.py, test_port_impedance_contract.py: 26 passed, none skipped"},
+ "rows": [
+  {"kind": "scale", "variant": "cuda-warm-1e-6", "finished": false, "stopped_after_seconds": 2400.1},
+  {"kind": "scale", "variant": "near-warm-1e-6 (CPU, thread budget 2)", "finished": true, "total_seconds": 1508.0,
+   "solve_seconds": [125.2, 238.2, 363.5, 780.7], "maximum_iterations": [37, 67, 101, 271], "peak_rss_mb": 4870},
+  {"kind": "probe", "what": "device near LU, 3 ports, 1 MHz, tolerance 1e-6", "prepare_ms": 4987, "solve_ms_per_port": [40162, 39834, 39927], "restart_cycles_per_port": 3},
+  {"kind": "probe", "what": "one application, 81,152 unknowns, 1 MHz", "near_factor_seconds": 5.08, "device_lu_solve_ms": 486.3, "device_operator_apply_ms": 5.4},
+  {"kind": "probe", "what": "near LU applied on the host (SciPy SuperLU, vectors copied), 3 ports, 1 MHz", "prepare_ms": 5547, "solve_ms_per_port": [7675, 8519, 8365]},
+  {"kind": "probe", "what": "near LU applied on the host, 3 ports, 30 MHz", "prepare_ms": 4502, "solve_ms_per_port": [29096, 29670, 28719]}
+ ],
+ "decision": {
+  "cuda_port_path": "kept as a working path (the matrices agree with the CPU to 1e-7 in tests/test_sheet_cuda_device.py), not a faster one: on this device it did not finish the four frequencies in 2400 s where the CPU took 1508 s on two threads and 171 s on eight (PORT_IMPEDANCE_SCALE_RESULTS.json)",
+  "host_applied_near_lu": "measured, not adopted: 5x faster per port than the device triangular solves at 1 MHz (8 s against 40 s) but still slower than the CPU lockstep solve of all 30 ports; not measured on other fixtures or devices",
+  "bottleneck": "the device triangular solves of the near LU (486 ms per application against 5.4 ms for the operator); ports are solved one after another, not in lockstep"
+ }
+}

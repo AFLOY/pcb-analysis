@@ -26,7 +26,10 @@ Versions before 0.7.0 were not tagged; see the Git history.
   contract's `execution_backend="cuda"`. `solve_sheet_cases_cuda` solves
   several excitations of one mesh on the device, sharing the operator and
   the factored preconditioner, with `keep_terminal_components` and `initial`
-  as on the CPU.
+  as on the CPU. It agrees with the CPU and is not faster: on a T4 the
+  30-port fixture did not finish in 2400 s (CPU: 171 s on eight threads),
+  the near LU's device triangular solves taking 90x the operator's time
+  (`docs/SHEET_CUDA_RESULTS.md`).
 - `electrical.port_network.PortImpedanceSweep` interpolates the copper's
   pad-port matrix over a band from a few solves (R: PCHIP in `sqrt f`, L:
   PCHIP in `log f`, chosen by measurement in
