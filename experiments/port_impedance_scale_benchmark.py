@@ -191,6 +191,7 @@ def main() -> None:
     parser.add_argument("--variants", nargs="+", default=[v for v in VARIANTS if not v.startswith("cuda")])
     parser.add_argument("--save-reference-z", help="write the reference variant's Z to this .npz")
     parser.add_argument("--reference-z", help="compare with the Z of an earlier reference run (.npz) instead")
+    parser.add_argument("--reference-variant", default=REFERENCE, help="the variant of this run the others are compared with")
     parser.add_argument("--time-limit", type=float, default=900.0, help="seconds a variant may take before it is stopped")
     parser.add_argument("--variant", help=argparse.SUPPRESS)
     parser.add_argument("--variant-out", help=argparse.SUPPRESS)
@@ -221,7 +222,7 @@ def main() -> None:
         summary = {k: v for k, v in rows[name].items() if k not in ("z_real", "z_imag", "ports")}
         print(json.dumps(summary), flush=True)
 
-    reference = rows.get(REFERENCE)
+    reference = rows.get(args.reference_variant)
     z_ref = None
     if reference and reference["finished"]:
         z_ref = np.array(reference["z_real"]) + 1j * np.array(reference["z_imag"])
@@ -274,7 +275,8 @@ def main() -> None:
                     "vias": len(value["vertical_connections"]), "frequencies_hz": args.frequencies,
                     "maximum_filaments": args.filaments},
         "time_limit_seconds": args.time_limit,
-        "reference": REFERENCE if not args.reference_z else f"{REFERENCE} (stored: {Path(args.reference_z).name})",
+        "reference": (args.reference_variant if args.reference_variant in rows
+                      else f"{REFERENCE} (stored: {Path(args.reference_z).name})" if args.reference_z else None),
         "rows": list(rows.values()),
         "decision": decision,
     }
