@@ -51,8 +51,9 @@ def test_multilayer_nonuniform_contract_matches_cpu_on_cuda() -> None:
     assert cuda.metrics["filament_counts"] == {
         "F.Cu": 1,
         "In1.Cu": 1,
-        "B.Cu": 3,
+        "B.Cu": 2,  # the middle sliver joins its neighbours (fix/filament-sliver)
     }
+    assert cuda.metrics["filament_counts"] == cpu.metrics["filament_counts"]
 
     voltage_difference = max(
         abs(cpu.voltage_phasor[node] - cuda.voltage_phasor[node])
