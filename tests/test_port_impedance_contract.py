@@ -97,6 +97,32 @@ def test_the_contract_gives_the_matrix_of_the_same_copper_built_by_hand() -> Non
         np.testing.assert_array_equal(result.at(frequency).z_ohm, direct.z_ohm)
 
 
+def test_a_port_solve_started_from_another_frequency() -> None:
+    mesh, operator = _direct()
+    pads = [_pad("VIN.near", 0, 1), _pad("VIN.far", 0, LENGTH), _pad("GND.near", 1, 1), _pad("GND.far", 1, LENGTH)]
+    references = {"VIN.near": "VIN.far", "GND.near": "GND.far"}
+    at_10 = solve_port_impedance(mesh, operator, pads, references, frequency_hz=1e7, keep_solutions=True)
+    cold = solve_port_impedance(mesh, operator, pads, references, frequency_hz=3e7)
+    warm = solve_port_impedance(mesh, operator, pads, references, frequency_hz=3e7, initial=at_10)
+    assert np.abs(warm.z_ohm - cold.z_ohm).max() < 1e-7 * np.abs(cold.z_ohm).max()
+    assert max(warm.iterations) < max(cold.iterations)
+    # its own solution is a start that needs no iteration
+    again = solve_port_impedance(mesh, operator, pads, references, frequency_hz=1e7, initial=at_10)
+    assert again.iterations == (0, 0)
+    np.testing.assert_allclose(again.z_ohm, at_10.z_ohm, rtol=1e-12)
+    # one port: the excitation solved alone, not in lockstep
+    one = {"VIN.near": "VIN.far"}
+    alone_10 = solve_port_impedance(mesh, operator, pads, one, frequency_hz=1e7, keep_solutions=True)
+    alone_cold = solve_port_impedance(mesh, operator, pads, one, frequency_hz=3e7)
+    alone_warm = solve_port_impedance(mesh, operator, pads, one, frequency_hz=3e7, initial=alone_10)
+    assert abs(alone_warm.z_ohm[0, 0] - alone_cold.z_ohm[0, 0]) < 1e-7 * abs(alone_cold.z_ohm[0, 0])
+    assert alone_warm.iterations[0] < alone_cold.iterations[0]
+    with pytest.raises(ValueError, match="keep_solutions"):
+        solve_port_impedance(mesh, operator, pads, references, frequency_hz=3e7, initial=cold)
+    with pytest.raises(ValueError, match="same ports"):
+        solve_port_impedance(mesh, operator, pads, {"VIN.near": "VIN.far"}, frequency_hz=3e7, initial=at_10)
+
+
 def test_vertical_connections_and_a_pad_over_two_layers() -> None:
     # the strips joined by vias at the far end: one conductor, a plated pad at the near end
     pads = [{"name": "J1.1", "cells": _cells("F.Cu", 1) + _cells("In1.Cu", 1)},

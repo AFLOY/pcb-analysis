@@ -172,6 +172,7 @@ def solve_port_impedance(
     preconditioner: str = "auto",
     near_tiles: int | None = None,
     keep_solutions: bool = False,
+    initial: SheetPortImpedance | None = None,
 ) -> SheetPortImpedance:
     """The impedance matrix between the ports ``references`` names (port -> its reference pad).
 
@@ -179,6 +180,9 @@ def solve_port_impedance(
     reference have to be on one conductor (the solve refuses a component that
     does not close its current); ports of different conductors couple.
     ``keep_solutions`` keeps each port's solve for :meth:`SheetPortImpedance.superpose`.
+    ``initial``: the same ports on the same mesh solved at another frequency
+    with their solves kept; each port's solve starts from its solve there
+    (``solve_sheet_cases``' ``initial``).
     """
     by_name = {pad.name: pad for pad in pads}
     if len(by_name) != len(pads):
@@ -194,6 +198,13 @@ def solve_port_impedance(
     if not ports:
         raise ValueError("no ports")
     nodes = {pad.name: _pad_nodes(mesh, pad) for pad in pads}
+    starts = None
+    if initial is not None:
+        if initial.solutions is None:
+            raise ValueError("initial was solved without keep_solutions")
+        if tuple(initial.ports) != ports or dict(initial.references) != dict(references):
+            raise ValueError("initial is not of the same ports")
+        starts = list(initial.solutions)
 
     def excitation(port: str) -> list[Terminal]:
         current = {name: 0.0 for name in by_name}
@@ -204,7 +215,7 @@ def solve_port_impedance(
     solutions = solve_sheet_cases(
         mesh, operator, [excitation(port) for port in ports], frequency_hz=frequency_hz, tolerance=tolerance,
         max_iterations=max_iterations, restart=restart, preconditioner=preconditioner, near_tiles=near_tiles,
-        keep_terminal_components=True,
+        keep_terminal_components=True, initial=starts,
     )
     z = np.zeros((len(ports), len(ports)), dtype=complex)
     for k, solution in enumerate(solutions):

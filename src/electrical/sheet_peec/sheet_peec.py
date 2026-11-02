@@ -767,6 +767,7 @@ def solve_sheet_cases(
     preconditioner: str = "auto",
     near_tiles: int | None = None,
     keep_terminal_components: bool = False,
+    initial: Sequence[SheetSolution | None] | None = None,
 ) -> list[SheetSolution]:
     """Solve several excitations of one mesh, in the order given.
 
@@ -786,6 +787,15 @@ def solve_sheet_cases(
     voltages on it are then those induced by the driven copper: the
     open-port voltages a multi-port impedance is read from.  Off by default,
     when such a component is left out like any undriven island.
+
+    ``initial`` (one entry per excitation, ``None`` for none): a solution of
+    the same mesh and terminals at another frequency, from which the Krylov
+    solve starts.  Its branch currents and node potentials are split into
+    their real and imaginary parts and the start is the combination of those
+    four vectors with the least residual here: between frequencies the
+    current's distribution moves slowly and the potentials scale with the
+    impedance, so the start is already close.  It changes the iterations,
+    not the solution's tolerance.
     """
     if preconditioner not in ("auto", "near", "block", "diagonal"):
         raise ValueError("preconditioner must be 'auto', 'near', 'block' or 'diagonal'")
@@ -799,6 +809,8 @@ def solve_sheet_cases(
     frequency_hz = float(frequency_hz)
     if frequency_hz < 0.0:
         raise ValueError("frequency must be non-negative")
+    if initial is not None and len(initial) != len(terminal_sets):
+        raise ValueError("initial needs one entry (or None) per excitation")
 
     incidence = mesh.incidence()
     resistance = mesh.resistances()
@@ -823,6 +835,7 @@ def solve_sheet_cases(
         solved = _solve_ac(
             mesh, operator, resistance, cases[members[0]][1], [cases[k][0] for k in members],
             frequency_hz, tolerance, max_iterations, restart, preconditioner, near_tiles,
+            None if initial is None else [initial[k] for k in members],
         )
         for index, solution in zip(members, solved):
             solutions[index] = solution
@@ -943,6 +956,7 @@ def _solve_ac(
     restart: int,
     preconditioner: str,
     near_tiles: int,
+    initial_list: list[SheetSolution | None] | None = None,
 ) -> list[SheetSolution]:
     keep, grounded, dropped = reduction.keep, reduction.grounded, reduction.dropped
     active_branches, active_incidence, reduced = (
@@ -1030,6 +1044,36 @@ def _solve_ac(
             [impedance(currents) - reduced @ voltages, reduced.T @ currents]
         )
 
+    def saddle_block(block: np.ndarray) -> np.ndarray:
+        currents = block[:branches]
+        voltages = block[branches:]
+        return np.concatenate(
+            [impedance_block(currents) - reduced @ voltages, reduced.T @ currents]
+        )
+
+    def starts(given: list[SheetSolution | None], right_hand_sides: np.ndarray) -> np.ndarray | None:
+        """Each column's start from its solution at another frequency: the least-residual mix of its parts."""
+        columns = [k for k, solution in enumerate(given) if solution is not None]
+        if not columns:
+            return None
+        parts = []
+        for k in columns:
+            solution = given[k]
+            if solution.branch_current.shape != (mesh.branch_count,) or solution.node_voltage.shape != (mesh.node_count,):
+                raise ValueError("an initial solution is not of this mesh")
+            current = solution.branch_current[active_branches]
+            voltage = solution.node_voltage[keep]
+            no_current, no_voltage = np.zeros(branches), np.zeros(unknowns)
+            parts += [np.concatenate([current.real, no_voltage]), np.concatenate([current.imag, no_voltage]),
+                      np.concatenate([no_current, voltage.real]), np.concatenate([no_current, voltage.imag])]
+        basis = np.stack(parts, axis=1).astype(np.complex128)
+        images = saddle_block(basis)
+        x0 = np.zeros(right_hand_sides.shape, dtype=np.complex128)
+        for n, k in enumerate(columns):
+            coefficients, *_ = np.linalg.lstsq(images[:, 4 * n:4 * n + 4], right_hand_sides[:, k], rcond=None)
+            x0[:, k] = basis[:, 4 * n:4 * n + 4] @ coefficients
+        return x0
+
     if preconditioner == "auto":
         preconditioner = choose_preconditioner(size)
     # The near block's strips are factored and solved on this pool; it lives
@@ -1049,10 +1093,11 @@ def _solve_ac(
             pool=pool,
         )
 
-        def solve_alone(injected: np.ndarray) -> SheetSolution:
+        def solve_alone(injected: np.ndarray, given: SheetSolution | None = None) -> SheetSolution:
             right_hand_side = np.concatenate(
                 [np.zeros(branches, dtype=np.complex128), injected[keep]]
             )
+            x0 = None if given is None else starts([given], right_hand_side[:, None])[:, 0]
             system = spla.LinearOperator((size, size), matvec=saddle, dtype=np.complex128)
             preconditioner = spla.LinearOperator(
                 (size, size), matvec=precondition, dtype=np.complex128
@@ -1065,6 +1110,7 @@ def _solve_ac(
             result, info = spla.gmres(
                 system,
                 right_hand_side,
+                x0=x0,
                 M=preconditioner,
                 rtol=tolerance,
                 restart=restart,
@@ -1091,21 +1137,14 @@ def _solve_ac(
                 undriven_nodes=dropped,
             )
 
-        def solve_together(chunk: list[np.ndarray]) -> list[SheetSolution]:
+        def solve_together(chunk: list[np.ndarray], given: list[SheetSolution | None]) -> list[SheetSolution]:
             right_hand_sides = np.stack(
                 [np.concatenate([np.zeros(branches, dtype=np.complex128), injected[keep]]) for injected in chunk],
                 axis=1,
             )
-
-            def saddle_block(block: np.ndarray) -> np.ndarray:
-                currents = block[:branches]
-                voltages = block[branches:]
-                return np.concatenate(
-                    [impedance_block(currents) - reduced @ voltages, reduced.T @ currents]
-                )
-
             results, infos, iterations = _gmres_lockstep(
-                saddle_block, precondition, right_hand_sides, tolerance, restart, max_iterations
+                saddle_block, precondition, right_hand_sides, tolerance, restart, max_iterations,
+                x0=starts(given, right_hand_sides),
             )
             residuals = np.linalg.norm(saddle_block(results) - right_hand_sides, axis=0) / np.maximum(
                 np.linalg.norm(right_hand_sides, axis=0), 1e-30
@@ -1131,14 +1170,16 @@ def _solve_ac(
                 )
             return solutions
 
+        given_list = initial_list if initial_list is not None else [None] * len(injected_list)
         if len(injected_list) == 1:
-            return [solve_alone(injected_list[0])]
+            return [solve_alone(injected_list[0], given_list[0])]
         # Measured once the factors exist, so the memory they took is not counted twice.
         width = lockstep_width(len(injected_list), lockstep_column_bytes(size, restart, operator))
         solutions: list[SheetSolution] = []
         for first in range(0, len(injected_list), width):
             chunk = injected_list[first : first + width]
-            solutions.extend([solve_alone(chunk[0])] if len(chunk) == 1 else solve_together(chunk))
+            given = given_list[first : first + width]
+            solutions.extend([solve_alone(chunk[0], given[0])] if len(chunk) == 1 else solve_together(chunk, given))
         return solutions
     finally:
         if pool is not None:
@@ -1154,6 +1195,7 @@ def _gmres_lockstep(
     rtol: float,
     restart: int,
     maxiter: int,
+    x0: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[int], list[int]]:
     """Restarted, left-preconditioned GMRES on each column of ``right_hand_sides``, in lockstep.
 
@@ -1163,8 +1205,9 @@ def _gmres_lockstep(
     called on the block of columns still iterating, which is what lets a
     group of excitations read the preconditioner's factors once per step.
     A column whose inner loop has stopped waits for the others before the
-    restart.  Returns the solutions, each column's ``info`` (0: converged,
-    else ``maxiter``) and its inner iteration count.
+    restart.  ``x0`` starts the columns as ``x0`` starts SciPy's.  Returns
+    the solutions, each column's ``info`` (0: converged, else ``maxiter``)
+    and its inner iteration count.
     """
 
     size, count = right_hand_sides.shape
@@ -1172,7 +1215,7 @@ def _gmres_lockstep(
     eps = np.finfo(dtype).eps
     restart = min(restart, size)
     lartg = get_lapack_funcs("lartg", dtype=dtype)
-    x = np.zeros((size, count), dtype=dtype)
+    x = np.zeros((size, count), dtype=dtype) if x0 is None else np.array(x0, dtype=dtype)
     bnrm2 = [float(np.linalg.norm(right_hand_sides[:, j])) for j in range(count)]
     atol = [max(0.0, float(rtol) * value) for value in bnrm2]
     done = [value == 0.0 for value in bnrm2]
@@ -1187,6 +1230,12 @@ def _gmres_lockstep(
     presid = [0.0] * count
     rnorm = [0.0] * count
     r = right_hand_sides.copy()
+    started = [j for j in range(count) if not done[j] and x[:, j].any()]
+    if started:
+        r[:, started] = right_hand_sides[:, started] - matvec(x[:, started])
+        for j in started:
+            rnorm[j] = float(np.linalg.norm(r[:, j]))
+            done[j] = rnorm[j] < atol[j]
     width = min(thread_budget(), count)
     pool = ThreadPoolExecutor(max_workers=width) if width > 1 else None
     try:
