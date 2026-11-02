@@ -244,9 +244,11 @@ def refine_frequencies(
     ``solve(f)`` returns the copper's matrix at ``f``.  Every interval is
     checked at its geometric midpoint until its R and L predictions are within
     ``tolerance`` of the solve there, an interval is narrower than
-    ``minimum_ratio`` (then accepted as it stands, and the sweep not
-    converged), or ``maximum_solves`` solves have been spent (the rest
-    unchecked, the sweep not converged).
+    ``minimum_ratio`` (then accepted as it stands), or ``maximum_solves``
+    solves have been spent (the rest unchecked, the sweep not converged).
+    A narrow interval between two frequencies asked for is left unchecked
+    and costs the sweep nothing; one a failed check split down to that width
+    did not meet the tolerance, and the sweep is not converged.
     """
     initial = sorted({float(f) for f in frequencies_hz})
     if len(initial) < 2:
@@ -255,12 +257,12 @@ def refine_frequencies(
         raise ValueError("tolerance must be positive and minimum_ratio above 1")
     solved = {f: solve(f) for f in initial}
     checks: list[FrequencyCheck] = []
-    pending = list(zip(initial[:-1], initial[1:]))
+    pending = [(low, high, False) for low, high in zip(initial[:-1], initial[1:])]
     converged = True
     while pending:
-        low, high = pending.pop(0)
+        low, high, split = pending.pop(0)
         if high / low < minimum_ratio:
-            converged = False
+            converged = converged and not split
             continue
         if len(solved) >= maximum_solves:
             converged = False
@@ -274,7 +276,7 @@ def refine_frequencies(
         accepted = r_error <= tolerance and l_error <= tolerance
         checks.append(FrequencyCheck(low, high, middle, r_error, l_error, accepted))
         if not accepted:
-            pending.extend([(low, middle), (middle, high)])
+            pending.extend([(low, middle, True), (middle, high, True)])
     return PortImpedanceSweep(solved.values(), checks, tolerance=tolerance, converged=converged, forms=forms)
 
 

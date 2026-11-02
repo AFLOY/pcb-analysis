@@ -200,8 +200,10 @@ is checked at its geometric midpoint: the copper is solved there and compared
 with what the interpolation over the points solved so far predicted, R and L
 each against the largest entry of its own matrix.  An interval that misses is
 split and its halves checked in turn.  The checks (`FrequencyCheck`) are kept
-with the sweep, and `converged` says whether every interval met the tolerance
-before an interval got narrower than `minimum_ratio` or the solves ran out.
+with the sweep, and `converged` says whether every interval met the tolerance before a split got narrower than
+`minimum_ratio` or the solves ran out.  An interval between two frequencies
+asked for that is already that narrow is left unchecked and does not count
+against `converged`.
 The port-impedance contract runs it with
 `settings["frequency_refinement"]` (`docs/SHEET_PEEC.md`).
 

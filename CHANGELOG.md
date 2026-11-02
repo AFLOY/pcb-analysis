@@ -40,6 +40,9 @@ Fixes from Kicad_PowerOpt's review of 0.12.0.
   `SweepPoint.converged`) says whether the port solves behind the copper's
   matrix converged; a matrix from solves that did not converge raises a
   `RuntimeWarning` once per frequency. `None` where the copper has no flags.
+- `refine_frequencies` no longer reports a sweep unconverged because two
+  frequencies asked for are closer than `minimum_ratio`; a split that gets
+  that narrow still does.
 
 ## 0.12.0
 

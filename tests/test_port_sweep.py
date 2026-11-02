@@ -158,6 +158,18 @@ def test_frequencies_match_within_their_rounding_not_to_the_bit() -> None:
     assert not near.interpolated and near.frequency_hz == middle
 
 
+def test_narrow_intervals_asked_for_leave_the_sweep_converged() -> None:
+    # 1.00 and 1.01 MHz are both asked for: the interval between them is
+    # narrower than minimum_ratio and needs no check; it is no failure
+    sweep = refine_frequencies(_synthetic, [1e4, 1e6, 1.01e6, 1e8], tolerance=1e-2)
+    assert sweep.converged
+    assert not any(c.low_hz == 1e6 and c.high_hz == 1.01e6 for c in sweep.checks)
+    # split down to that width by failed checks, the tolerance was not met
+    # (1e4, 1e8) fails, its halves (ratio 100) fail, their halves (ratio 10) are narrower than 50
+    tight = refine_frequencies(_synthetic, [1e4, 1e8], tolerance=1e-9, minimum_ratio=50.0)
+    assert tight.converged is False and len(tight.points) == 5
+
+
 def test_an_interpolated_matrix_says_whether_its_solves_converged() -> None:
     @dataclass(frozen=True)
     class Flagged(Copper):
