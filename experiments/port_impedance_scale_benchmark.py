@@ -149,6 +149,9 @@ VARIANTS = {
     "near-warm-1e-9": {"preconditioner": "near", "relative_tolerance": 1e-9, "warm_start": True},
     "near-cold-1e-6": {"preconditioner": "near", "relative_tolerance": 1e-6, "warm_start": False},
     "near-warm-1e-6": {"preconditioner": "near", "relative_tolerance": 1e-6, "warm_start": True},
+    # the device path (not in the default list): ports one after another, warm
+    "cuda-warm-1e-6": {"preconditioner": "near", "relative_tolerance": 1e-6, "warm_start": True,
+                       "execution_backend": "cuda"},
 }
 REFERENCE = "near-cold-1e-9"
 CANDIDATE, BASELINE = "near-warm-1e-6", "near-cold-1e-6"
@@ -164,8 +167,14 @@ def _run_variant(name: str, frequencies: list[float], threads: int, filaments: i
     started = time.perf_counter()
     with thread_budget_scope(threads):
         result = solve_port_impedance_problem(value, settings)
+    device = "CPU"
+    if settings.get("execution_backend") == "cuda":
+        import cupy as cp
+
+        props = cp.cuda.runtime.getDeviceProperties(int(settings.get("device_id", 0)))
+        device = f"{props['name'].decode()} (CuPy {cp.__version__})"
     out.write_text(json.dumps({
-        "variant": name, "settings": settings, "total_seconds": time.perf_counter() - started,
+        "variant": name, "settings": settings, "device": device, "total_seconds": time.perf_counter() - started,
         "peak_rss_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0,
         "frequencies": result.metrics["frequencies"], "ports": list(result.ports),
         "z_real": [z.z_ohm.real.tolist() for z in result.impedances],
@@ -179,7 +188,9 @@ def main() -> None:
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--frequencies", type=float, nargs="+", default=[1e6, 10e6, 30e6, 100e6])
     parser.add_argument("--filaments", type=int, default=1)
-    parser.add_argument("--variants", nargs="+", default=list(VARIANTS))
+    parser.add_argument("--variants", nargs="+", default=[v for v in VARIANTS if not v.startswith("cuda")])
+    parser.add_argument("--save-reference-z", help="write the reference variant's Z to this .npz")
+    parser.add_argument("--reference-z", help="compare with the Z of an earlier reference run (.npz) instead")
     parser.add_argument("--time-limit", type=float, default=900.0, help="seconds a variant may take before it is stopped")
     parser.add_argument("--variant", help=argparse.SUPPRESS)
     parser.add_argument("--variant-out", help=argparse.SUPPRESS)
@@ -211,8 +222,17 @@ def main() -> None:
         print(json.dumps(summary), flush=True)
 
     reference = rows.get(REFERENCE)
+    z_ref = None
     if reference and reference["finished"]:
         z_ref = np.array(reference["z_real"]) + 1j * np.array(reference["z_imag"])
+        if args.save_reference_z:
+            np.savez(args.save_reference_z, z=z_ref, frequencies_hz=np.array(args.frequencies))
+    elif args.reference_z:
+        stored = np.load(args.reference_z)
+        if list(stored["frequencies_hz"]) != list(args.frequencies):
+            raise SystemExit("the stored reference was solved at other frequencies")
+        z_ref = stored["z"]
+    if z_ref is not None:
         for row in rows.values():
             if row["finished"]:
                 z = np.array(row["z_real"]) + 1j * np.array(row["z_imag"])
@@ -254,7 +274,7 @@ def main() -> None:
                     "vias": len(value["vertical_connections"]), "frequencies_hz": args.frequencies,
                     "maximum_filaments": args.filaments},
         "time_limit_seconds": args.time_limit,
-        "reference": REFERENCE,
+        "reference": REFERENCE if not args.reference_z else f"{REFERENCE} (stored: {Path(args.reference_z).name})",
         "rows": list(rows.values()),
         "decision": decision,
     }
