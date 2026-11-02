@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Mapping
 
 import numpy as np
@@ -333,10 +333,19 @@ def solve_port_impedance_problem(
     Settings, as the current-field contract reads them: ``relative_tolerance``
     (1e-9), ``maximum_iterations`` (200), ``restart`` (120),
     ``preconditioner`` (``auto``), ``near_tiles``, ``cells_per_skin_depth``,
-    ``maximum_filaments``, ``operator`` and the ``pfft_*`` keys.  The solve
-    runs on the CPU; ``execution_backend`` other than ``cpu`` is refused.
+    ``maximum_filaments``, ``operator`` and the ``pfft_*`` keys.
+    The solve runs on the CPU; ``execution_backend`` other than ``cpu`` is refused.
     ``keep_solutions`` keeps each port's solve and the mesh it is on, for
     :meth:`SheetPortImpedance.superpose`.
+
+    ``warm_start`` (on by default): a frequency whose mesh an earlier one
+    already solved starts each port's Krylov solve from that port's solve at
+    the solved frequency nearest to it (in log f), as
+    ``solve_port_impedance``'s ``initial`` does.  The matrix is the same to
+    the tolerance, its bits depend on which frequencies were solved before
+    it, and on a four-layer board of 28k cells and 30 ports it halved the
+    solve (``docs/PORT_IMPEDANCE_SCALE_RESULTS.json``).  ``False`` solves
+    every frequency from zero.
 
     ``frequency_refinement`` (``relative_tolerance`` 0.01, ``maximum_solves``
     24, ``minimum_ratio`` 1.05) solves the problem's frequencies and then the
@@ -360,6 +369,7 @@ def solve_port_impedance_problem(
         "near_tiles": None if settings.get("near_tiles") is None else int(settings["near_tiles"]),
     }
 
+    warm_start = bool(settings.get("warm_start", True))
     refinement = settings.get("frequency_refinement")
     built: dict[tuple, tuple[SheetMesh, Any, list[PortPad]]] = {}
     solved: dict[float, tuple[SheetPortImpedance, SheetMesh, dict[str, Any]]] = {}
@@ -373,8 +383,14 @@ def solve_port_impedance_problem(
             built[key] = (mesh, operator, _port_pads(problem, geometry.filament_of))
         mesh, operator, pads = built[key]
         prepared = time.perf_counter()
+        nearest = None
+        if warm_start:
+            same_mesh = [f for f, (_, other, _) in solved.items() if other is mesh]
+            if same_mesh:
+                nearest = min(same_mesh, key=lambda f: (abs(math.log(f / frequency)), f))
         impedance = solve_port_impedance(
-            mesh, operator, pads, ports, frequency_hz=frequency, keep_solutions=keep_solutions, **solve_arguments
+            mesh, operator, pads, ports, frequency_hz=frequency, keep_solutions=keep_solutions or warm_start,
+            initial=None if nearest is None else solved[nearest][0], **solve_arguments
         )
         solved[frequency] = (impedance, mesh, {
             "frequency_hz": frequency,
@@ -386,6 +402,7 @@ def solve_port_impedance_problem(
             "solve_seconds": time.perf_counter() - prepared,
             "converged": all(impedance.converged),
             "maximum_iterations": max(impedance.iterations),
+            "started_from_hz": nearest,
         })
         return impedance
 
@@ -411,7 +428,7 @@ def solve_port_impedance_problem(
             "checks": [asdict(check) for check in sweep.checks],
         }
     order = sorted(solved)
-    impedances = [solved[f][0] for f in order]
+    impedances = [solved[f][0] if keep_solutions else replace(solved[f][0], solutions=None) for f in order]
     meshes = [solved[f][1] for f in order]
     records = [solved[f][2] for f in order]
     groups = problem.pad_groups()

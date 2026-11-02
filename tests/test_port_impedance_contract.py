@@ -84,7 +84,7 @@ def _pad(name, layer, col, rows=range(1, 1 + WIDTH)):
 
 
 def test_the_contract_gives_the_matrix_of_the_same_copper_built_by_hand() -> None:
-    result = solve_port_impedance_problem(_problem(frequencies=(1e7, 1e6)), ONE_FILAMENT)
+    result = solve_port_impedance_problem(_problem(frequencies=(1e7, 1e6)), {**ONE_FILAMENT, "warm_start": False})
     assert result.ports == ("VIN.near", "GND.near")
     assert result.references == {"VIN.near": "VIN.far", "GND.near": "GND.far"}
     assert result.frequencies_hz == (1e6, 1e7)  # ascending
@@ -95,6 +95,20 @@ def test_the_contract_gives_the_matrix_of_the_same_copper_built_by_hand() -> Non
         direct = solve_port_impedance(mesh, operator, pads, {"VIN.near": "VIN.far", "GND.near": "GND.far"},
                                       frequency_hz=frequency, tolerance=1e-10, max_iterations=200, restart=120)
         np.testing.assert_array_equal(result.at(frequency).z_ohm, direct.z_ohm)
+
+
+def test_a_frequency_starts_from_the_nearest_one_solved_on_its_mesh() -> None:
+    frequencies = (1e6, 1e8, 1e7)
+    cold = solve_port_impedance_problem(_problem(frequencies=frequencies), {**ONE_FILAMENT, "warm_start": False})
+    warm = solve_port_impedance_problem(_problem(frequencies=frequencies), ONE_FILAMENT)
+    started = {r["frequency_hz"]: r["started_from_hz"] for r in warm.metrics["frequencies"]}
+    assert started == {1e6: None, 1e7: 1e6, 1e8: 1e7}  # solved in ascending order
+    assert all(r["started_from_hz"] is None for r in cold.metrics["frequencies"])
+    assert all(z.solutions is None for z in warm.impedances)  # kept to start from, not returned
+    for a, b in zip(cold.impedances, warm.impedances):
+        assert np.abs(a.z_ohm - b.z_ohm).max() < 1e-7 * np.abs(a.z_ohm).max()
+    later = [r["maximum_iterations"] for r in warm.metrics["frequencies"][1:]]
+    assert sum(later) < sum(r["maximum_iterations"] for r in cold.metrics["frequencies"][1:])
 
 
 def test_a_port_solve_started_from_another_frequency() -> None:
