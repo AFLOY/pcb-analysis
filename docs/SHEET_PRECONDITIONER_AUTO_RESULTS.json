@@ -1,0 +1,215 @@
+{
+  "benchmark": "sheet_preconditioner_benchmark",
+  "timestamp_utc": "2026-11-02T02:13:38.561151+00:00",
+  "environment": {
+    "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+    "cpu_count": 16,
+    "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "openblas_num_threads": "1"
+  },
+  "settings": {
+    "footprint_mm": [
+      33.0,
+      30.3
+    ],
+    "frequency_hz": 800000.0,
+    "pitches_mm": "0.5,0.25,0.2,0.15,0.1",
+    "near_up_to_mm": 0.1,
+    "variants": "block,near",
+    "tolerance": 1e-09,
+    "restart": 120,
+    "max_iterations": 400
+  },
+  "cases": [
+    {
+      "pitch_mm": 0.5,
+      "results": {
+        "block": {
+          "variant": "block",
+          "pitch_mm": 0.5,
+          "cells": 8052,
+          "branches": 15890,
+          "nodes": 8052,
+          "iterations": 238,
+          "converged": true,
+          "residual": 2.45706580179624e-10,
+          "wall_s": 1.43,
+          "peak_rss_mb": 168,
+          "max_relative_difference_vs_near": 1.314203852234123e-10
+        },
+        "near": {
+          "variant": "near",
+          "pitch_mm": 0.5,
+          "cells": 8052,
+          "branches": 15890,
+          "nodes": 8052,
+          "iterations": 32,
+          "converged": true,
+          "residual": 5.9457805635991175e-12,
+          "wall_s": 0.64,
+          "peak_rss_mb": 213,
+          "max_relative_difference_vs_near": 0.0
+        }
+      }
+    },
+    {
+      "pitch_mm": 0.25,
+      "results": {
+        "block": {
+          "variant": "block",
+          "pitch_mm": 0.25,
+          "cells": 31944,
+          "branches": 63422,
+          "nodes": 31944,
+          "iterations": 383,
+          "converged": true,
+          "residual": 1.1417077017343458e-10,
+          "wall_s": 9.21,
+          "peak_rss_mb": 415,
+          "max_relative_difference_vs_near": 1.1159225084562962e-10
+        },
+        "near": {
+          "variant": "near",
+          "pitch_mm": 0.25,
+          "cells": 31944,
+          "branches": 63422,
+          "nodes": 31944,
+          "iterations": 38,
+          "converged": true,
+          "residual": 8.074186276018327e-12,
+          "wall_s": 4.69,
+          "peak_rss_mb": 769,
+          "max_relative_difference_vs_near": 0.0
+        }
+      }
+    },
+    {
+      "pitch_mm": 0.2,
+      "results": {
+        "block": {
+          "variant": "block",
+          "pitch_mm": 0.2,
+          "cells": 50160,
+          "branches": 99721,
+          "nodes": 50160,
+          "iterations": 410,
+          "converged": true,
+          "residual": 9.386440111525307e-10,
+          "wall_s": 15.68,
+          "peak_rss_mb": 613,
+          "max_relative_difference_vs_near": 2.472437866002292e-10
+        },
+        "near": {
+          "variant": "near",
+          "pitch_mm": 0.2,
+          "cells": 50160,
+          "branches": 99721,
+          "nodes": 50160,
+          "iterations": 41,
+          "converged": true,
+          "residual": 1.0324875212512636e-11,
+          "wall_s": 8.37,
+          "peak_rss_mb": 1227,
+          "max_relative_difference_vs_near": 0.0
+        }
+      }
+    },
+    {
+      "pitch_mm": 0.15,
+      "results": {
+        "block": {
+          "variant": "block",
+          "pitch_mm": 0.15,
+          "cells": 88880,
+          "branches": 176956,
+          "nodes": 88880,
+          "iterations": 641,
+          "converged": true,
+          "residual": 5.199831656692005e-10,
+          "wall_s": 46.86,
+          "peak_rss_mb": 1026,
+          "max_relative_difference_vs_near": 3.6137836560477207e-10
+        },
+        "near": {
+          "variant": "near",
+          "pitch_mm": 0.15,
+          "cells": 88880,
+          "branches": 176956,
+          "nodes": 88880,
+          "iterations": 44,
+          "converged": true,
+          "residual": 1.2568245629760112e-11,
+          "wall_s": 20.8,
+          "peak_rss_mb": 2371,
+          "max_relative_difference_vs_near": 0.0
+        }
+      }
+    },
+    {
+      "pitch_mm": 0.1,
+      "results": {
+        "block": {
+          "variant": "block",
+          "pitch_mm": 0.1,
+          "cells": 199980,
+          "branches": 398734,
+          "nodes": 199980,
+          "iterations": 1184,
+          "converged": true,
+          "residual": 7.403462937362833e-10,
+          "wall_s": 225.39,
+          "peak_rss_mb": 2310,
+          "max_relative_difference_vs_near": 4.916520216212538e-10
+        },
+        "near": {
+          "variant": "near",
+          "pitch_mm": 0.1,
+          "cells": 199980,
+          "branches": 398734,
+          "nodes": 199980,
+          "iterations": 49,
+          "converged": true,
+          "residual": 3.8927183219057496e-11,
+          "wall_s": 67.88,
+          "peak_rss_mb": 5955,
+          "max_relative_difference_vs_near": 0.0
+        }
+      }
+    }
+  ],
+  "decision": {
+    "adopted": false,
+    "criteria": "where the near variant fits: block converges, within 1.5x its wall time, at most 1/4 of its peak RSS, same solution to 1e-06",
+    "criteria_note": "the first run of this benchmark judged block by its GMRES iteration count (3x near); that criterion was replaced by wall time before adoption, because an iteration of the near variant includes a saddle-point LU solve and an iteration of block two small ones, so iterations of the two are not the same unit; the iteration counts are recorded above unchanged",
+    "verdicts_per_pitch_with_near": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "auto_threshold": {
+      "near_memory_budget_mb": 4096,
+      "near_peak_mb_per_unknown": [
+        0.008896499874697185,
+        0.008063670490531217,
+        0.008186494619064458,
+        0.008919032787131916,
+        0.00994631827550383
+      ],
+      "near_peak_mb_per_unknown_max": 0.00994631827550383,
+      "near_up_to_unknowns": 411810,
+      "near_faster_than_block_at_every_size": true,
+      "near_over_block_wall": [
+        0.4475524475524476,
+        0.509229098805646,
+        0.5338010204081632,
+        0.4438753734528383,
+        0.30116686632059986
+      ],
+      "criteria": "near is chosen up to the saddle-point size at which its peak RSS, at the largest MB per unknown measured, reaches 4096 MB, when it is faster than block at every size measured"
+    }
+  }
+}

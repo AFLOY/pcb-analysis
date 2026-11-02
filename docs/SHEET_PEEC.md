@@ -476,9 +476,9 @@ Flow2 compute node, thread budget 48, `OPENBLAS_NUM_THREADS=1`:
 | own layer + the cells straight above and below | 176 | 105.6 | 22.0 | 156 | 3.054796 |
 | own layer (adopted) | 135 | 42.6 | 18.4 | 73 | 3.054797 |
 
-The reference at tolerance 1e-9 is 3.054796. The other near and block tables in
-this document predate the change; `block` factors the same `Z_near` and has
-not been measured again.
+The reference at tolerance 1e-9 is 3.054796. The near and block tables
+before the next section predate the change; the next section measures both
+again with it.
 
 ### Hot-loop preconditioner experiments that did not pay
 
@@ -588,6 +588,41 @@ evaluation of `power_module` at 0.1 mm ran in 3.1 GB with `block` where
 (3× near) and failed it; that criterion was replaced by wall time before
 adoption because an iteration of the two variants is not the same unit (the
 JSON records both the counts and the note).
+
+### Where auto switches to block, measured again (`SHEET_PRECONDITIONER_AUTO_RESULTS.json`)
+
+The 60k switch above was set when the near LU still carried the couplings
+across layers.  With the near field cut to each branch's own layer the same
+plane was measured again from 0.5 to 0.1 mm, near and block only
+(`experiments/sheet_preconditioner_benchmark.py --variants block,near
+--near-up-to-mm 0.1`, AMD Ryzen 7 9700X, Python 3.12.14, NumPy 2.3.5,
+`OPENBLAS_NUM_THREADS=1`, 800 kHz, tolerance 1e-9, restart 120, each variant
+in its own process):
+
+| Pitch (mm) | Saddle unknowns | Near wall (s) | Near peak RSS (MB) | GMRES iterations block / near | Block wall (s) | Block peak RSS (MB) | Block vs near |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0.5 | 23,942 | 0.64 | 213 | 238 / 32 | 1.43 | 168 | 1.3e-10 |
+| 0.25 | 95,366 | 4.69 | 769 | 383 / 38 | 9.21 | 415 | 1.1e-10 |
+| 0.2 | 149,881 | 8.37 | 1,227 | 410 / 41 | 15.68 | 613 | 2.5e-10 |
+| 0.15 | 265,836 | 20.8 | 2,371 | 641 / 44 | 46.86 | 1,026 | 3.6e-10 |
+| 0.1 | 598,714 | 67.88 | 5,955 | 1184 / 49 | 225.39 | 2,310 | 4.9e-10 |
+
+The near LU now fits where it was OOM-killed (0.2 mm: 1.2 GB) and is the
+faster variant at every size, at 0.30 to 0.53 of block's time; block keeps
+its memory advantage (about 4 KB of peak RSS per unknown against near's 8.1
+to 9.9 KB).  On four layers with 0.2 mm between the outer pairs block is no
+alternative at all: the 30-port fixture of the next section (83,440
+unknowns) did not finish its first frequency in 15 minutes with block, where
+near took 100 s.
+
+**Decision:** `auto` takes `near` below `AUTO_BLOCK_FROM_UNKNOWNS` = 400,000
+saddle-point unknowns and `block` from there, for memory alone: the size at
+which near's peak RSS, at the largest per-unknown figure measured, reaches
+4 GB (411,810, from the JSON's `decision.auto_threshold`).  The switch is a
+fixed size, not the memory free at solve time, so the choice and the bits of
+a solve do not depend on the machine.  Solves between 60k and 400k unknowns
+with `auto` now run near: faster, with about twice block's memory, and their
+bits move within the tolerance.
 
 ## The DC network on its own (`dc_network`)
 
@@ -939,8 +974,8 @@ pads, ports and frequencies, so a caller never builds a `SheetMesh`:
 rows; JSON round-trips the bits).  Settings are the current-field contract's
 keys and defaults (`relative_tolerance` 1e-9, `maximum_iterations` 200,
 `restart` 120, `preconditioner`, `near_tiles`, `maximum_filaments`,
-`cells_per_skin_depth`, `operator`, `pfft_*`).  The solve runs on the CPU;
-`execution_backend="cuda"` is refused.
+`cells_per_skin_depth`, `operator`, `pfft_*`), plus `warm_start` (on) and
+`execution_backend` (`cpu`, or `cuda` with `device_id`; no fallback).
 
 - A pad on several layers is a `PortPad` over those layers: its current is
   spread evenly over all its cells.  A current-field terminal instead divides
@@ -951,6 +986,17 @@ keys and defaults (`relative_tolerance` 1e-9, `maximum_iterations` 200,
 - The thickness is cut into filaments per frequency.  Frequencies that cut
   alike share one mesh and one inductance operator (`metrics["meshes_built"]`,
   and per frequency `mesh_reused`, `build_seconds`, `solve_seconds`).
+- `warm_start` (default on): a frequency whose mesh an earlier frequency
+  solved starts each port's GMRES from that port's solve at the solved
+  frequency nearest in log f (`started_from_hz` in its record).  The start is
+  the least-residual mix of that solve's real and imaginary branch currents
+  and node potentials (`solve_sheet_cases(initial=...)`,
+  `solve_port_impedance(initial=...)`).  The matrix agrees with a cold solve
+  to the tolerance; its bits depend on which frequencies were solved before.
+- `execution_backend="cuda"` solves the ports on the device one after
+  another (`solve_sheet_cases_cuda`): the operator moves once, the near
+  preconditioner is factored once per frequency, the undriven conductors are
+  kept (`keep_terminal_components`) and the warm start is the CPU's.
 - `keep_solutions=True` keeps each port's solve and its mesh
   (`PortImpedanceResult.meshes`) for `SheetPortImpedance.superpose`.
 - `settings["frequency_refinement"]` (`relative_tolerance` 0.01,
@@ -965,6 +1011,43 @@ Acceptance (`tests/test_port_impedance_contract.py`): on the two 5 x 40 cell
 strips, at 1 and 10 MHz, with vertical connections and a pad over two
 layers, and with merged pins, the contract's matrix is bit-identical to
 `solve_port_impedance` on the same copper built as a `SheetMesh` by hand.
+
+### A placement candidate's size (measured, `PORT_IMPEDANCE_SCALE_RESULTS.json`)
+
+Kicad_PowerOpt evaluates the top placements of each generation and needs a
+candidate's copper as ports in minutes: about 24,000 cells at 0.25 mm, 20
+to 40 ports, 3 to 5 frequencies, at most 5 minutes on 8 threads.
+`experiments/port_impedance_scale_benchmark.py` states a synthetic
+four-layer boost stage as `port-impedance-problem/v1`: 28,195 cells
+(F.Cu 10,159, In1.Cu 11,376, In2.Cu 2,520, B.Cu 4,140), 34 pads, 30 ports,
+196 barrel vias, layers 0.2, 1.2 and 0.2 mm apart, one filament per layer,
+solved at 1, 10, 30 and 100 MHz (83,440 saddle-point unknowns).  AMD Ryzen 7
+9700X, thread budget 8, Python 3.12.14, NumPy 2.3.5, SciPy 1.17.1,
+`OPENBLAS_NUM_THREADS=1`; each variant in its own process, stopped after
+900 s; Z compared with near, cold, 1e-9 (largest entry difference over the
+largest entry, per frequency, the worst shown):
+
+| Variant | Total (s) | Per frequency (s) | GMRES iterations (worst port) | Peak RSS (MB) | Z vs reference | R vs reference |
+|---|---:|---|---|---:|---:|---:|
+| auto (block at this size then), cold, 1e-9 | stopped after 900 s | — | — | — | — | — |
+| near, cold, 1e-9 (reference) | 541.4 | 19.8 / 45.1 / 100.1 / 376.3 | 52 / 110 / 259 / 950 | 3,958 | 0 | 0 |
+| near, warm, 1e-9 | 341.2 | 19.9 / 41.8 / 72.6 / 206.9 | 52 / 102 / 191 / 540 | 4,094 | 2.5e-10 | 2.5e-07 |
+| near, cold, 1e-6 | 346.9 | 14.2 / 29.1 / 66.6 / 237.0 | 37 / 76 / 187 / 654 | 4,056 | 2.4e-07 | 2.7e-04 |
+| near, warm, 1e-6 | 170.7 | 14.1 / 26.4 / 41.1 / 89.0 | 37 / 67 / 101 / 271 | 4,068 | 3.0e-08 | 4.1e-05 |
+
+GMRES iterations grow with frequency on these four close layers (the same-
+layer near field leaves the coupling across layers to the iterations, and it
+weighs more as the inductance outgrows the resistance); 100 MHz dominates.
+Starting each frequency from the one below halves the solve at either
+tolerance, and at 1e-6 it is also closer to the reference than the cold
+solve, because the start already is.
+
+**Decision:** warm starts adopted and on by default in the contract
+(`decision.warm_start_adopted`).  At 1e-6 the candidate meets the 5-minute
+target (171 s); at the contract's default 1e-9 it does not (341 s).  A
+caller that needs Z to a few parts in 1e8 (R to 4e-5 of the largest R) can
+set `relative_tolerance` to 1e-6; the default stays 1e-9.  The `auto` row
+predates the threshold change above; `auto` now takes near at this size.
 
 Measured device acceptance and CPU comparisons are in
 `docs/SHEET_CUDA_RESULTS.md`.

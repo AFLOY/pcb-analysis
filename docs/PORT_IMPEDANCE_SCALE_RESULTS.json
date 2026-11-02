@@ -1,0 +1,485 @@
+{
+ "benchmark": "port-impedance solve at a placement candidate's size",
+ "measured_utc": "2026-11-02T01:36:03+00:00",
+ "environment": {
+  "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+  "cpu_count": 16,
+  "threads": 8,
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "python": "3.12.14",
+  "numpy": "2.3.5",
+  "scipy": "1.17.1",
+  "device": "CPU",
+  "openblas_num_threads": "1",
+  "omp_num_threads": "1"
+ },
+ "fixture": {
+  "name": "synthetic_boost_4layer",
+  "pitch_mm": 0.25,
+  "cells": 28195,
+  "cells_by_layer": {
+   "F.Cu": 10159,
+   "In1.Cu": 11376,
+   "In2.Cu": 2520,
+   "B.Cu": 4140
+  },
+  "ports": 30,
+  "pads": 34,
+  "vias": 196,
+  "frequencies_hz": [
+   1000000.0,
+   10000000.0,
+   30000000.0,
+   100000000.0
+  ],
+  "maximum_filaments": 1
+ },
+ "time_limit_seconds": 900.0,
+ "reference": "near-cold-1e-9",
+ "rows": [
+  {
+   "variant": "auto-cold-1e-9",
+   "settings": {
+    "preconditioner": "auto",
+    "relative_tolerance": 1e-09,
+    "warm_start": false
+   },
+   "finished": false,
+   "stopped_after_seconds": 900.0225560700055
+  },
+  {
+   "variant": "near-cold-1e-9",
+   "settings": {
+    "maximum_filaments": 1,
+    "preconditioner": "near",
+    "relative_tolerance": 1e-09,
+    "warm_start": false
+   },
+   "total_seconds": 541.3819800009951,
+   "peak_rss_mb": 3958.234375,
+   "frequencies": [
+    {
+     "frequency_hz": 1000000.0,
+     "mesh_reused": false,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 0.062442004011245444,
+     "solve_seconds": 19.82248531098594,
+     "converged": true,
+     "maximum_iterations": 52,
+     "started_from_hz": null
+    },
+    {
+     "frequency_hz": 10000000.0,
+     "mesh_reused": true,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 5.5997021263465285e-05,
+     "solve_seconds": 45.08113874698756,
+     "converged": true,
+     "maximum_iterations": 110,
+     "started_from_hz": null
+    },
+    {
+     "frequency_hz": 30000000.0,
+     "mesh_reused": true,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 4.994499613530934e-05,
+     "solve_seconds": 100.10759848699672,
+     "converged": true,
+     "maximum_iterations": 259,
+     "started_from_hz": null
+    },
+    {
+     "frequency_hz": 100000000.0,
+     "mesh_reused": true,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 5.343198426999152e-05,
+     "solve_seconds": 376.298756927019,
+     "converged": true,
+     "maximum_iterations": 950,
+     "started_from_hz": null
+    }
+   ],
+   "ports": [
+    "CIN1.1",
+    "CIN1.2",
+    "CIN2.1",
+    "CIN2.2",
+    "CIN3.1",
+    "CIN3.2",
+    "CIN4.1",
+    "CIN4.2",
+    "L1.1",
+    "L1.2",
+    "Q1.2",
+    "Q1.3",
+    "D1.1",
+    "D1.2",
+    "COUT1.1",
+    "COUT1.2",
+    "COUT2.1",
+    "COUT2.2",
+    "COUT3.1",
+    "COUT3.2",
+    "COUT4.1",
+    "COUT4.2",
+    "COUT5.1",
+    "COUT5.2",
+    "COUT6.1",
+    "COUT6.2",
+    "U1.VIN",
+    "U1.PGND",
+    "U1.SW",
+    "J2.2"
+   ],
+   "finished": true,
+   "max_z_difference_vs_reference": [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "max_r_difference_vs_reference": [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "variant": "near-warm-1e-9",
+   "settings": {
+    "maximum_filaments": 1,
+    "preconditioner": "near",
+    "relative_tolerance": 1e-09,
+    "warm_start": true
+   },
+   "total_seconds": 341.2138911730144,
+   "peak_rss_mb": 4093.91015625,
+   "frequencies": [
+    {
+     "frequency_hz": 1000000.0,
+     "mesh_reused": false,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 0.06145173800177872,
+     "solve_seconds": 19.887584529002197,
+     "converged": true,
+     "maximum_iterations": 52,
+     "started_from_hz": null
+    },
+    {
+     "frequency_hz": 10000000.0,
+     "mesh_reused": true,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 5.307098035700619e-05,
+     "solve_seconds": 41.77485794201493,
+     "converged": true,
+     "maximum_iterations": 102,
+     "started_from_hz": 1000000.0
+    },
+    {
+     "frequency_hz": 30000000.0,
+     "mesh_reused": true,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 4.787198849953711e-05,
+     "solve_seconds": 72.5815557570022,
+     "converged": true,
+     "maximum_iterations": 191,
+     "started_from_hz": 10000000.0
+    },
+    {
+     "frequency_hz": 100000000.0,
+     "mesh_reused": true,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 4.8421992687508464e-05,
+     "solve_seconds": 206.8973056480172,
+     "converged": true,
+     "maximum_iterations": 540,
+     "started_from_hz": 30000000.0
+    }
+   ],
+   "ports": [
+    "CIN1.1",
+    "CIN1.2",
+    "CIN2.1",
+    "CIN2.2",
+    "CIN3.1",
+    "CIN3.2",
+    "CIN4.1",
+    "CIN4.2",
+    "L1.1",
+    "L1.2",
+    "Q1.2",
+    "Q1.3",
+    "D1.1",
+    "D1.2",
+    "COUT1.1",
+    "COUT1.2",
+    "COUT2.1",
+    "COUT2.2",
+    "COUT3.1",
+    "COUT3.2",
+    "COUT4.1",
+    "COUT4.2",
+    "COUT5.1",
+    "COUT5.2",
+    "COUT6.1",
+    "COUT6.2",
+    "U1.VIN",
+    "U1.PGND",
+    "U1.SW",
+    "J2.2"
+   ],
+   "finished": true,
+   "max_z_difference_vs_reference": [
+    0.0,
+    3.905758436809726e-11,
+    2.473413212991053e-10,
+    2.0150556316516146e-10
+   ],
+   "max_r_difference_vs_reference": [
+    0.0,
+    1.559995703651149e-08,
+    2.472349064138255e-07,
+    2.3228183420620077e-07
+   ]
+  },
+  {
+   "variant": "near-cold-1e-6",
+   "settings": {
+    "maximum_filaments": 1,
+    "preconditioner": "near",
+    "relative_tolerance": 1e-06,
+    "warm_start": false
+   },
+   "total_seconds": 346.8930624870118,
+   "peak_rss_mb": 4056.4375,
+   "frequencies": [
+    {
+     "frequency_hz": 1000000.0,
+     "mesh_reused": false,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 0.06222945998888463,
+     "solve_seconds": 14.153145461023087,
+     "converged": true,
+     "maximum_iterations": 37,
+     "started_from_hz": null
+    },
+    {
+     "frequency_hz": 10000000.0,
+     "mesh_reused": true,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 5.84619992878288e-05,
+     "solve_seconds": 29.08349066300434,
+     "converged": true,
+     "maximum_iterations": 76,
+     "started_from_hz": null
+    },
+    {
+     "frequency_hz": 30000000.0,
+     "mesh_reused": true,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 5.127702024765313e-05,
+     "solve_seconds": 66.55153250700096,
+     "converged": true,
+     "maximum_iterations": 187,
+     "started_from_hz": null
+    },
+    {
+     "frequency_hz": 100000000.0,
+     "mesh_reused": true,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 4.7972018364816904e-05,
+     "solve_seconds": 237.03308675598237,
+     "converged": true,
+     "maximum_iterations": 654,
+     "started_from_hz": null
+    }
+   ],
+   "ports": [
+    "CIN1.1",
+    "CIN1.2",
+    "CIN2.1",
+    "CIN2.2",
+    "CIN3.1",
+    "CIN3.2",
+    "CIN4.1",
+    "CIN4.2",
+    "L1.1",
+    "L1.2",
+    "Q1.2",
+    "Q1.3",
+    "D1.1",
+    "D1.2",
+    "COUT1.1",
+    "COUT1.2",
+    "COUT2.1",
+    "COUT2.2",
+    "COUT3.1",
+    "COUT3.2",
+    "COUT4.1",
+    "COUT4.2",
+    "COUT5.1",
+    "COUT5.2",
+    "COUT6.1",
+    "COUT6.2",
+    "U1.VIN",
+    "U1.PGND",
+    "U1.SW",
+    "J2.2"
+   ],
+   "finished": true,
+   "max_z_difference_vs_reference": [
+    2.9686729251552248e-08,
+    4.8105847241046375e-08,
+    1.9311027127920937e-07,
+    2.3621845021055905e-07
+   ],
+   "max_r_difference_vs_reference": [
+    1.024923147716075e-06,
+    1.2716444405367349e-05,
+    0.00022455274148372478,
+    0.00026847189938431875
+   ]
+  },
+  {
+   "variant": "near-warm-1e-6",
+   "settings": {
+    "maximum_filaments": 1,
+    "preconditioner": "near",
+    "relative_tolerance": 1e-06,
+    "warm_start": true
+   },
+   "total_seconds": 170.70719146699412,
+   "peak_rss_mb": 4067.7421875,
+   "frequencies": [
+    {
+     "frequency_hz": 1000000.0,
+     "mesh_reused": false,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 0.06296988000394776,
+     "solve_seconds": 14.14413767599035,
+     "converged": true,
+     "maximum_iterations": 37,
+     "started_from_hz": null
+    },
+    {
+     "frequency_hz": 10000000.0,
+     "mesh_reused": true,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 5.1126990001648664e-05,
+     "solve_seconds": 26.41197469801409,
+     "converged": true,
+     "maximum_iterations": 67,
+     "started_from_hz": 1000000.0
+    },
+    {
+     "frequency_hz": 30000000.0,
+     "mesh_reused": true,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 4.5797001803293824e-05,
+     "solve_seconds": 41.083456188993296,
+     "converged": true,
+     "maximum_iterations": 101,
+     "started_from_hz": 10000000.0
+    },
+    {
+     "frequency_hz": 100000000.0,
+     "mesh_reused": true,
+     "sheet_layers": 4,
+     "nodes": 28195,
+     "branches": 55245,
+     "build_seconds": 4.890302079729736e-05,
+     "solve_seconds": 88.9934858540073,
+     "converged": true,
+     "maximum_iterations": 271,
+     "started_from_hz": 30000000.0
+    }
+   ],
+   "ports": [
+    "CIN1.1",
+    "CIN1.2",
+    "CIN2.1",
+    "CIN2.2",
+    "CIN3.1",
+    "CIN3.2",
+    "CIN4.1",
+    "CIN4.2",
+    "L1.1",
+    "L1.2",
+    "Q1.2",
+    "Q1.3",
+    "D1.1",
+    "D1.2",
+    "COUT1.1",
+    "COUT1.2",
+    "COUT2.1",
+    "COUT2.2",
+    "COUT3.1",
+    "COUT3.2",
+    "COUT4.1",
+    "COUT4.2",
+    "COUT5.1",
+    "COUT5.2",
+    "COUT6.1",
+    "COUT6.2",
+    "U1.VIN",
+    "U1.PGND",
+    "U1.SW",
+    "J2.2"
+   ],
+   "finished": true,
+   "max_z_difference_vs_reference": [
+    2.9686729251552248e-08,
+    4.350872051601272e-09,
+    2.9430096365636777e-09,
+    1.037126440331324e-08
+   ],
+   "max_r_difference_vs_reference": [
+    1.024923147716075e-06,
+    1.6610977320464768e-06,
+    3.072418995075524e-06,
+    4.142303468580476e-05
+   ]
+  }
+ ],
+ "decision": {
+  "warm_start_adopted": true,
+  "criteria": "warm starts are adopted when, at the same preconditioner and tolerance, they solve the four frequencies faster than cold starts and their Z stays within 1e-5 (largest entry) of near-cold-1e-9",
+  "candidate": "near-warm-1e-6",
+  "baseline": "near-cold-1e-6",
+  "candidate_seconds": 170.70719146699412,
+  "baseline_seconds": 346.8930624870118,
+  "meets_target_seconds": 300.0,
+  "candidate_meets_target": true
+ }
+}

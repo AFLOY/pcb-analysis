@@ -6,6 +6,27 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
+- The port-impedance contract starts each frequency from the port solves of
+  the nearest frequency solved on its mesh (`settings["warm_start"]`, on by
+  default; `started_from_hz` per frequency). On a four-layer 28k-cell board
+  with 30 ports at 1/10/30/100 MHz this halved the solve (171 s against
+  347 s at tolerance 1e-6, 341 s against 541 s at 1e-9,
+  `docs/PORT_IMPEDANCE_SCALE_RESULTS.json`). The matrix agrees with a cold
+  solve to the tolerance; its bits now depend on which frequencies were
+  solved before it. `solve_sheet_cases(initial=...)` and
+  `solve_port_impedance(initial=...)` expose the start.
+- `preconditioner="auto"` keeps `near` up to 400,000 saddle-point unknowns
+  (was 60,000). With the same-layer near field the near LU is faster than
+  block at every size measured (0.30-0.53 of its time up to 599k unknowns)
+  at 8-10 KB per unknown (`docs/SHEET_PRECONDITIONER_AUTO_RESULTS.json`); on
+  four close layers block did not finish a 30-port solve in 15 minutes.
+  Solves between the two sizes now use about twice block's memory and their
+  bits move within the tolerance.
+- Port impedance on CUDA: `solve_port_impedance(backend="cuda")` and the
+  contract's `execution_backend="cuda"`. `solve_sheet_cases_cuda` solves
+  several excitations of one mesh on the device, sharing the operator and
+  the factored preconditioner, with `keep_terminal_components` and `initial`
+  as on the CPU.
 - `electrical.port_network.PortImpedanceSweep` interpolates the copper's
   pad-port matrix over a band from a few solves (R: PCHIP in `sqrt f`, L:
   PCHIP in `log f`, chosen by measurement in
