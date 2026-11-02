@@ -34,6 +34,9 @@ FOOTPRINT_MM = (33.0, 30.3)
 WALL_LIMIT_RATIO = 1.5          # block may take at most this many times the near variant's wall time
 MEMORY_GAIN_REQUIRED = 4.0      # and must need at most 1/4 of the near variant's peak RSS
 SOLUTION_TOLERANCE = 1e-6
+# ``auto`` picks near up to the size whose near peak RSS, at the largest
+# bytes per saddle-point unknown measured, stays within this budget.
+NEAR_MEMORY_BUDGET_MB = 4096
 
 
 def build(pitch_mm: float):
@@ -87,6 +90,7 @@ def main() -> None:
     parser.add_argument("--frequency-hz", type=float, default=800e3)
     parser.add_argument("--near-up-to-mm", type=float, default=0.25, help="run the near (saddle LU) variant only at pitches at or above this")
     parser.add_argument("--output", type=Path, default=Path(__file__).resolve().parents[1] / "benchmark-results" / "sheet_preconditioner_benchmark.json")
+    parser.add_argument("--variants", default="diagonal,block,near", help="which variants to run (near still only down to --near-up-to-mm)")
     parser.add_argument("--variant", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--pitch", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--out", type=Path, default=None, help=argparse.SUPPRESS)
@@ -99,7 +103,9 @@ def main() -> None:
     scratch = args.output.parent / "sheet_preconditioner_scratch"
     scratch.mkdir(parents=True, exist_ok=True)
     for pitch in [float(p) for p in args.pitches_mm.split(",") if p]:
-        variants = ["diagonal", "block"] + (["near"] if pitch >= args.near_up_to_mm else [])
+        chosen = [v for v in args.variants.split(",") if v]
+        variants = [v for v in ("diagonal", "block") if v in chosen] + (
+            ["near"] if "near" in chosen and pitch >= args.near_up_to_mm else [])
         results: dict[str, dict] = {}
         for variant in variants:
             out = scratch / f"{variant}_{pitch:g}.npz"
@@ -144,7 +150,7 @@ def main() -> None:
             "cpu": _cpu_model(), "cpu_count": os.cpu_count(), "platform": platform.platform(),
             "python": platform.python_version(), "numpy": np.__version__, "openblas_num_threads": os.environ.get("OPENBLAS_NUM_THREADS"),
         },
-        "settings": {"footprint_mm": FOOTPRINT_MM, "frequency_hz": args.frequency_hz, "pitches_mm": args.pitches_mm, "near_up_to_mm": args.near_up_to_mm,
+        "settings": {"footprint_mm": FOOTPRINT_MM, "frequency_hz": args.frequency_hz, "pitches_mm": args.pitches_mm, "near_up_to_mm": args.near_up_to_mm, "variants": args.variants,
                      "tolerance": 1e-9, "restart": 120, "max_iterations": 400},
         "cases": cases,
         "decision": {
@@ -160,11 +166,33 @@ def main() -> None:
                 "the iteration counts are recorded above unchanged"
             ),
             "verdicts_per_pitch_with_near": verdicts,
+            "auto_threshold": _auto_threshold(cases),
         },
     }
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print("decision:", json.dumps(report["decision"]))
     print("wrote", args.output)
+
+
+def _auto_threshold(cases: list[dict]) -> dict:
+    """Where ``auto`` should switch from near to block, from the near rows' memory and both variants' time."""
+    near_rows = [c["results"]["near"] for c in cases if "near" in c["results"] and "failed" not in c["results"]["near"]]
+    pairs = [(c["results"]["near"], c["results"]["block"]) for c in cases
+             if all(v in c["results"] and "failed" not in c["results"][v] for v in ("near", "block"))]
+    if not near_rows:
+        return {"near_up_to_unknowns": None, "note": "no near row ran"}
+    per_unknown = [row["peak_rss_mb"] / (row["branches"] + row["nodes"]) for row in near_rows]
+    worst = max(per_unknown)
+    return {
+        "near_memory_budget_mb": NEAR_MEMORY_BUDGET_MB,
+        "near_peak_mb_per_unknown": per_unknown,
+        "near_peak_mb_per_unknown_max": worst,
+        "near_up_to_unknowns": int(NEAR_MEMORY_BUDGET_MB / worst),
+        "near_faster_than_block_at_every_size": all(n["wall_s"] < b["wall_s"] for n, b in pairs),
+        "near_over_block_wall": [n["wall_s"] / b["wall_s"] for n, b in pairs],
+        "criteria": ("near is chosen up to the saddle-point size at which its peak RSS, at the largest MB per unknown "
+                     f"measured, reaches {NEAR_MEMORY_BUDGET_MB} MB, when it is faster than block at every size measured"),
+    }
 
 
 if __name__ == "__main__":
