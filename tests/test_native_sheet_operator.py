@@ -75,6 +75,38 @@ def test_the_core_operator_is_the_same_at_every_thread_budget() -> None:
     assert all(result == results[0] for result in results)
 
 
+def test_sets_applied_together_get_the_bits_each_gets_alone() -> None:
+    # The core transforms every set's planes on one team and reads each
+    # stretch of the kernels once for all of them; each set's sums still run
+    # over its source layers in layer order, so nothing moves by a bit.  Sets
+    # with and without vertical currents may come in one call.
+    shape = (13, 9)
+    sets = [_currents(*shape, seed=seed) for seed in range(5)]
+    mixed = [(x, y, z if index % 2 else None) for index, (x, y, z) in enumerate(sets)]
+    for threads in (1, 3, 8):
+        with thread_budget_scope(threads):
+            operator = SheetInductanceOperator(shape, PITCH_M, STACKUP, vertical_levels=LEVELS)
+            together = operator.apply_many(mixed)
+            alone = [operator.apply(x, y, z) if z is not None else operator.apply(x, y) for x, y, z in mixed]
+        assert [len(result) for result in together] == [2, 3, 2, 3, 2]
+        for got, expected in zip(together, alone):
+            assert b"".join(part.tobytes() for part in got) == b"".join(part.tobytes() for part in expected)
+
+
+def test_many_sets_in_several_batches_match_one_set_on_one_thread() -> None:
+    # A set of this grid takes about 1 MiB of spectra, so forty of them go in
+    # three batches on four threads, which split the transforms and the
+    # spectrum's stretches differently from one set on one thread.
+    operator = SheetInductanceOperator((60, 66), PITCH_M, STACKUP, vertical_levels=LEVELS)
+    sets = [_currents(60, 66, seed=seed) for seed in range(40)]
+    together = operator._native.apply_many(
+        [x for x, _, _ in sets], [y for _, y, _ in sets], [z for _, _, z in sets], threads=4
+    )
+    for (x, y, z), got in zip(sets, together):
+        expected = operator._native.apply(x, y, z, threads=1)
+        assert all(a.tobytes() == b.tobytes() for a, b in zip(got, expected))
+
+
 def _mesh(rows: int, cols: int) -> SheetMesh:
     occupancy = np.ones((3, rows, cols), dtype=bool)
     vias = tuple(ViaBranch(r, c, 0, 1, resistance_ohm=1e-3) for r, c in ((1, 1), (rows - 2, cols - 2)))

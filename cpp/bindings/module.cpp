@@ -167,6 +167,63 @@ py::tuple apply_convolution(const pcbcore::sheet::ConvolutionOperator& op, const
     return py::make_tuple(to_array(std::move(flux_x), shape), to_array(std::move(flux_y), shape), out_z);
 }
 
+// Several sets at once: lists of ``(layers, rows, cols)`` arrays (and of
+// ``(levels, rows, cols)`` for z, or None for no vertical currents in any
+// set); each set's fluxes are those ``apply`` gives it alone.
+py::list apply_convolution_many(const pcbcore::sheet::ConvolutionOperator& op,
+                                const std::vector<Input<double>>& currents_x,
+                                const std::vector<Input<double>>& currents_y,
+                                const std::optional<std::vector<Input<double>>>& currents_z, const int threads) {
+    const auto count = static_cast<std::int64_t>(currents_x.size());
+    if (static_cast<std::int64_t>(currents_y.size()) != count ||
+        (currents_z.has_value() && static_cast<std::int64_t>(currents_z->size()) != count)) {
+        throw pcbcore::InvalidInput("currents_x, currents_y and currents_z need one array per set");
+    }
+    const std::int64_t layers = op.layers();
+    const bool vertical = currents_z.has_value() && op.levels() > 0;
+    std::vector<const double*> in_x, in_y, in_z;
+    std::vector<double*> out_x, out_y, out_z;
+    std::vector<py::array_t<double>> fx, fy, fz;
+    py::ssize_t rows = 0;
+    py::ssize_t cols = 0;
+    for (std::int64_t s = 0; s < count; ++s) {
+        const Input<double>& x = currents_x[static_cast<size_t>(s)];
+        const Input<double>& y = currents_y[static_cast<size_t>(s)];
+        if (x.ndim() != 3 || y.ndim() != 3 || x.shape(0) != layers || y.shape(0) != layers ||
+            x.shape(1) != y.shape(1) || x.shape(2) != y.shape(2) || (s > 0 && (x.shape(1) != rows || x.shape(2) != cols))) {
+            throw pcbcore::InvalidInput("currents_x and currents_y must be (layers, rows, cols), one shape for all sets");
+        }
+        rows = x.shape(1);
+        cols = x.shape(2);
+        in_x.push_back(x.data());
+        in_y.push_back(y.data());
+        fx.emplace_back(std::vector<py::ssize_t>{layers, rows, cols});
+        fy.emplace_back(std::vector<py::ssize_t>{layers, rows, cols});
+        out_x.push_back(fx.back().mutable_data());
+        out_y.push_back(fy.back().mutable_data());
+        if (vertical) {
+            const Input<double>& z = (*currents_z)[static_cast<size_t>(s)];
+            if (z.ndim() != 3 || z.shape(0) != op.levels() || z.shape(1) != rows || z.shape(2) != cols) {
+                throw pcbcore::InvalidInput("currents_z must be (levels, rows, cols)");
+            }
+            in_z.push_back(z.data());
+            fz.emplace_back(std::vector<py::ssize_t>{op.levels(), rows, cols});
+            out_z.push_back(fz.back().mutable_data());
+        }
+    }
+    {
+        py::gil_scoped_release release;
+        op.apply_many(count, in_x.data(), in_y.data(), vertical ? in_z.data() : nullptr, out_x.data(), out_y.data(),
+                      vertical ? out_z.data() : nullptr, threads);
+    }
+    py::list out;
+    for (std::int64_t s = 0; s < count; ++s) {
+        const auto i = static_cast<size_t>(s);
+        out.append(py::make_tuple(fx[i], fy[i], vertical ? py::object(fz[i]) : py::object(py::none())));
+    }
+    return out;
+}
+
 py::array_t<double> build_kernel(const std::int64_t rows, const std::int64_t cols, const double length,
                                  const double width, const double thickness_a, const double thickness_b,
                                  const double separation, const bool along_x, const int near_radius_cells,
@@ -534,6 +591,8 @@ PYBIND11_MODULE(_pcbcore, m) {
         .def(py::init(&make_convolution_operator), py::arg("layers"), py::arg("rows"), py::arg("cols"),
              py::arg("levels"), py::arg("tables_x"), py::arg("tables_y"), py::arg("tables_z"), py::arg("threads"))
         .def("apply", &apply_convolution, py::arg("currents_x"), py::arg("currents_y"),
+             py::arg("currents_z") = py::none(), py::arg("threads"))
+        .def("apply_many", &apply_convolution_many, py::arg("currents_x"), py::arg("currents_y"),
              py::arg("currents_z") = py::none(), py::arg("threads"))
         .def_property_readonly("spectrum_bytes", &pcbcore::sheet::ConvolutionOperator::spectrum_bytes);
     sheet.def("build_kernel", &build_kernel, py::arg("rows"), py::arg("cols"), py::arg("length"), py::arg("width"),

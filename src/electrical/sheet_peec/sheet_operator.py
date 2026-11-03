@@ -318,17 +318,30 @@ class SheetInductanceOperator:
                 stacked.append(currents_z)
 
         if self._native is not None:
-            # The C++ core applies one set at a time, each to the bits it gives alone.
-            results: list[tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]] = []
-            for currents_x, currents_y, currents_z in currents:
-                vertical = currents_z if (currents_z is not None and levels) else None
-                flux_x, flux_y, flux_z = self._native.apply(currents_x, currents_y, vertical, threads=thread_budget())
-                if currents_z is None:
-                    results.append((flux_x, flux_y))
-                else:
-                    results.append(
-                        (flux_x, flux_y, flux_z if flux_z is not None else np.zeros_like(currents_z, dtype=np.float64))
-                    )
+            # The C++ core applies the sets together, those with vertical
+            # currents in one call and those without in another, each set to
+            # the bits it gets alone: the kernels are read once per stretch of
+            # the spectrum for all of them.
+            results: list[tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]] = [None] * len(currents)  # type: ignore[list-item]
+            vertical = [index for index, item in enumerate(currents) if item[2] is not None and levels]
+            in_plane = [index for index, item in enumerate(currents) if not (item[2] is not None and levels)]
+            for members, with_z in ((vertical, True), (in_plane, False)):
+                if not members:
+                    continue
+                applied = self._native.apply_many(
+                    [currents[index][0] for index in members],
+                    [currents[index][1] for index in members],
+                    [currents[index][2] for index in members] if with_z else None,
+                    threads=thread_budget(),
+                )
+                for index, (flux_x, flux_y, flux_z) in zip(members, applied):
+                    currents_z = currents[index][2]
+                    if currents_z is None:
+                        results[index] = (flux_x, flux_y)
+                    else:
+                        results[index] = (
+                            flux_x, flux_y, flux_z if flux_z is not None else np.zeros_like(currents_z, dtype=np.float64)
+                        )
             return results
 
         workers = thread_budget()
