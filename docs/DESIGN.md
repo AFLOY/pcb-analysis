@@ -39,6 +39,52 @@ core with the GIL released and wrap the results; the NumPy (and CuPy)
 implementations stay as references and as the path without a build.  The
 only threading control is the process-wide budget of `electrical.threads`.
 
+## Reproducibility
+
+**Same bits.** On one machine and one build, the same input gives the same
+bits in every process, whatever the thread budget, `PYTHONHASHSEED`, the
+memory free (which sets how a lockstep group is cut) or how many sets the
+operator applies at once:
+
+- Every sum runs in a fixed order.  A native kernel gives each output to
+  one task, which sums in layer (or entry) order; a lockstep group solves each
+  column as it would be solved alone; BLAS is held to one thread.
+- No set or `frozenset` is iterated where its order could reach a number.
+  Sets of names, or of cells keyed by a layer's name, iterate in another
+  order in every process, because Python randomises string hashes.  The
+  only sets iterated hold integers, and they are sorted or used where order
+  does not count.
+- Evidence:
+  - `tests/test_reproducibility.py` solves both contracts in three
+    processes, each with its own hash seed and thread budget, and compares
+    every float they return, in the order returned.
+  - `tests/test_native_sheet_operator.py` and `tests/test_sheet_peec.py`
+    check thread budgets, operator batches and lockstep cuts.
+  - Kicad_PowerOpt's LM5156 hot loop (eight excitations, `near`) gave the
+    same results with lockstep widths 1, 2 and 8, at thread budgets 1 and 8,
+    and in separate processes.
+
+**Not the same bits, but the same answer within the solver's tolerance:**
+
+- Another CPU, another BLAS (OpenBLAS picks kernels by instruction set;
+  Apple's Accelerate solves several right-hand sides differently, see
+  [SHEET_PEEC.md](SHEET_PEEC.md)), or other NumPy, SciPy or pocketfft
+  versions.  The core's operator gave the same bits built with GCC 12.5.0 and
+  with AOCC 5.2.0 on one machine (`docs/SHEET_OPERATOR_BATCHING_RESULTS.json`),
+  but no compiler is promised.
+- The CUDA path against the CPU.
+- A port-impedance frequency solved with a warm start (the default) depends
+  on which frequencies were solved before it on the same mesh.  The
+  frequencies of one problem are solved in ascending order, so one problem
+  always gives the same bits.  The same frequency asked for in another set
+  of frequencies agrees within the tolerance, not to the bit (measured
+  against cold starts in [SHEET_PEEC.md](SHEET_PEEC.md)).
+
+**For callers.** A sum taken over a set of named nodes moves in its last bits
+from one process to the next.  An example is a pad's mean voltage over the
+cells of its set.  Sorting the nodes, or the values, before summing makes the
+sum the same in every process.
+
 ## Implementation status
 
 | Component | Module | Status |
