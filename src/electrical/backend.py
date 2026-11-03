@@ -9,9 +9,21 @@ is no environment variable or per-call switch.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from types import ModuleType
+
+# A core built with Clang or AOCC runs its teams on LLVM's libomp, whose
+# threads spin for 200 ms after every parallel region by default.  A sheet
+# solve alternates the core's operator with SuperLU solves and Gram-Schmidt
+# steps on Python's own thread pools, which those spinning threads starved:
+# on a lockstep solve of eight excitations (AOCC 5.2.0, 8 threads) the solve
+# took 41.7 s spinning and 32.8 s with the threads put to sleep at once.
+# libomp reads this when its runtime starts, so it is set before the core
+# loads; a value already in the environment is kept.  GCC's libgomp does not
+# read it.
+os.environ.setdefault("KMP_BLOCKTIME", "0")
 
 try:  # pragma: no cover - depends on the local build
     from . import _pcbcore as _core
