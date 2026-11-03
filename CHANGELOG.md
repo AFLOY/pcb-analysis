@@ -4,6 +4,23 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
+## Unreleased
+
+- The C++ sheet operator (`ConvolutionOperator`) applies the sets of a
+  lockstep step together, keeps its spectra between applications instead of
+  mapping fresh pages each time, transforms only the rows that carry data and
+  spreads every plane over the thread budget.  On a hot-loop-shaped operator
+  (8 layers, 7 levels, 225 x 320) ten sets on 8 threads take 19.94 ms a set
+  where they took 58.29 (GCC 12.5.0); results are identical to the bit
+  (`docs/SHEET_OPERATOR_BATCHING_RESULTS.json`).  A solve keeps up to 1 GiB
+  of spectra in the operator while it lives (about 0.5 GB on that hot loop).
+- `electrical.backend` sets `KMP_BLOCKTIME=0` before the core loads unless
+  the environment sets it: a core built with Clang or AOCC runs on LLVM's
+  libomp, whose threads otherwise spin for 200 ms after each parallel
+  region and slow the solver's own thread pools.  GCC's libgomp ignores it.
+- The core builds with AOCC 5.2.0 (Clang 17), which lacks
+  `-fcx-limited-range`: the operator's complex products are spelled out.
+
 ## 0.12.1
 
 Fixes from Kicad_PowerOpt's review of 0.12.0. Port-impedance solves on a
