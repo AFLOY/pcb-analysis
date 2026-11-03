@@ -38,6 +38,24 @@ constexpr size_t kWorkspaceBytes = size_t{1} << 30;
 thread_local std::vector<double> row_scratch;
 thread_local std::vector<std::complex<double>> sum_scratch;
 
+// sum += kernel * spectrum, entry by entry, as (ac - bd, ad + bc): the
+// product -fcx-limited-range gives, spelled out so that a compiler without
+// that flag (Clang 17, AOCC 5) neither calls __muldc3 nor stops vectorising.
+void multiply_add(const std::complex<double>* const kernel, const std::complex<double>* const spectrum,
+                  std::complex<double>* const sum, const size_t length) {
+    const auto* const k = reinterpret_cast<const double*>(kernel);
+    const auto* const s = reinterpret_cast<const double*>(spectrum);
+    auto* const out = reinterpret_cast<double*>(sum);
+    for (size_t i = 0; i < length; ++i) {
+        const double a = k[2 * i];
+        const double b = k[2 * i + 1];
+        const double c = s[2 * i];
+        const double d = s[2 * i + 1];
+        out[2 * i] += a * c - b * d;
+        out[2 * i + 1] += a * d + b * c;
+    }
+}
+
 template <typename T>
 T* scratch(std::vector<T>& buffer, const size_t size) {
     if (buffer.size() < size) {
@@ -212,9 +230,7 @@ void ConvolutionOperator::apply_batch(const std::int64_t count, const double* co
                         std::complex<double>* const sum = sums + (set * planes + family.offset + to) * kStretch;
                         const std::complex<double>* const spectrum =
                             spectra + (set * planes + family.offset + from) * spectrum_size + begin;
-                        for (size_t k = 0; k < length; ++k) {
-                            sum[k] += kernel[k] * spectrum[k];
-                        }
+                        multiply_add(kernel, spectrum, sum, length);
                     }
                 }
             }
