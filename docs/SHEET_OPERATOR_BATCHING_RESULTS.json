@@ -1,0 +1,332 @@
+{
+ "benchmark": "sheet_operator_batching",
+ "environment": {
+  "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+  "cpu_count": 16,
+  "physical_cores": 8,
+  "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+  "python": "3.12.14",
+  "numpy": "2.3.5",
+  "scipy": "1.17.1",
+  "commit": "0da768b",
+  "date": "2026-11-03T01:00:43+00:00",
+  "compiler": "GCC 12.5.0"
+ },
+ "pairs": {
+  "candidate-gcc": {
+   "current": {
+    "label": "current-gcc",
+    "environment": {
+     "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+     "cpu_count": 16,
+     "physical_cores": 8,
+     "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+     "python": "3.12.14",
+     "numpy": "2.3.5",
+     "scipy": "1.17.1",
+     "commit": "ba54a9b",
+     "date": "2026-11-03T00:53:05+00:00",
+     "compiler": "GCC 12.5.0"
+    },
+    "operator": {
+     "shape": [
+      225,
+      320
+     ],
+     "layers": 8,
+     "levels": 7,
+     "one_set_ms_by_threads": {
+      "1": 57.65,
+      "2": 45.75,
+      "4": 46.43,
+      "8": 57.26
+     },
+     "ms_per_set_together_at_8": 58.29,
+     "sets_together": 10,
+     "digest": "4eb7e325317a22c478296723ca39b3abe8b4676d26887fce1267a29e6546e867"
+    },
+    "solve": {
+     "shape": [
+      120,
+      132
+     ],
+     "layers": 6,
+     "levels": 5,
+     "branches": 63575,
+     "nodes": 32040,
+     "excitations": 8,
+     "settings": {
+      "frequency_hz": 30000000.0,
+      "preconditioner": "near",
+      "tolerance": 1e-06,
+      "restart": 120,
+      "max_iterations": 200
+     },
+     "iterations": [
+      187,
+      187,
+      187,
+      187,
+      187,
+      187,
+      186,
+      152
+     ],
+     "lockstep_columns": [
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8
+     ],
+     "converged": true,
+     "wall_s": 34.47,
+     "digest": "adc0e0adfcd4b0e9aa4f29ad8c6b15d23d1713c25ee0db9efd6d332fb526a947"
+    }
+   },
+   "candidate": {
+    "label": "candidate-gcc",
+    "environment": {
+     "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+     "cpu_count": 16,
+     "physical_cores": 8,
+     "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+     "python": "3.12.14",
+     "numpy": "2.3.5",
+     "scipy": "1.17.1",
+     "commit": "0da768b",
+     "date": "2026-11-03T01:00:43+00:00",
+     "compiler": "GCC 12.5.0"
+    },
+    "operator": {
+     "shape": [
+      225,
+      320
+     ],
+     "layers": 8,
+     "levels": 7,
+     "one_set_ms_by_threads": {
+      "1": 47.95,
+      "2": 28.16,
+      "4": 22.83,
+      "8": 24.68
+     },
+     "ms_per_set_together_at_8": 19.94,
+     "sets_together": 10,
+     "digest": "4eb7e325317a22c478296723ca39b3abe8b4676d26887fce1267a29e6546e867"
+    },
+    "solve": {
+     "shape": [
+      120,
+      132
+     ],
+     "layers": 6,
+     "levels": 5,
+     "branches": 63575,
+     "nodes": 32040,
+     "excitations": 8,
+     "settings": {
+      "frequency_hz": 30000000.0,
+      "preconditioner": "near",
+      "tolerance": 1e-06,
+      "restart": 120,
+      "max_iterations": 200
+     },
+     "iterations": [
+      187,
+      187,
+      187,
+      187,
+      187,
+      187,
+      186,
+      152
+     ],
+     "lockstep_columns": [
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8
+     ],
+     "converged": true,
+     "wall_s": 32.43,
+     "digest": "adc0e0adfcd4b0e9aa4f29ad8c6b15d23d1713c25ee0db9efd6d332fb526a947"
+    }
+   },
+   "operator_speedup_together_at_8": 2.92,
+   "solve_speedup": 1.06,
+   "same_bits": {
+    "operator": true,
+    "solve": true
+   },
+   "passes": true
+  },
+  "candidate-aocc": {
+   "current": {
+    "label": "current-aocc",
+    "environment": {
+     "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+     "cpu_count": 16,
+     "physical_cores": 8,
+     "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+     "python": "3.12.14",
+     "numpy": "2.3.5",
+     "scipy": "1.17.1",
+     "commit": "ba54a9b",
+     "date": "2026-11-03T00:53:52+00:00",
+     "compiler": "AOCC 5.2.0 (clang 17.0.6)"
+    },
+    "operator": {
+     "shape": [
+      225,
+      320
+     ],
+     "layers": 8,
+     "levels": 7,
+     "one_set_ms_by_threads": {
+      "1": 56.63,
+      "2": 45.41,
+      "4": 43.68,
+      "8": 55.73
+     },
+     "ms_per_set_together_at_8": 56.19,
+     "sets_together": 10,
+     "digest": "4eb7e325317a22c478296723ca39b3abe8b4676d26887fce1267a29e6546e867"
+    },
+    "solve": {
+     "shape": [
+      120,
+      132
+     ],
+     "layers": 6,
+     "levels": 5,
+     "branches": 63575,
+     "nodes": 32040,
+     "excitations": 8,
+     "settings": {
+      "frequency_hz": 30000000.0,
+      "preconditioner": "near",
+      "tolerance": 1e-06,
+      "restart": 120,
+      "max_iterations": 200
+     },
+     "iterations": [
+      187,
+      187,
+      187,
+      187,
+      187,
+      187,
+      186,
+      152
+     ],
+     "lockstep_columns": [
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8
+     ],
+     "converged": true,
+     "wall_s": 36.22,
+     "digest": "adc0e0adfcd4b0e9aa4f29ad8c6b15d23d1713c25ee0db9efd6d332fb526a947"
+    }
+   },
+   "candidate": {
+    "label": "candidate-aocc",
+    "environment": {
+     "cpu": "AMD Ryzen 7 9700X 8-Core Processor",
+     "cpu_count": 16,
+     "physical_cores": 8,
+     "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+     "python": "3.12.14",
+     "numpy": "2.3.5",
+     "scipy": "1.17.1",
+     "commit": "0da768b",
+     "date": "2026-11-03T01:01:26+00:00",
+     "compiler": "AOCC 5.2.0 (clang 17.0.6)"
+    },
+    "operator": {
+     "shape": [
+      225,
+      320
+     ],
+     "layers": 8,
+     "levels": 7,
+     "one_set_ms_by_threads": {
+      "1": 47.29,
+      "2": 30.9,
+      "4": 22.34,
+      "8": 22.45
+     },
+     "ms_per_set_together_at_8": 18.65,
+     "sets_together": 10,
+     "digest": "4eb7e325317a22c478296723ca39b3abe8b4676d26887fce1267a29e6546e867"
+    },
+    "solve": {
+     "shape": [
+      120,
+      132
+     ],
+     "layers": 6,
+     "levels": 5,
+     "branches": 63575,
+     "nodes": 32040,
+     "excitations": 8,
+     "settings": {
+      "frequency_hz": 30000000.0,
+      "preconditioner": "near",
+      "tolerance": 1e-06,
+      "restart": 120,
+      "max_iterations": 200
+     },
+     "iterations": [
+      187,
+      187,
+      187,
+      187,
+      187,
+      187,
+      186,
+      152
+     ],
+     "lockstep_columns": [
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8
+     ],
+     "converged": true,
+     "wall_s": 32.1,
+     "digest": "adc0e0adfcd4b0e9aa4f29ad8c6b15d23d1713c25ee0db9efd6d332fb526a947"
+    }
+   },
+   "operator_speedup_together_at_8": 3.01,
+   "solve_speedup": 1.13,
+   "same_bits": {
+    "operator": true,
+    "solve": true
+   },
+   "passes": true
+  }
+ },
+ "same_bits_across_all_builds": true,
+ "decision": {
+  "adopted": true,
+  "criteria": "for every compiler: operator and solve outputs identical to the bit, the operator no slower at any thread budget, the solve faster and converged"
+ }
+}

@@ -828,6 +828,55 @@ side; repeated measurements move by about 3 %.
 **Decision:** adopted (on every case the estimate is at least the measured
 column and at most 2.5 times it).
 
+### The C++ operator on batches of sets (measured, `SHEET_OPERATOR_BATCHING_RESULTS.json`)
+
+Profiling a hot loop of Kicad_PowerOpt (eight sheet layers of which four are
+bridge sheets of a few hundred cells each, 225 × 320 cells, eight
+excitations, `near`, tolerance 1e-6) put most of the solve in the C++
+`ConvolutionOperator`.  It applied one set of currents at a time, split its
+team by layer, and allocated its spectra and every transform's padding afresh,
+so each application mapped and faulted in new pages and the time did not fall
+past two threads.  The operator now keeps the spectra of the sets it applies
+in a workspace between applications and per-thread row buffers, transforms
+only the rows that carry data and inverts only the rows kept, runs every
+plane's transform as a task of its own, and forms the products over 64-entry
+stretches of the spectrum, reading each stretch of a kernel once for every set
+in the batch.  `SheetInductanceOperator.apply_many` hands it a lockstep
+step's sets together (each column's real and imaginary parts).  Sets whose
+spectra fit in 24 MiB go in batches of that size, larger ones in batches of up
+to 1 GiB.  Every output keeps its sums over source layers in layer order, so
+nothing moves by a bit, whatever the batch or the thread count.  The kernel
+products are spelled out as `-fcx-limited-range` makes them, since Clang 17
+(AOCC 5.2.0) lacks the flag and took the Annex G path through `__muldc3`
+otherwise.  A core built with Clang or AOCC runs on LLVM's libomp, whose
+threads spin for 200 ms after each parallel region and starved the SuperLU
+and Gram-Schmidt threads of a solve; `electrical.backend` sets
+`KMP_BLOCKTIME=0` unless the environment has it.
+
+`experiments/sheet_operator_batching_benchmark.py`, AMD Ryzen 7 9700X 8-Core
+Processor, Python 3.12.14, NumPy 2.3.5, SciPy 1.17.1, current ba54a9b against
+candidate 0da768b, each core built with GCC 12.5.0 and with AOCC 5.2.0 (clang
+17.0.6).  The operator is shaped like that hot loop (8 layers, 7 levels,
+225 × 320, 0.25 mm); the solve is `solve_sheet_cases` on the 0.25 mm plane
+with four bridge sheets above it (63,575 branches, eight excitations in
+lockstep, `near`, 1e-6, restart 120, 187 iterations at most):
+
+| Compiler | Build | One set, 1 / 2 / 4 / 8 threads (ms) | Ten sets on 8 threads (ms a set) | Solve (s) |
+|---|---|---|---:|---:|
+| GCC 12.5.0 | current | 57.65 / 45.75 / 46.43 / 57.26 | 58.29 | 34.47 |
+| GCC 12.5.0 | candidate | 47.95 / 28.16 / 22.83 / 24.68 | 19.94 | 32.43 |
+| AOCC 5.2.0 | current | 56.63 / 45.41 / 43.68 / 55.73 | 56.19 | 36.22 |
+| AOCC 5.2.0 | candidate | 47.29 / 30.90 / 22.34 / 22.45 | 18.65 | 32.10 |
+
+The operator's outputs and the solutions are the same to the bit in all four
+builds.  The plane spends most of its solve in the near preconditioner's
+SuperLU solves and in Gram-Schmidt, so its solve gains less (1.06 times with
+GCC, 1.13 with AOCC) than the operator does (2.92 and 3.01 times).
+
+**Decision:** adopted (for each compiler: operator and solve identical to the
+bit, the operator no slower at any thread budget, the solve faster and
+converged).
+
 ## What is not done
 
 - The barrel's partial self inductance is taken as a given scalar. Nothing

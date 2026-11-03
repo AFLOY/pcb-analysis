@@ -23,13 +23,13 @@ int team_size(const int threads, const std::int64_t tasks) {
 // in a core's cache (64 entries: 1 KiB a plane).
 constexpr size_t kStretch = 64;
 
-// How many sets go in one batch (measured on a Ryzen 7 9700X, 32 MiB of L3,
-// docs/SHEET_OPERATOR_BATCHING_RESULTS.json): sets whose spectra fit in
-// kCacheBytes go together up to that size, where the batch stays in the
-// cache from the forward transforms to the inverse ones (more sets than
-// that were up to 2.6 times slower a set); larger sets go together up to
-// kWorkspaceBytes, where reading each kernel once for all of them is what
-// counts (up to 1.2 times faster a set than one at a time).
+// How many sets go in one batch, from batches of 1 to 16 sets on eight grids
+// of 0.6 to 51 MiB of spectra a set (Ryzen 7 9700X, 32 MiB of L3, 8 threads):
+// sets whose spectra fit in kCacheBytes go together up to that size, where
+// the batch stays in the cache from the forward transforms to the inverse
+// ones (larger batches of them were up to 2.7 times slower a set); larger
+// sets go together up to kWorkspaceBytes, where reading each kernel once for
+// all of them is what counts (up to 1.2 times faster a set than one alone).
 constexpr size_t kCacheBytes = size_t{24} << 20;
 constexpr size_t kWorkspaceBytes = size_t{1} << 30;
 
