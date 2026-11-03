@@ -21,4 +21,20 @@ void rfft2_padded(const double* input, std::size_t rows, std::size_t cols, std::
 // the full ``padded_rows x padded_cols`` block and ``spectrum`` is clobbered.
 void irfft2(std::complex<double>* spectrum, std::size_t padded_rows, std::size_t padded_cols, double* output);
 
+// rfft2_padded into caller-owned memory: ``row_buffer`` holds ``rows x
+// padded_cols`` doubles.  Only the ``rows`` rows that carry data are
+// transformed along the columns' axis (the padding rows' transforms are
+// zero); the rest is rfft2_padded's arithmetic, step for step.
+void rfft2_padded_rows(const double* input, std::size_t rows, std::size_t cols, std::size_t ld,
+                       std::size_t padded_rows, std::size_t padded_cols, std::complex<double>* spectrum,
+                       double* row_buffer);
+
+// irfft2 of which only the leading ``rows x cols`` block is wanted, written to
+// ``output`` (leading dimension ``ld``): the inverse along the rows' axis runs
+// in place in ``spectrum`` (clobbered) and the one along the columns' axis
+// only for the ``rows`` rows kept, through ``row_buffer`` (``rows x
+// padded_cols`` doubles).  Each kept entry is irfft2's, step for step.
+void irfft2_rows(std::complex<double>* spectrum, std::size_t padded_rows, std::size_t padded_cols, std::size_t rows,
+                 std::size_t cols, double* output, std::size_t ld, double* row_buffer);
+
 }  // namespace pcbcore::fft

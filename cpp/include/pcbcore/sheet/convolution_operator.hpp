@@ -9,11 +9,21 @@
 // spectra.  An application transforms every layer's currents, multiplies and
 // sums the spectra over source layers in layer order, and transforms back:
 // each output is computed by one thread in a fixed order, so the result does
-// not depend on the thread count.
+// not depend on the thread count, nor on how many sets of currents are
+// applied together.
+//
+// Several sets of currents (the excitations a lockstep Krylov solve carries,
+// each as its real and imaginary part) are applied at once: every plane of
+// every set is transformed on the team, and the products run over short
+// stretches of the spectrum, each reading a stretch of every kernel once for
+// all the sets.  The spectra live in a workspace the operator keeps between
+// applications, so a solve does not map and fault in fresh pages on every
+// step; one application at a time uses it, and concurrent callers wait.
 #pragma once
 
 #include <complex>
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 namespace pcbcore::sheet {
@@ -31,6 +41,13 @@ public:
     void apply(const double* currents_x, const double* currents_y, const double* currents_z, double* flux_x,
                double* flux_y, double* flux_z, int threads) const;
 
+    // ``count`` sets of currents, set ``s`` at ``currents_x[s]`` and so on,
+    // each given exactly what apply gives it alone.  ``currents_z`` and
+    // ``flux_z`` are null for no vertical currents in any set.
+    void apply_many(std::int64_t count, const double* const* currents_x, const double* const* currents_y,
+                    const double* const* currents_z, double* const* flux_x, double* const* flux_y,
+                    double* const* flux_z, int threads) const;
+
     [[nodiscard]] std::int64_t layers() const noexcept { return layers_; }
     [[nodiscard]] std::int64_t levels() const noexcept { return levels_; }
     [[nodiscard]] std::int64_t spectrum_bytes() const noexcept;
@@ -39,8 +56,9 @@ private:
     using Spectrum = std::vector<std::complex<double>>;
 
     [[nodiscard]] std::size_t pair_index(std::int64_t first, std::int64_t second, std::int64_t count) const noexcept;
-    void convolve(const double* currents, double* flux, std::int64_t count, const std::vector<Spectrum>& kernels,
-                  int threads) const;
+    void apply_batch(std::int64_t count, const double* const* currents_x, const double* const* currents_y,
+                     const double* const* currents_z, double* const* flux_x, double* const* flux_y,
+                     double* const* flux_z, bool vertical, int threads) const;
 
     std::int64_t layers_;
     std::int64_t rows_;
@@ -52,6 +70,9 @@ private:
     std::vector<Spectrum> kernels_x_;
     std::vector<Spectrum> kernels_y_;
     std::vector<Spectrum> kernels_z_;
+    // The spectra of the sets being applied, kept for the next application.
+    mutable std::mutex workspace_mutex_;
+    mutable Spectrum workspace_;
 };
 
 }  // namespace pcbcore::sheet
