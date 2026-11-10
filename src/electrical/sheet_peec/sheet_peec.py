@@ -31,9 +31,11 @@ from any question about the inductance.
 from __future__ import annotations
 
 import math
+import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 import numpy as np
 
@@ -1573,15 +1575,40 @@ def _available_memory_bytes() -> int | None:
     return None
 
 
+_MEMORY_SHARE = threading.local()
+
+
+@contextmanager
+def memory_share(fraction: float) -> Iterator[float]:
+    """Run a block on this thread with only ``fraction`` of the free memory counted as its own.
+
+    Solves that run side by side (conductors of one call, see
+    ``current_field_contract.solve_current_field_problems``) each see the
+    whole of ``MemAvailable``; each is given its share of it, so that their
+    lockstep cuts together fit where one alone would.  The share is per
+    thread and nests by multiplication.
+    """
+    if not 0.0 < fraction <= 1.0:
+        raise ValueError("a memory share must be in (0, 1]")
+    previous = getattr(_MEMORY_SHARE, "value", 1.0)
+    _MEMORY_SHARE.value = previous * fraction
+    try:
+        yield _MEMORY_SHARE.value
+    finally:
+        _MEMORY_SHARE.value = previous
+
+
 def lockstep_width(count: int, column_bytes: int) -> int:
     """How many of ``count`` excitations to solve in one lockstep group, at least one.
 
-    All of them when the memory available is unknown.
+    All of them when the memory available is unknown.  A solve running beside
+    others counts only its :func:`memory_share` of the memory available.
     """
     available = _available_memory_bytes()
     if available is None or column_bytes <= 0:
         return count
-    return max(1, min(count, int(LOCKSTEP_MEMORY_FRACTION * available) // int(column_bytes)))
+    share = getattr(_MEMORY_SHARE, "value", 1.0)
+    return max(1, min(count, int(LOCKSTEP_MEMORY_FRACTION * share * available) // int(column_bytes)))
 
 
 def choose_preconditioner(unknowns: int, near_factorization: str = "mumps_quasi_definite") -> str:
