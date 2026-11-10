@@ -907,6 +907,44 @@ side; repeated measurements move by about 3 %.
 **Decision:** adopted (on every case the estimate is at least the measured
 column and at most 2.5 times it).
 
+### Conductors side by side (measured, `SHEET_CONDUCTOR_PROCESSES_RESULTS.json`)
+
+A call of `solve_current_field_problems` often holds several conductors: a
+board's roles, each with its cases.  One conductor's solve is mostly the
+preconditioner's SuperLU solves and GMRES, which do not run faster on more
+threads, so a call solved its conductors one after another on a few cores of
+whatever budget it had.  Its conductors share nothing, and they are now
+solved side by side, each in a worker process of its own (`spawn`) on an even
+share of the thread budget and of the free memory (`memory_share`, which the
+lockstep cut reads).  How many run at once is the smallest of the conductor
+count, the budget, and the largest conductors whose estimate
+(`conductor_bytes`: saddle-point unknowns counted from the cells, every
+filament, at `CONDUCTOR_BYTES_PER_UNKNOWN` = 12 KB) fits together in
+`CONDUCTOR_MEMORY_FRACTION` (0.5) of `MemAvailable`.  Below
+`CONDUCTOR_PROCESS_FROM_UNKNOWNS` (100k) in the largest conductor a worker's
+start would cost more than it saves, and the call stays in the caller's
+process.  Each result carries the width as the `conductor_width` metric and
+is the one its conductor gets alone, to the bit.
+
+Measured on Flow2 (AMD EPYC 9965, 192 cores, budget 192) with Kicad_PowerOpt's
+full-domain baseline of the 2-layer LM5145 EVM: five conductors of 1.09M to
+1.26M unknowns at 0.1 mm, two cases each, 214 kHz, `block`, tolerance 1e-9
+(1,000 to 1,700 GMRES iterations a case):
+
+| layout | wall (s) | each conductor (s) | speed-up |
+| --- | ---: | ---: | ---: |
+| one after another | 7,599 | 1,135 to 2,026 | 1.00 |
+| five on threads, budget 38 each | 6,548 | 4,795 to 6,548 | 1.16 |
+| five in processes, budget 38 each | 2,067 | 1,174 to 2,050 | 3.68 |
+
+On threads every conductor took three to four times its time alone: their
+GMRES steps queue on the interpreter's lock.  In processes each takes about
+its time alone (largest worker 10.9 GB), and the call ends with its largest
+conductor.  The solutions of all ten cases were the same bits in every
+layout.
+
+**Decision:** adopted in processes; threads rejected.
+
 ### The C++ operator on batches of sets (measured, `SHEET_OPERATOR_BATCHING_RESULTS.json`)
 
 Profiling a hot loop of Kicad_PowerOpt (eight sheet layers of which four are
