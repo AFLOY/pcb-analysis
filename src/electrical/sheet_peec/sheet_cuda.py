@@ -110,15 +110,16 @@ class CudssQuasiDefiniteNear:
         self._cp = cp
         self._sign = cp.asarray(sign)
         self._rhs = cp.zeros(matrix.shape[0], dtype=cp.complex128)
-        self._solver = nsa.DirectSolver(
-            csp.csr_matrix(matrix),
-            self._rhs,
-            execution="cuda",
-            options={
-                "sparse_system_type": nsa.DirectSolverMatrixType.SYMMETRIC,
-                "sparse_system_view": nsa.DirectSolverMatrixViewType.FULL,
-            },
-        )
+        options = {
+            "sparse_system_type": nsa.DirectSolverMatrixType.SYMMETRIC,
+            "sparse_system_view": nsa.DirectSolverMatrixViewType.FULL,
+        }
+        threading = _cudss_threading_library()
+        if threading is not None:
+            # cuDSS orders and plans on the host; single-threaded that took
+            # 5.6 s of a 0.4 mm filament hot loop on a Colab host
+            options["multithreading_lib"] = threading
+        self._solver = nsa.DirectSolver(csp.csr_matrix(matrix), self._rhs, execution="cuda", options=options)
         self._solver.plan_config.pivot_type = cudss_bindings.PivotType.PIVOT_NONE
         self._solver.plan()
         self._solver.factorize()
@@ -133,6 +134,28 @@ class CudssQuasiDefiniteNear:
         solver, self._solver = getattr(self, "_solver", None), None
         if solver is not None:
             solver.free()
+
+
+def _cudss_threading_library() -> str | None:
+    """cuDSS's OpenMP threading layer beside its library, or None when it is not installed."""
+    import glob
+    import os
+
+    stated = os.environ.get("CUDSS_THREADING_LIB")
+    if stated:
+        return stated
+    try:
+        import nvidia.cu13 as cu13_package  # nvidia-cudss-cu13 ships it here
+    except ImportError:
+        try:
+            import nvidia.cudss as cu13_package  # older wheel layout
+        except ImportError:
+            return None
+    for root in getattr(cu13_package, "__path__", []):
+        found = sorted(glob.glob(os.path.join(root, "**", "libcudss_mtlayer_gomp.so*"), recursive=True))
+        if found:
+            return found[0]
+    return None
 
 
 class CudaSheetSolveError(RuntimeError):
@@ -790,7 +813,9 @@ def _solve_group_cuda(
     active_resistance = resistance[active_branches]
     reduced = csp.csr_matrix(reduced_cpu)
     resistance_device = cp.asarray(active_resistance)
-    active_branches_device = cp.asarray(active_branches)
+    # integer positions, not the boolean mask: a masked index makes CuPy count
+    # the mask on the host, a device synchronisation in every product
+    active_branches_device = cp.asarray(np.flatnonzero(active_branches))
 
     def finish(index: int, voltage_device: Any, current_device: Any, iterations: int, residual: float,
                converged: bool, factor_backend: str, prepare_ms: float, solve_started: float) -> None:
