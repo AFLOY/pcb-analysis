@@ -372,3 +372,13 @@ def test_a_barrel_section_scales_the_via_resistance_at_the_solve_frequency() -> 
         value["frequency_hz"] = 0.0
         at_dc = _sheet_geometry(CurrentFieldProblem.from_mapping(value), {"maximum_filaments": 1})[0]
         assert {via.resistance_ohm for via in at_dc.via_branches} == plain
+
+
+def test_the_near_preconditioner_keeps_a_cut_layer_s_filaments_together() -> None:
+    """A layer cut into skin filaments converges about as fast as one left whole."""
+    settings = {"relative_tolerance": 1e-9, "preconditioner": "near"}
+    whole = solve_current_field_problem(_problem(frequency_hz=3e7), {**settings, "maximum_filaments": 1})
+    cut = solve_current_field_problem(_problem(frequency_hz=3e7), {**settings, "maximum_filaments": 64})
+    assert cut.metrics["converged"] and max(cut.metrics["filament_counts"].values()) > 5
+    # 31 iterations when the filaments' mutual terms were dropped from the near matrix
+    assert cut.metrics["solver_iterations"] <= 3 * whole.metrics["solver_iterations"]

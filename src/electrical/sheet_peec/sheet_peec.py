@@ -1376,13 +1376,19 @@ def _branch_layers(mesh: SheetMesh) -> np.ndarray:
     )
 
 
+def _conductor_of_layer(name: str) -> str:
+    """The copper layer a stackup layer belongs to: ``F.Cu#3``, a skin filament, is ``F.Cu``."""
+    return str(name).split("#", 1)[0]
+
+
 def _near_impedance(
     mesh: SheetMesh, operator: Any, omega: float, resistance: np.ndarray, active_branches: np.ndarray
 ) -> sp.csr_matrix:
     """``R + j omega L_near`` over the active branches: the sparse near-field impedance.
 
     ``L_near`` keeps a branch's couplings to the branches near it on its own
-    layer (and the vertical branches' among themselves), not those to the
+    layer -- all the filaments of one cut layer counting as that layer -- (and
+    the vertical branches' among themselves), not those to the
     layers above and below.  Two layers a tenth of a millimetre apart couple
     almost as strongly a few cells away as next door, so cutting that coupling
     at the near radius gives a worse approximation than leaving it out: on a
@@ -1393,7 +1399,17 @@ def _near_impedance(
     """
 
     near = operator.near_inductance(mesh).tocoo()
-    layer = _branch_layers(mesh)
+    # A layer cut into skin filaments is one conductor: its filaments sit
+    # microns apart and couple almost as strongly as a filament to itself, so
+    # their mutual terms stay (dropped, a 71 um plane cut seven ways took the
+    # GMRES of a 30 MHz hot loop from 17 iterations to its cap).  Filaments
+    # are the stackup layers named ``<layer>#<k>``.
+    parent = np.asarray(
+        [_conductor_of_layer(layer.name) for layer in mesh.stackup.layers] + [-1], dtype=object
+    )
+    sheet_ids = {name: index for index, name in enumerate(dict.fromkeys(parent[:-1]))}
+    sheet = np.asarray([sheet_ids[name] for name in parent[:-1]] + [-1], dtype=np.int64)
+    layer = sheet[_branch_layers(mesh)]
     same = layer[near.row] == layer[near.col]
     near = sp.csr_matrix((near.data[same], (near.row[same], near.col[same])), shape=near.shape)
     active_index = np.flatnonzero(active_branches)
