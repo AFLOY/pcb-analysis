@@ -311,8 +311,17 @@ class PortImpedanceResult:
 
 def _cut_key(problem: PortImpedanceProblem, frequency_hz: float, settings: Mapping[str, Any]) -> tuple:
     cuts = _filament_cuts(problem.layers, frequency_hz, settings)
+    # A barrel's resistance moves with frequency even where the cut does not;
+    # a mesh is reused only while every barrel's Rac/Rdc agrees to 1e-9.
+    layer_by_name = {layer.name: layer for layer in problem.layers}
+    barrels = tuple(
+        round(segment.resistance_at(frequency_hz, layer_by_name[segment.upper_layer].resistivity_ohm_m)
+              / segment.resistance_ohm, 9)
+        for _, _, segment in problem.vertical_segments
+        if segment.skin_outer_diameter_mm is not None
+    )
     return tuple((layer.name, tuple(cuts[layer.name].layers(layer.name, layer.resistivity_ohm_m)))
-                 for layer in problem.layers)
+                 for layer in problem.layers) + (("barrel_skin", barrels),)
 
 
 def _port_pads(problem: PortImpedanceProblem, filament_of: Mapping[str, tuple[int, ...]]) -> list[PortPad]:
