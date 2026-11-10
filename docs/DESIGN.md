@@ -43,12 +43,13 @@ only threading control is the process-wide budget of `electrical.threads`.
 
 **Same bits.** On one machine and one build, the same input gives the same
 bits in every process, whatever the thread budget, `PYTHONHASHSEED`, the
-memory free (which sets how a lockstep group is cut) or how many sets the
-operator applies at once:
+memory free (which sets how a lockstep group is cut and how many conductors
+are solved side by side) or how many sets the operator applies at once:
 
 - Every sum runs in a fixed order.  A native kernel gives each output to
   one task, which sums in layer (or entry) order; a lockstep group solves each
-  column as it would be solved alone; BLAS is held to one thread.
+  column as it would be solved alone; conductors solved side by side share
+  nothing; BLAS is held to one thread.
 - No set or `frozenset` is iterated where its order could reach a number.
   Sets of names, or of cells keyed by a layer's name, iterate in another
   order in every process, because Python randomises string hashes.  The
