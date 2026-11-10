@@ -19,6 +19,13 @@ Versions before 0.7.0 were not tagged; see the Git history.
   residual fell to ~1e-20, its dot products underflowing; a board held at
   its ambient by a stiff contact did that.  The correction's right-hand side
   is scaled by a power of two first, so other results keep their bits.
+- Board-enclosure coupling can solve each body with a Robin condition to the
+  board face's temperature (`InterfaceCouplingConfig.scheme="body_robin"`,
+  `ContactMap.body_robin`, `ContactMap.board_nodal_heat_w`) instead of
+  loading it with the interface heat: a part that loses little to its own
+  film no longer swings by P / G_film on the first step, which made the
+  exchange diverge on a two-layer buck EVM.  The default stays
+  `"board_robin"`, so existing results do not move.
 
 ## 0.13.0
 

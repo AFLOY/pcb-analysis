@@ -81,6 +81,14 @@ class InterfaceCouplingConfig:
     divergence_temperature_k: float = 1.0e6
     board: MPIRConfig | None = None
     body: MPIRConfig | None = None
+    # Which side of the interface is held by a film and which is handed a heat:
+    # "board_robin" solves the board against the bodies' contact temperature
+    # and hands each body the heat that crosses (a body anchored only by its
+    # own small film then swings with every error in that heat, and on a part
+    # of a few square millimetres the loop diverges); "body_robin" solves each
+    # body against the board's face temperature and hands the board the heat,
+    # which the board, cooled over its whole area, takes without amplifying.
+    scheme: str = "board_robin"
 
     def __post_init__(self) -> None:
         if self.max_iterations < 1:
@@ -93,6 +101,8 @@ class InterfaceCouplingConfig:
             raise ValueError("relaxation must lie in (0, max_relaxation]")
         if self.max_relaxation < 1.0:
             raise ValueError("max_relaxation must be at least one")
+        if self.scheme not in ("board_robin", "body_robin"):
+            raise ValueError("scheme must be 'board_robin' or 'body_robin'")
 
 
 @dataclass(frozen=True)
@@ -151,6 +161,9 @@ def run_board_enclosure_thermal(
     """
 
     config = config or InterfaceCouplingConfig()
+    if config.scheme == "body_robin":
+        # the C++ loop runs the board_robin exchange only
+        return _python_body_robin_enclosure(scenario, config, backend=backend, device_id=device_id, initial=initial)
     from .native_loops import coupling_core
 
     core = coupling_core(None, backend)
@@ -295,6 +308,129 @@ def _python_board_enclosure(
     )
 
 
+
+
+def _python_body_robin_enclosure(
+    scenario: BoardEnclosureThermalScenario,
+    config: InterfaceCouplingConfig,
+    *,
+    backend: RuntimeBackend | None,
+    device_id: int,
+    initial: BoardEnclosureThermalResult | None,
+) -> BoardEnclosureThermalResult:
+    """The interface loop with every body held by a film to the board's face temperature.
+
+    Each step solves every body against the board's face temperature across
+    its contact (``ContactMap.body_robin``), hands the board the heat that
+    crossed (``board_nodal_heat_w``), solves the board, and reads its face
+    temperatures back; the fixed point is on those, relaxed as the
+    board_robin loop relaxes its own.  ``contact_temperature_k`` of the
+    result holds the board face temperatures of each contact.
+    """
+
+    board_mesh = scenario.board.mesh
+    bodies = scenario.bodies
+    base_nodal = scenario.board.nodal_heat_w
+    ambient = (
+        scenario.board.convection[0].mean_ambient_k()
+        if scenario.board.convection
+        else float(np.mean(scenario.board.fixed_temperature_k[scenario.board.fixed_temperature_mask]))
+    )
+    face_temperatures = [np.full(body.contact.size, ambient) for body in bodies]
+    board_guess: np.ndarray | None = None
+    body_guesses: list[np.ndarray | None] = [None] * len(bodies)
+    if initial is not None:
+        if len(initial.bodies) != len(bodies) or any(
+            previous.shape != current.shape for previous, current in zip(initial.contact_temperature_k, face_temperatures)
+        ):
+            raise ValueError("initial must come from a scenario with the same bodies and contacts")
+        face_temperatures = [np.asarray(t, dtype=np.float64).copy() for t in initial.contact_temperature_k]
+        board_guess = np.nan_to_num(initial.board.temperature_k, nan=initial.board.min_temperature_k)
+        body_guesses = [np.nan_to_num(s.temperature_k, nan=s.min_temperature_k) for s in initial.bodies]
+    previous_increment: np.ndarray | None = None
+    relaxation = config.relaxation
+    previous_heat = float("nan")
+    history: list[InterfaceStep] = []
+    converged = False
+    board_solution: ThermalConductionSolution | None = None
+    body_solutions: list[ThermalConductionSolution] = []
+    pair_heat: list[np.ndarray] = []
+
+    for iteration in range(1, config.max_iterations + 1):
+        body_solutions, pair_heat = [], []
+        load = np.zeros(board_mesh.node_shape) if base_nodal is None else np.array(base_nodal, dtype=np.float64)
+        for index, (body, face) in enumerate(zip(bodies, face_temperatures)):
+            contact = body.contact
+            coefficient, film_ambient = contact.body_robin(body.body.mesh, face)
+            problem = dataclasses.replace(
+                body.body,
+                convection=tuple(body.body.convection)
+                + (ConvectionBoundary(contact.body_side, coefficient, film_ambient),),
+            )
+            solution = solve_thermal_conduction(
+                problem, config=config.body, backend=backend, device_id=device_id,
+                initial_temperature_k=body_guesses[index],
+            )
+            body_guesses[index] = np.nan_to_num(solution.temperature_k, nan=solution.min_temperature_k)
+            heat = contact.pair_heat_w(face, contact.body_face_temperature_k(body.body.mesh, solution.temperature_k))
+            body_solutions.append(solution)
+            pair_heat.append(heat)
+            load = load - contact.board_nodal_heat_w(board_mesh, heat)
+        board_solution = solve_thermal_conduction(
+            dataclasses.replace(scenario.board, nodal_heat_w=load),
+            config=config.board, backend=backend, device_id=device_id, initial_temperature_k=board_guess,
+        )
+        board_guess = np.nan_to_num(board_solution.temperature_k, nan=board_solution.min_temperature_k)
+        proposed = [body.contact.board_face_temperature_k(board_mesh, board_solution.temperature_k) for body in bodies]
+
+        current_all = np.concatenate(face_temperatures)
+        increment = np.concatenate(proposed) - current_all
+        if config.aitken and previous_increment is not None:
+            difference = increment - previous_increment
+            denominator = float(np.dot(difference, difference))
+            if denominator > 0.0:
+                relaxation = -relaxation * float(np.dot(previous_increment, difference)) / denominator
+                relaxation = float(np.clip(relaxation, 0.05, config.max_relaxation))
+        updated = current_all + relaxation * increment
+        change = float(np.max(np.abs(updated - current_all)))
+        previous_increment = increment
+        offsets = np.cumsum([0] + [body.contact.size for body in bodies])
+        face_temperatures = [updated[offsets[i] : offsets[i + 1]] for i in range(len(bodies))]
+
+        total_heat = float(sum(np.sum(heat) for heat in pair_heat))
+        relative_heat_change = (
+            abs(total_heat - previous_heat) / abs(total_heat)
+            if np.isfinite(previous_heat) and total_heat
+            else float("inf")
+        )
+        previous_heat = total_heat
+        history.append(
+            InterfaceStep(
+                iteration=iteration,
+                interface_heat_w=total_heat,
+                max_temperature_change_k=change,
+                relative_heat_change=relative_heat_change,
+                relaxation=relaxation,
+                board_inner_iterations=board_solution.solve.inner_iterations,
+                body_inner_iterations=sum(s.solve.inner_iterations for s in body_solutions),
+            )
+        )
+        if change <= config.temperature_tolerance_k and relative_heat_change <= config.relative_heat_tolerance:
+            converged = board_solution.solve.converged and all(s.solve.converged for s in body_solutions)
+            break
+        if not np.isfinite(change) or change > config.divergence_temperature_k:
+            break
+
+    assert board_solution is not None
+    return BoardEnclosureThermalResult(
+        board=board_solution,
+        bodies=tuple(body_solutions),
+        contact_heat_w=tuple(pair_heat),
+        contact_temperature_k=tuple(face_temperatures),
+        converged=converged,
+        iterations=len(history),
+        history=tuple(history),
+    )
 
 def result_from_core(result: dict) -> BoardEnclosureThermalResult:
     from thermal.matrix_free_mpir_fem.native_system import solution_from

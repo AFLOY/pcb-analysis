@@ -156,6 +156,44 @@ class ContactMap:
         ambient = np.where(touched, weighted / np.where(touched, conductance, 1.0), 0.0)
         return conductance / cell_area, ambient
 
+    @property
+    def body_side(self) -> Side:
+        """The side of the body's own grid its contact faces lie on."""
+
+        return "bottom" if self.body_face == "-z" else "top"
+
+    def body_robin(
+        self, body: LayeredThermalMesh, board_face_temperature_k: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Per-face film coefficient and ambient the body sees on its contact side, ``(rows, cols)``.
+
+        The mirror of :meth:`board_robin`: each body face carries the pairs
+        that touch it, their conductances added and the board temperatures
+        averaged with conductance weights.
+        """
+
+        board_temperature = np.asarray(board_face_temperature_k, dtype=np.float64).reshape(-1)
+        if board_temperature.size != self.size:
+            raise ValueError("one board temperature per contact pair is required")
+        shape = body.element_grid_shape[1:]
+        conductance = np.zeros(shape)
+        weighted = np.zeros(shape)
+        rows, cols = self.body_cells[:, 1], self.body_cells[:, 2]
+        np.add.at(conductance, (rows, cols), self.conductance_w_per_k)
+        np.add.at(weighted, (rows, cols), self.conductance_w_per_k * board_temperature)
+        touched = conductance > 0.0
+        ambient = np.where(touched, weighted / np.where(touched, conductance, 1.0), 0.0)
+        return conductance / body.cell_area_m2, ambient
+
+    def board_nodal_heat_w(self, board: LayeredThermalMesh, pair_heat_w: np.ndarray) -> np.ndarray:
+        """Lump heat flowing into the board across each pair onto its four board face nodes."""
+
+        load = np.zeros(board.size, dtype=np.float64)
+        nodes = self.board_face_nodes(board)
+        share = np.asarray(pair_heat_w, dtype=np.float64) / 4.0
+        np.add.at(load, nodes.reshape(-1), np.repeat(share, 4))
+        return load.reshape(board.node_shape)
+
     def pair_heat_w(
         self, board_face_temperature_k: np.ndarray, body_face_temperature_k: np.ndarray
     ) -> np.ndarray:
