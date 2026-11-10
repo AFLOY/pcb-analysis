@@ -44,6 +44,97 @@ class CudaSheetUnavailableError(RuntimeError):
 MINIMUM_CUPY_MAJOR_VERSION = 14
 
 
+# How the ``near`` preconditioner is factored and applied on the device.
+NEAR_FACTORIZATIONS = ("superlu", "cudss_quasi_definite")
+
+
+def quasi_definite_near_matrix(near: Any, reduced: Any, regularization: float) -> tuple[Any, np.ndarray, float]:
+    """``(matrix, sign, delta)``: the near saddle-point matrix made quasi-definite.
+
+    ``matrix`` is ``[[Z, -A], [-A^T, -delta I]]`` (SciPy CSR, complex128,
+    sorted), ``sign`` the row signs that take the saddle-point right-hand side
+    to it (``+1`` on branches, ``-1`` on nodes), ``delta`` the regularization
+    over the median ``|Z_ii|``.  See :class:`CudssQuasiDefiniteNear`.
+    """
+    import scipy.sparse as sp
+
+    near = sp.csr_matrix(near)
+    diagonal = np.abs(near.diagonal())
+    scale = float(np.median(diagonal[diagonal > 0.0])) if np.any(diagonal > 0.0) else 1.0
+    delta = float(regularization) / scale
+    nodes = reduced.shape[1]
+    matrix = sp.bmat(
+        [[near, -reduced], [-reduced.T, -delta * sp.identity(nodes, format="csr")]], format="csr"
+    ).astype(np.complex128)
+    matrix.sum_duplicates()
+    matrix.sort_indices()
+    sign = np.concatenate([np.ones(near.shape[0]), -np.ones(nodes)]).astype(np.complex128)
+    return matrix, sign, delta
+
+
+class CudssQuasiDefiniteNear:
+    """The near-field saddle-point preconditioner as a quasi-definite cuDSS LDL^T.
+
+    The near matrix is ``[[Z, -A], [A^T, 0]]``: ``Z`` the near branch
+    impedances (complex symmetric, its real part the branch resistances),
+    ``A`` the reduced incidence.  Its zero block defeats a factorization that
+    does not pivot across the whole matrix: cuDSS's default static pivoting
+    gave residuals above one, and the general COLAMD ordering that does pivot
+    is 70 times slower per solve.  Negating the node rows and putting
+    ``-delta I`` in the zero block gives
+
+        [[Z, -A], [-A^T, -delta I]],
+
+    complex symmetric and quasi-definite (``Re Z`` positive, the node block
+    negative), which factors stably as LDL^T in any symmetric ordering
+    without pivoting, so cuDSS's nested dissection and parallel triangular
+    solves apply.  ``delta`` is ``regularization`` over the median ``|Z_ii|``;
+    at 1e-8 the factors solve the unregularized near matrix to about 1e-6,
+    which is a preconditioner, not the solution, so the Krylov iteration
+    count is unchanged.
+
+    ``solve(v)`` returns ``M^-1 v`` for the unregularized sign convention.
+    """
+
+    def __init__(self, near: Any, reduced: Any, regularization: float, cp: Any) -> None:
+        try:
+            import nvmath.bindings.cudss as cudss_bindings
+            import nvmath.sparse.advanced as nsa
+        except ImportError as error:
+            raise CudaSheetUnavailableError(
+                "near_factorization='cudss_quasi_definite' needs nvmath-python with cuDSS"
+            ) from error
+        import cupyx.scipy.sparse as csp
+
+        matrix, sign, delta = quasi_definite_near_matrix(near, reduced, regularization)
+        self._cp = cp
+        self._sign = cp.asarray(sign)
+        self._rhs = cp.zeros(matrix.shape[0], dtype=cp.complex128)
+        self._solver = nsa.DirectSolver(
+            csp.csr_matrix(matrix),
+            self._rhs,
+            execution="cuda",
+            options={
+                "sparse_system_type": nsa.DirectSolverMatrixType.SYMMETRIC,
+                "sparse_system_view": nsa.DirectSolverMatrixViewType.FULL,
+            },
+        )
+        self._solver.plan_config.pivot_type = cudss_bindings.PivotType.PIVOT_NONE
+        self._solver.plan()
+        self._solver.factorize()
+        self.regularization = float(regularization)
+        self.delta = delta
+
+    def solve(self, vector: Any) -> Any:
+        self._rhs[...] = vector * self._sign
+        return self._solver.solve().copy()
+
+    def free(self) -> None:
+        solver, self._solver = getattr(self, "_solver", None), None
+        if solver is not None:
+            solver.free()
+
+
 class CudaSheetSolveError(RuntimeError):
     """Raised when CUDA initialized but the sheet solve failed."""
 
@@ -417,6 +508,8 @@ def solve_sheet_case_cuda(
     preconditioner: str = "near",
     keep_terminal_components: bool = False,
     initial: SheetSolution | None = None,
+    near_factorization: str = "superlu",
+    near_regularization: float = 1e-8,
 ) -> tuple[SheetSolution, CudaSheetTelemetry]:
     """Solve one sheet case with cuFFT, CuPy sparse algebra, and CUDA GMRES."""
     return solve_sheet_cases_cuda(
@@ -424,6 +517,7 @@ def solve_sheet_case_cuda(
         max_iterations=max_iterations, restart=restart, device_id=device_id, cupy_module=cupy_module,
         preconditioner=preconditioner, keep_terminal_components=keep_terminal_components,
         initial=None if initial is None else [initial],
+        near_factorization=near_factorization, near_regularization=near_regularization,
     )[0]
 
 
@@ -441,6 +535,8 @@ def solve_sheet_cases_cuda(
     preconditioner: str = "near",
     keep_terminal_components: bool = False,
     initial: Sequence[SheetSolution | None] | None = None,
+    near_factorization: str = "superlu",
+    near_regularization: float = 1e-8,
 ) -> list[tuple[SheetSolution, CudaSheetTelemetry]]:
     """Solve several excitations of one mesh on the device, in the order given.
 
@@ -453,6 +549,11 @@ def solve_sheet_cases_cuda(
     frequency (the least-residual mix of its parts), as on the CPU.  Each
     excitation gets its own telemetry; ``prepare_ms`` counts the shared
     preparation and its group's factorisation.
+
+    ``near_factorization`` chooses how the ``near`` preconditioner is factored
+    and applied: ``superlu`` (SciPy SuperLU factors, CuPy triangular solves)
+    or ``cudss_quasi_definite`` (:class:`CudssQuasiDefiniteNear`, cuDSS LDL^T
+    of the regularized near matrix, ``near_regularization`` relative).
     """
     cp = cupy_module if cupy_module is not None else _import_cupy()
     try:
@@ -478,6 +579,11 @@ def solve_sheet_cases_cuda(
         preconditioner = "near"
     if preconditioner not in ("near", "diagonal"):
         raise ValueError("preconditioner must be 'auto', 'near' or 'diagonal'")
+    if near_factorization not in NEAR_FACTORIZATIONS:
+        raise ValueError(f"near_factorization must be one of {NEAR_FACTORIZATIONS}")
+    near_regularization = float(near_regularization)
+    if not (math.isfinite(near_regularization) and near_regularization > 0.0):
+        raise ValueError("near_regularization must be positive")
     frequency_hz = float(frequency_hz)
     if not math.isfinite(frequency_hz) or frequency_hz < 0.0:
         raise ValueError("frequency must be finite and non-negative")
@@ -536,7 +642,7 @@ def solve_sheet_cases_cuda(
                     _solve_group_cuda(
                         cp, csp, csl, mesh, operator, cuda_operator, indices, resistance, cases, members,
                         given_list, solved, frequency_hz, tolerance, max_iterations, restart, preconditioner,
-                        shared_prepare_ms,
+                        shared_prepare_ms, near_factorization, near_regularization,
                     )
                 pool_peak = int(pool.total_bytes())
                 free_after, _ = cp.cuda.runtime.memGetInfo()
@@ -583,7 +689,7 @@ def _solve_group_cuda(
     cp: Any, csp: Any, csl: Any, mesh: SheetMesh, operator: Any, cuda_operator: Any, indices: "_BranchIndices",
     resistance: np.ndarray, cases: list, members: list[int], given_list: list, solved: list,
     frequency_hz: float, tolerance: float, max_iterations: int, restart: int, preconditioner: str,
-    shared_prepare_ms: float,
+    shared_prepare_ms: float, near_factorization: str = "superlu", near_regularization: float = 1e-8,
 ) -> None:
     """The excitations ``members`` of one reduction: their system prepared once, each solved in turn."""
     group_started = time.perf_counter()
@@ -687,8 +793,13 @@ def _solve_group_cuda(
         import scipy.sparse as sp
 
         near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
-        saddle_cpu = sp.bmat([[near_cpu, -reduced_cpu], [reduced_cpu.T, None]], format="csc")
-        factored = csl.splu(csp.csc_matrix(saddle_cpu))
+        if near_factorization == "cudss_quasi_definite":
+            factored = CudssQuasiDefiniteNear(near_cpu, reduced_cpu, near_regularization, cp)
+            factor_backend = "cudss_quasi_definite_ldlt"
+        else:
+            saddle_cpu = sp.bmat([[near_cpu, -reduced_cpu], [reduced_cpu.T, None]], format="csc")
+            factored = csl.splu(csp.csc_matrix(saddle_cpu))
+            factor_backend = "scipy_superlu_factor_cupy_triangular_solve"
 
         def precondition(vector: Any) -> Any:
             return factored.solve(vector)
@@ -700,6 +811,8 @@ def _solve_group_cuda(
         diagonal = cp.asarray(full_diagonal_cpu[active_branches])
         schur = (reduced.T @ csp.diags(1.0 / diagonal) @ reduced).tocsc()
         factored = csl.splu(schur)
+
+        factor_backend = "scipy_superlu_factor_cupy_triangular_solve"
 
         def precondition(vector: Any) -> Any:
             rhs_current = vector[:branches]
@@ -722,6 +835,25 @@ def _solve_group_cuda(
     effective_restart = min(restart, size)
     floor = 100.0 * np.finfo(np.float64).eps
 
+    try:
+        _solve_members_cuda(
+            cp, csl, mesh, members, cases, given_list, saddle, precondition, linear_system, active_branches, keep,
+            branches, unknowns, size, tolerance, max_iterations, effective_restart, floor, finish, factor_backend,
+            prepare_ms,
+        )
+    finally:
+        release = getattr(factored, "free", None)
+        if release is not None:
+            release()
+
+
+def _solve_members_cuda(
+    cp: Any, csl: Any, mesh: SheetMesh, members: list[int], cases: list, given_list: list, saddle: Any,
+    precondition: Any, linear_system: Any, active_branches: np.ndarray, keep: np.ndarray, branches: int,
+    unknowns: int, size: int, tolerance: float, max_iterations: int, effective_restart: int, floor: float,
+    finish: Any, factor_backend: str, prepare_ms: float,
+) -> None:
+    """Each excitation of a prepared group, solved in turn by restarted left-preconditioned GMRES."""
     for index in members:
         solve_started = time.perf_counter()
         injected_device = cp.asarray(cases[index][0])
@@ -773,7 +905,7 @@ def _solve_group_cuda(
         voltage_device = cp.zeros(mesh.node_count, dtype=cp.complex128)
         voltage_device[keep] = result[branches:]
         finish(index, voltage_device, current_device, counter["restarts"], residual, residual <= tolerance,
-               "scipy_superlu_factor_cupy_triangular_solve", prepare_ms, solve_started)
+               factor_backend, prepare_ms, solve_started)
 
 
 def _cuda_start(
