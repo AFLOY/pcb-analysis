@@ -20,8 +20,10 @@ share, and threaded BLAS kept every core spinning for no gain -- at a budget
 of 8 it froze the host.
 
 Where pcb-analysis nests parallelism (the thread pool over the unit solves
-of an N-port basis, each solve running an OpenMP team) it splits the budget
-between the levels itself, so that their product never exceeds it.  There is
+of an N-port basis, each solve running an OpenMP team; the conductors of one
+current-field call solved side by side, each running its own solve) it
+splits the budget between the levels itself, so that their product never
+exceeds it.  There is
 no per-call, per-kernel or per-level knob and no environment variable for a
 thread count; the split is an internal decision that follows measurements.
 

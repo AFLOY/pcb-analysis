@@ -44,8 +44,9 @@ only threading control is the process-wide budget of `electrical.threads`.
 **Same bits, at the same thread counts.** On one machine and one build, the
 same input solved with the same thread budget and the same
 `near_factor_threads` gives the same bits in every process, whatever
-`PYTHONHASHSEED`, the memory free (which sets how a lockstep group is cut) or
-how many sets the operator applies at once.  This is the promise; other
+`PYTHONHASHSEED`, the memory free (which sets how a lockstep group is cut and
+how many conductors are solved side by side) or how many sets the operator
+applies at once.  This is the promise; other
 thread counts agree within the solver's tolerance.
 
 The MUMPS near factor (the CPU sheet solve's default where the core links
@@ -62,9 +63,9 @@ not a promise: a caller that compares bits keeps the thread counts the same.
 
 - Every sum runs in a fixed order.  A native kernel gives each output to
   one task, which sums in layer (or entry) order; a lockstep group solves each
-  column as it would be solved alone; BLAS is held to one thread; MUMPS runs
-  without its L0 tree parallelism on `near_factor_threads` threads.
-
+  column as it would be solved alone; conductors solved side by side share
+  nothing; BLAS is held to one thread; MUMPS runs without its L0 tree
+  parallelism on `near_factor_threads` threads.
 - No set or `frozenset` is iterated where its order could reach a number.
   Sets of names, or of cells keyed by a layer's name, iterate in another
   order in every process, because Python randomises string hashes.  The
