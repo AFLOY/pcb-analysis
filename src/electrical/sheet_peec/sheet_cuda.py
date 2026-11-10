@@ -202,6 +202,43 @@ class CudaSheetInductanceOperator:
         kernels_z = source._kernels_z or {key: np.fft.rfft2(table) for key, table in source._tables_z.items()}
         self._kernels = {key: cp.asarray(value) for key, value in kernels.items()}
         self._kernels_z = {key: cp.asarray(value) for key, value in kernels_z.items()}
+        # The layer-pair products as one batched matrix product per axis: at
+        # every frequency point the coupling of the layers is an L x L matrix
+        # and the layers' spectra a vector, so the whole convolution is one
+        # (F, L, L) @ (F, L, B) product.  The loop over L^2 pairs it replaces
+        # launched a kernel per pair: 841 a product per axis with the two
+        # 71 um planes of a 2-layer board cut into filaments, which left the
+        # device waiting on launches.  The stack reads every pair's spectrum
+        # once per application whatever the batch, so it is bound by memory
+        # bandwidth.  It is built only where it fits beside the solve.
+        self._stack = self._stacked(kernels, kernels_z, cp)
+
+    def _stacked(self, kernels: dict, kernels_z: dict, cp: Any) -> dict[str, Any] | None:
+        layers, levels = self.layer_count, len(self.vertical_levels)
+        if not kernels:
+            return None
+        sample = next(iter(kernels.values()))
+        frequencies = int(np.prod(sample.shape))
+        needed = 16 * frequencies * (2 * layers * layers + levels * levels)
+        budget = _device_memory_budget(cp)
+        if budget is not None and needed > budget:
+            return None
+
+        def stack(pick: Any, count: int) -> Any:
+            out = cp.empty((frequencies, count, count), dtype=cp.complex128)
+            for first in range(count):
+                for second in range(count):
+                    out[:, first, second] = cp.asarray(pick(first, second)).reshape(-1)
+            return out
+
+        stacked = {
+            "x": stack(lambda a, b: kernels[("x", min(a, b), max(a, b))], layers),
+            "y": stack(lambda a, b: kernels[("y", min(a, b), max(a, b))], layers),
+        }
+        if levels:
+            stacked["z"] = stack(lambda a, b: kernels_z[(min(a, b), max(a, b))], levels)
+        self.spectrum_shape = tuple(sample.shape)
+        return stacked
 
     def _kernel(self, axis: str, first: int, second: int) -> Any:
         key = (
@@ -223,7 +260,37 @@ class CudaSheetInductanceOperator:
     def kernel_bytes(self) -> int:
         return sum(int(value.nbytes) for value in self._kernels.values()) + sum(
             int(value.nbytes) for value in self._kernels_z.values()
-        )
+        ) + (0 if self._stack is None else sum(int(value.nbytes) for value in self._stack.values()))
+
+    def _convolve_batch(self, currents: Any, matrix: Any) -> Any:
+        """``currents`` ``(B, L, rows, cols)`` convolved by the stacked pairs, one product for all."""
+        cp = self.cp
+        rows, cols = self.shape
+        batch, count = currents.shape[0], currents.shape[1]
+        spectra = cp.fft.rfft2(currents, s=self.padded, axes=(-2, -1))
+        frequencies = spectra.shape[-2] * spectra.shape[-1]
+        # (B, L, F) -> (F, L, B): each frequency's layers a column per batch member
+        columns = cp.ascontiguousarray(spectra.reshape(batch, count, frequencies).transpose(2, 1, 0))
+        mixed = cp.matmul(matrix, columns)
+        accumulated = mixed.transpose(2, 1, 0).reshape(batch, count, *spectra.shape[-2:])
+        product = cp.fft.irfft2(accumulated, s=self.padded, axes=(-2, -1))
+        return cp.ascontiguousarray(product[..., :rows, :cols])
+
+    def apply_batch(self, currents_x: Any, currents_y: Any, currents_z: Any | None = None) -> Any:
+        """:meth:`apply` for a batch: every array carries a leading batch axis."""
+        if self._stack is None:
+            outputs = [
+                self.apply(currents_x[b], currents_y[b], None if currents_z is None else currents_z[b])
+                for b in range(currents_x.shape[0])
+            ]
+            return tuple(self.cp.stack(parts) for parts in zip(*outputs))
+        flux_x = self._convolve_batch(currents_x, self._stack["x"])
+        flux_y = self._convolve_batch(currents_y, self._stack["y"])
+        if currents_z is None:
+            return flux_x, flux_y
+        if not self.vertical_levels:
+            return flux_x, flux_y, self.cp.zeros_like(currents_z)
+        return flux_x, flux_y, self._convolve_batch(currents_z, self._stack["z"])
 
     def _convolve(self, spectra: Any, axis: str) -> Any:
         cp = self.cp
@@ -343,6 +410,14 @@ class CudaPfftSheetInductanceOperator:
             out[target] = length * (projection @ potential.reshape(-1))
         return (out.reshape(-1) + self._correction[axis] @ flat.reshape(-1)).reshape(currents.shape)
 
+    def apply_batch(self, currents_x: Any, currents_y: Any, currents_z: Any | None = None) -> Any:
+        """:meth:`apply` over a leading batch axis, one member at a time."""
+        outputs = [
+            self.apply(currents_x[b], currents_y[b], None if currents_z is None else currents_z[b])
+            for b in range(currents_x.shape[0])
+        ]
+        return tuple(self.cp.stack(parts) for parts in zip(*outputs))
+
     def apply(self, currents_x: Any, currents_y: Any, currents_z: Any | None = None) -> Any:
         cp = self.cp
         rows, cols = self.shape
@@ -389,6 +464,21 @@ class _CudaBarrelSelf:
             return self._base.apply(currents_x, currents_y)
         flux_x, flux_y, flux_z = self._base.apply(currents_x, currents_y, currents_z)
         return flux_x, flux_y, flux_z + self._delta_grid * currents_z
+
+    def apply_batch(self, currents_x: Any, currents_y: Any, currents_z: Any | None = None) -> Any:
+        if currents_z is None:
+            return self._base.apply_batch(currents_x, currents_y)
+        flux_x, flux_y, flux_z = self._base.apply_batch(currents_x, currents_y, currents_z)
+        return flux_x, flux_y, flux_z + self._delta_grid * currents_z
+
+
+def _device_memory_budget(cp: Any) -> int | None:
+    """Half the device's free memory, or None where there is no device (NumPy as ``cp``)."""
+    cuda = getattr(cp, "cuda", None)
+    if cuda is None:
+        return None
+    free, _total = cuda.runtime.memGetInfo()
+    return int(free) // 2
 
 
 def cuda_inductance_operator(operator: Any, cp: Any) -> Any:
@@ -753,33 +843,35 @@ def _solve_group_cuda(
     omega = 2.0 * math.pi * frequency_hz
 
     def _flux(currents: Any) -> Any:
+        """The operator on ``currents`` ``(B, branches)``, real, all ``B`` in one application."""
         rows, cols = mesh.shape
-        full_currents = cp.zeros(mesh.branch_count, dtype=cp.float64)
-        full_currents[active_branches_device] = currents
-        grid_x = cp.zeros((len(mesh.stackup), rows, cols), dtype=cp.float64)
+        batch = currents.shape[0]
+        full_currents = cp.zeros((batch, mesh.branch_count), dtype=cp.float64)
+        full_currents[:, active_branches_device] = currents
+        grid_x = cp.zeros((batch, len(mesh.stackup), rows, cols), dtype=cp.float64)
         grid_y = cp.zeros_like(grid_x)
         x_count = len(mesh.branch_x)
         y_count = len(mesh.branch_y)
-        grid_x[indices.x_layer, indices.x_row, indices.x_col] = full_currents[:x_count]
-        grid_y[indices.y_layer, indices.y_row, indices.y_col] = full_currents[x_count : x_count + y_count]
+        grid_x[:, indices.x_layer, indices.x_row, indices.x_col] = full_currents[:, :x_count]
+        grid_y[:, indices.y_layer, indices.y_row, indices.y_col] = full_currents[:, x_count : x_count + y_count]
         if has_vertical:
-            grid_z = cp.zeros((len(levels), rows, cols), dtype=cp.float64)
-            grid_z[indices.z_level, indices.z_row, indices.z_col] = full_currents[x_count + y_count :]
-            flux_x, flux_y, flux_z = cuda_operator.apply(grid_x, grid_y, grid_z)
+            grid_z = cp.zeros((batch, len(levels), rows, cols), dtype=cp.float64)
+            grid_z[:, indices.z_level, indices.z_row, indices.z_col] = full_currents[:, x_count + y_count :]
+            flux_x, flux_y, flux_z = cuda_operator.apply_batch(grid_x, grid_y, grid_z)
         else:
-            flux_x, flux_y = cuda_operator.apply(grid_x, grid_y)
+            flux_x, flux_y = cuda_operator.apply_batch(grid_x, grid_y)
             flux_z = None
-        full_output = cp.zeros(mesh.branch_count, dtype=cp.float64)
-        full_output[:x_count] = flux_x[indices.x_layer, indices.x_row, indices.x_col]
-        full_output[x_count : x_count + y_count] = flux_y[indices.y_layer, indices.y_row, indices.y_col]
+        full_output = cp.zeros((batch, mesh.branch_count), dtype=cp.float64)
+        full_output[:, :x_count] = flux_x[:, indices.x_layer, indices.x_row, indices.x_col]
+        full_output[:, x_count : x_count + y_count] = flux_y[:, indices.y_layer, indices.y_row, indices.y_col]
         if flux_z is not None:
-            full_output[x_count + y_count :] = flux_z[indices.z_level, indices.z_row, indices.z_col]
-        return full_output[active_branches_device]
+            full_output[:, x_count + y_count :] = flux_z[:, indices.z_level, indices.z_row, indices.z_col]
+        return full_output[:, active_branches_device]
 
     def impedance(currents: Any) -> Any:
-        flux = _flux(currents.real).astype(cp.complex128)
-        flux += 1j * _flux(currents.imag)
-        return resistance_device * currents + 1j * omega * flux
+        # the real and imaginary parts are one batch of two: one read of the operator
+        parts = _flux(cp.stack([currents.real, currents.imag]))
+        return resistance_device * currents + 1j * omega * (parts[0] + 1j * parts[1])
 
     def saddle(vector: Any) -> Any:
         currents = vector[:branches]
