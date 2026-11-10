@@ -328,3 +328,47 @@ def test_a_connection_on_several_cells_carries_their_sum() -> None:
     assert together["max_via_current_a"] == pytest.approx(1.0, rel=1e-6)
     # the branches alone each carry part of it
     assert together["max_vertical_connection_current_a"] < 1.0
+
+
+def test_a_plated_barrel_s_resistance_follows_its_skin_depth() -> None:
+    from electrical.sheet_peec.skin_filaments import skin_depth_m, tube_internal_impedance, tube_resistance_ratio
+
+    outer, bore, rho = 0.127e-3, 0.102e-3, 1.724e-8  # a 0.254 mm drill plated 25 um
+    dc = rho / (math.pi * (outer**2 - bore**2))
+    assert tube_resistance_ratio(outer, bore, 0.0, rho) == 1.0
+    assert tube_internal_impedance(outer, bore, 10.0, rho).real == pytest.approx(dc, rel=1e-9)
+    ratios = [tube_resistance_ratio(outer, bore, f, rho) for f in (1e6, 3e7, 1.5e8, 3e8)]
+    assert ratios == sorted(ratios) and ratios[0] < 1.01 < ratios[1]
+    # a wall of many skin depths conducts one skin depth at its outer face only
+    f = 3e9
+    assert tube_internal_impedance(outer, bore, f, rho).real == pytest.approx(
+        rho / (skin_depth_m(f, rho) * 2 * math.pi * outer), rel=0.01)
+    # a solid pin tends to the same surface, over its whole section at DC
+    assert tube_internal_impedance(outer, 0.0, 10.0, rho).real == pytest.approx(rho / (math.pi * outer**2), rel=1e-9)
+    assert tube_internal_impedance(outer, 0.0, f, rho).real == pytest.approx(
+        tube_internal_impedance(outer, bore, f, rho).real, rel=1e-6)
+
+
+def test_a_barrel_section_scales_the_via_resistance_at_the_solve_frequency() -> None:
+    from electrical.sheet_peec.current_field_contract import _sheet_geometry
+    from electrical.sheet_peec.skin_filaments import tube_resistance_ratio
+
+    section = {"outer_diameter_mm": 0.254, "drill_diameter_mm": 0.204}
+    dc = CurrentFieldProblem.from_mapping(_problem(frequency_hz=0.0))
+    dc_values = [via.resistance_ohm for via in _sheet_geometry(dc, {"maximum_filaments": 1})[0].via_branches]
+    plain = set(dc_values)
+    ratio = tube_resistance_ratio(0.127e-3, 0.102e-3, 1.5e8, 1.724e-8)
+    for key in ("resistance_barrel", "barrel"):
+        value = _problem(frequency_hz=1.5e8)
+        for connection in value["vertical_connections"]:
+            connection[key] = dict(section)
+        problem = CurrentFieldProblem.from_mapping(value)
+        mesh = _sheet_geometry(problem, {"maximum_filaments": 1})[0]
+        assert sorted(via.resistance_ohm for via in mesh.via_branches) == pytest.approx(
+            sorted(r * ratio for r in dc_values), rel=1e-12)
+        # a resistance-only section leaves the inductance to the cells' columns
+        assert all((via.barrel_radius_m is None) == (key == "resistance_barrel") for via in mesh.via_branches)
+        # and at DC the stated resistance stands
+        value["frequency_hz"] = 0.0
+        at_dc = _sheet_geometry(CurrentFieldProblem.from_mapping(value), {"maximum_filaments": 1})[0]
+        assert {via.resistance_ohm for via in at_dc.via_branches} == plain

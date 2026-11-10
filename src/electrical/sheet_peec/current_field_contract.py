@@ -20,7 +20,7 @@ from .sheet_pfft import PfftSheetInductanceOperator
 from .sheet_operator import SheetInductanceOperator, SheetStackup
 from .sheet_peec import SheetMesh, Terminal, ViaBranch, solve_sheet_cases
 from .sheet_results import cell_current_density_phasor, sheet_fields
-from .skin_filaments import filament_links, graded_filaments, skin_depth_m
+from .skin_filaments import filament_links, graded_filaments, skin_depth_m, tube_resistance_ratio
 
 CURRENT_FIELD_PROBLEM_SCHEMA = "current-field-problem/v1"
 # v2 carries the grid lines (``x_edges_mm``, ``y_edges_mm``) instead of one pitch,
@@ -98,6 +98,38 @@ class CurrentFieldVerticalSegment:
     # geometry.cad_import writes it from the STEP solid).
     barrel_outer_diameter_mm: float | None = None
     barrel_drill_diameter_mm: float = 0.0
+    # The cross-section whose skin effect scales ``resistance_ohm`` at the
+    # solve frequency: the barrel's, or ``resistance_barrel`` for a barrel the
+    # front end laid on several cells (each carrying a share of it), whose
+    # inductance is those cells' columns and not the barrel's own.
+    skin_outer_diameter_mm: float | None = None
+    skin_drill_diameter_mm: float = 0.0
+
+    def resistance_at(self, frequency_hz: float, resistivity_ohm_m: float) -> float:
+        """``resistance_ohm`` at a frequency: the DC value times the barrel's Rac/Rdc."""
+        if self.skin_outer_diameter_mm is None:
+            return self.resistance_ohm
+        return self.resistance_ohm * tube_resistance_ratio(
+            0.5e-3 * self.skin_outer_diameter_mm,
+            0.5e-3 * self.skin_drill_diameter_mm,
+            frequency_hz,
+            resistivity_ohm_m,
+        )
+
+
+def _barrel_section(barrel: Mapping[str, Any], name: Any) -> tuple[float | None, float]:
+    """``(outer, drill)`` diameters of a stated barrel in mm, or ``(None, 0)`` when none is stated."""
+    outer = barrel.get("outer_diameter_mm")
+    drill = 0.0 if barrel.get("solid_pin") else float(barrel.get("drill_diameter_mm") or 0.0)
+    if outer is None:
+        return None, 0.0
+    outer = float(outer)
+    if not math.isfinite(outer) or outer <= 0.0 or not (0.0 <= drill < outer):
+        raise ValueError(
+            f"vertical connection {name}: a barrel needs "
+            "0 <= drill_diameter_mm < outer_diameter_mm"
+        )
+    return outer, drill
 
 
 def _parse_geometry(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -168,15 +200,13 @@ def _parse_geometry(value: Mapping[str, Any]) -> dict[str, Any]:
         cell_value = connection.get("cell") or {}
         cell = (int(cell_value["x"]), int(cell_value["y"]))
         barrel = connection.get("barrel") or {}
-        outer = barrel.get("outer_diameter_mm")
-        drill = 0.0 if barrel.get("solid_pin") else float(barrel.get("drill_diameter_mm") or 0.0)
-        if outer is not None:
-            outer = float(outer)
-            if not math.isfinite(outer) or outer <= 0.0 or not (0.0 <= drill < outer):
-                raise ValueError(
-                    f"vertical connection {connection.get('name')}: a barrel needs "
-                    "0 <= drill_diameter_mm < outer_diameter_mm"
-                )
+        outer, drill = _barrel_section(barrel, connection.get("name"))
+        # ``resistance_barrel``: the section only scales the resistance with
+        # frequency; ``barrel`` also gives the connection its own inductance.
+        skin_outer, skin_drill = (
+            (outer, drill) if outer is not None
+            else _barrel_section(connection.get("resistance_barrel") or {}, connection.get("name"))
+        )
         for segment in connection.get("segments") or []:
             upper = str(segment["upper_layer"])
             lower = str(segment["lower_layer"])
@@ -220,6 +250,8 @@ def _parse_geometry(value: Mapping[str, Any]) -> dict[str, Any]:
                         length_mm=length,
                         barrel_outer_diameter_mm=outer,
                         barrel_drill_diameter_mm=drill if outer is not None else 0.0,
+                        skin_outer_diameter_mm=skin_outer,
+                        skin_drill_diameter_mm=skin_drill if skin_outer is not None else 0.0,
                     ),
                 )
             )
@@ -440,9 +472,8 @@ def _sheet_geometry(
     pitch_m = problem.pitch_mm * 1e-3 if problem.pitch_mm is not None else None
     sheet_layers = []
     filament_of: dict[str, tuple[int, ...]] = {}
-    cuts = _filament_cuts(
-        problem.layers, problem.frequency_hz if frequency_hz is None else frequency_hz, settings
-    )
+    frequency = problem.frequency_hz if frequency_hz is None else frequency_hz
+    cuts = _filament_cuts(problem.layers, frequency, settings)
     for layer in problem.layers:
         cut = cuts[layer.name]
         indices = tuple(
@@ -519,7 +550,9 @@ def _sheet_geometry(
                 col=x,
                 lower_layer=lower,
                 upper_layer=upper,
-                resistance_ohm=segment.resistance_ohm,
+                resistance_ohm=segment.resistance_at(
+                    frequency, layer_by_name[segment.upper_layer].resistivity_ohm_m
+                ),
                 barrel_radius_m=0.5e-3 * segment.barrel_outer_diameter_mm if barrel else None,
                 barrel_bore_radius_m=0.5e-3 * segment.barrel_drill_diameter_mm if barrel else 0.0,
             )
