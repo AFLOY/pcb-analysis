@@ -1,0 +1,85 @@
+{
+ "benchmark": "Kicad_PowerOpt work/p1 par_bench.py / par_contract.py: the full-domain baseline batch of the 2-layer LM5145 EVM",
+ "timestamp_utc": "2026-11-10T06:52:36Z",
+ "environment": {
+  "host": "Flow2 (Nagoya U.) t1 node, PBS numa=4 (192 cores, 344 GB), shared node",
+  "cpu": "AMD EPYC 9965 192-Core Processor",
+  "python": "3.12.15",
+  "pcb_analysis": "main 50aa1a5, native kernels gcc-toolset 15; feature/concurrent-conductor-groups for 'one call'"
+ },
+ "settings": {
+  "preconditioner": "auto (block: every conductor above 400k unknowns)",
+  "relative_tolerance": 1e-09,
+  "restart": 120,
+  "maximum_filaments": 64,
+  "frequency_hz": 214358.0,
+  "conductors": 5,
+  "cases_per_conductor": 2,
+  "unknowns_per_conductor_estimate": "1.09M to 1.26M",
+  "gmres_iterations_per_case": {
+   "pgnd_hs_on": 1698,
+   "pgnd_hs_off": 1667,
+   "vout_hs_on": 1416,
+   "vout_hs_off": 1412,
+   "vin_hs_on": 1277,
+   "vin_hs_off": 1319,
+   "vsup_hs_on": 1411,
+   "vsup_hs_off": 1406,
+   "sw_hs_on": 1001,
+   "sw_hs_off": 1144
+  }
+ },
+ "cases": [
+  {
+   "layout": "one conductor after another, budget 192",
+   "wall_s": 7598.563285503071,
+   "peak_rss_gb": 12.446857452392578,
+   "conductor_seconds": {
+    "PGND": 2026.04002902098,
+    "VOUT": 1513.2451381679857,
+    "VIN": 1434.2088794300798,
+    "VSUP": 1490.5362676969962,
+    "SW": 1134.532164245029
+   }
+  },
+  {
+   "layout": "five conductors side by side, threads, budget 38 each",
+   "wall_s": 6548.0715949239675,
+   "peak_rss_gb": 48.78681945800781,
+   "conductor_seconds": {
+    "PGND": 6548.070034839911,
+    "VOUT": 6156.948029919993,
+    "VIN": 5807.112787503982,
+    "VSUP": 5967.828076834907,
+    "SW": 4795.20503707102
+   },
+   "same_bits": true
+  },
+  {
+   "layout": "five conductors side by side, five separate processes (by hand), budget 38 each",
+   "wall_s": 2070,
+   "conductor_seconds": {
+    "PGND": 2049.8640643990366,
+    "VOUT": 1480.7426301230444,
+    "VIN": 1360.8558875919553,
+    "VSUP": 1561.5865784899797,
+    "SW": 1173.577403296018
+   },
+   "peak_rss_gb_per_process": {
+    "PGND": 11.451900482177734,
+    "VOUT": 11.410995483398438,
+    "VIN": 10.735549926757812,
+    "VSUP": 10.779258728027344,
+    "SW": 10.298561096191406
+   }
+  },
+  {
+   "layout": "one solve_current_field_problems call, budget 192 (this change: five worker processes)",
+   "wall_s": 2067.4380828660214,
+   "conductor_width": 5,
+   "maxrss_gb_largest_worker": 10.883224487304688,
+   "same_bits_as_one_after_another": true
+  }
+ ],
+ "decision": "adopted: conductors of one call in worker processes (3.68x here, the largest conductor's own time bounds it); threads rejected (1.16x: the GMRES steps queue on the interpreter's lock)"
+}
