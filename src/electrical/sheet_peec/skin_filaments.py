@@ -243,6 +243,69 @@ def resistance_ratio(
     return float(impedance.real / (resistivity_ohm_m / float(thickness_m)))
 
 
+def tube_internal_impedance(
+    outer_radius_m: float,
+    inner_radius_m: float,
+    frequency_hz: float,
+    resistivity_ohm_m: float = COPPER_RESISTIVITY_OHM_M,
+) -> complex:
+    """Give the internal impedance per metre of a plated barrel, in ohms per metre.
+
+    A tube of radius ``outer_radius_m`` around a bore of ``inner_radius_m``
+    carries current along its axis.  Nothing flows in the bore, so the field
+    is zero at the inner face and ``I / (2 pi r_o)`` at the outer one, and the
+    current crowds to the outer face:
+
+    .. math::
+
+        Z = \\frac{\\rho k}{2 \\pi r_o}
+            \\frac{I_0(k r_o) K_1(k r_i) + K_0(k r_o) I_1(k r_i)}
+                 {I_1(k r_o) K_1(k r_i) - I_1(k r_i) K_1(k r_o)},
+        \\qquad k = \\frac{1 + j}{\\delta}
+
+    which tends to ``rho / (pi (r_o^2 - r_i^2))`` at zero frequency.  A
+    solid pin (``inner_radius_m`` zero) is ``rho k I_0 / (2 pi r_o I_1)``.
+    The Bessel functions are taken exponentially scaled, so a wall of many
+    skin depths does not overflow.  This is the barrel alone in free space: a
+    return conductor close by would also crowd the current around the
+    circumference, which this does not hold.
+    """
+    from scipy.special import ive, kve
+
+    outer = float(outer_radius_m)
+    inner = float(inner_radius_m)
+    if not (outer > 0.0 and 0.0 <= inner < outer):
+        raise ValueError("a barrel needs 0 <= inner radius < outer radius")
+    dc = resistivity_ohm_m / (math.pi * (outer * outer - inner * inner))
+    if frequency_hz <= 0.0:
+        return complex(dc, 0.0)
+    k = complex(1.0, 1.0) / skin_depth_m(frequency_hz, resistivity_ohm_m)
+    a = k * outer
+    if inner == 0.0:
+        return resistivity_ohm_m * k / (2.0 * math.pi * outer) * complex(ive(0, a) / ive(1, a))
+    b = k * inner
+    # I_n(z) = ive(n, z) e^{Re z}, K_n(z) = kve(n, z) e^{-z}; dividing every
+    # term by e^{Re a - b} leaves the factor below on the two that mix radii.
+    mix = np.exp(-(a + a.real) + (b + b.real))
+    numerator = ive(0, a) * kve(1, b) + kve(0, a) * ive(1, b) * mix
+    denominator = ive(1, a) * kve(1, b) - ive(1, b) * kve(1, a) * mix
+    return resistivity_ohm_m * k / (2.0 * math.pi * outer) * complex(numerator / denominator)
+
+
+def tube_resistance_ratio(
+    outer_radius_m: float,
+    inner_radius_m: float,
+    frequency_hz: float,
+    resistivity_ohm_m: float = COPPER_RESISTIVITY_OHM_M,
+) -> float:
+    """Give a plated barrel's AC resistance as a multiple of its DC resistance."""
+    if frequency_hz <= 0.0:
+        return 1.0
+    impedance = tube_internal_impedance(outer_radius_m, inner_radius_m, frequency_hz, resistivity_ohm_m)
+    dc = resistivity_ohm_m / (math.pi * (float(outer_radius_m) ** 2 - float(inner_radius_m) ** 2))
+    return float(impedance.real / dc)
+
+
 def filament_links(
     stack: FilamentStack,
     shape: tuple[int, int],
