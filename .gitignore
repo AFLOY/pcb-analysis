@@ -17,6 +17,10 @@ benchmark-results/
 experiments/*
 !experiments/fp32_accuracy.py
 !experiments/__init__.py
+!experiments/sheet_cuda_hot_loop_benchmark.py
+!experiments/fixtures/
+experiments/fixtures/*
+!experiments/fixtures/evm2l_hot_loop/
 !experiments/maxwell_small_benchmark.py
 !experiments/maxwell_cuda_benchmark.py
 !experiments/peec_fem_comparison.py
