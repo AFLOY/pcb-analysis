@@ -74,3 +74,17 @@ def _pairwise(device, x, y, z):
     """The operator by its loop over layer pairs (the path the stack replaces)."""
     spectra = lambda a: np.fft.rfft2(a, s=device.padded, axes=(-2, -1))  # noqa: E731
     return device._convolve(spectra(x), "x"), device._convolve(spectra(y), "y"), device._convolve_z(spectra(z))
+
+
+def test_the_near_preconditioner_keeps_a_cut_layer_s_filaments_together() -> None:
+    """A layer cut into skin filaments converges about as fast as one left whole."""
+    from electrical.sheet_peec.current_field_contract import solve_current_field_problem
+
+    from test_current_field_contract import _problem
+
+    settings = {"relative_tolerance": 1e-9, "preconditioner": "near"}
+    whole = solve_current_field_problem(_problem(frequency_hz=3e7), {**settings, "maximum_filaments": 1})
+    cut = solve_current_field_problem(_problem(frequency_hz=3e7), {**settings, "maximum_filaments": 64})
+    assert cut.metrics["converged"] and max(cut.metrics["filament_counts"].values()) > 5
+    # 31 iterations when the filaments' mutual terms were dropped from the near matrix
+    assert cut.metrics["solver_iterations"] <= 3 * whole.metrics["solver_iterations"]
