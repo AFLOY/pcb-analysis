@@ -9,7 +9,7 @@ owns only the physical sheet mesh and solve.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -373,6 +373,7 @@ class _SheetContext:
     name_of_filament: Mapping[int, str]
     filament_counts: Mapping[str, int]
     skin_depth_by_layer_m: Mapping[str, float]
+    via_name_by_key: Mapping[tuple[int, int, int, int], str] = field(default_factory=dict)
 
 
 def _nearest_filament(
@@ -404,6 +405,8 @@ class _SheetGeometry:
 
     filament_of: Mapping[str, tuple[int, ...]]
     layer_by_name: Mapping[str, CurrentFieldLayer]
+    # (row, col, lower filament, upper filament) of each vertical branch -> its connection's name
+    via_name_by_key: Mapping[tuple[int, int, int, int], str] = field(default_factory=dict)
 
 
 def _filament_cuts(
@@ -490,7 +493,8 @@ def _sheet_geometry(
         raise ValueError("via_self_inductance must be 'barrel' or 'column'")
     use_barrels = via_model == "barrel"
     seen: set[tuple[int, int, int, int]] = set()
-    for _, (x, y), segment in problem.vertical_segments:
+    via_name_by_key: dict[tuple[int, int, int, int], str] = {}
+    for connection_name, (x, y), segment in problem.vertical_segments:
         upper_indices = filament_of[segment.upper_layer]
         lower_indices = filament_of[segment.lower_layer]
         upper = _nearest_filament(
@@ -507,6 +511,7 @@ def _sheet_geometry(
         if key in seen:
             continue
         seen.add(key)
+        via_name_by_key[key] = connection_name or f"vertical_{y}_{x}"
         barrel = use_barrels and segment.barrel_outer_diameter_mm is not None
         vias.append(
             ViaBranch(
@@ -550,7 +555,9 @@ def _sheet_geometry(
             vertical_levels=mesh.vertical_levels,
         )
 
-    return mesh, operator, _SheetGeometry(filament_of=filament_of, layer_by_name=layer_by_name)
+    return mesh, operator, _SheetGeometry(
+        filament_of=filament_of, layer_by_name=layer_by_name, via_name_by_key=via_name_by_key
+    )
 
 
 def _sheet_terminals(problem: CurrentFieldProblem, geometry: _SheetGeometry) -> list[Terminal]:
@@ -588,6 +595,7 @@ def _sheet_context(problem: CurrentFieldProblem, geometry: _SheetGeometry) -> _S
         filament_of=filament_of,
         name_of_filament=name_of_filament,
         filament_counts={name: len(indices) for name, indices in filament_of.items()},
+        via_name_by_key=geometry.via_name_by_key,
         skin_depth_by_layer_m={
             layer.name: skin_depth_m(
                 problem.frequency_hz, layer.resistivity_ohm_m
@@ -704,6 +712,30 @@ def _regions(problem: CurrentFieldProblem) -> dict[str, dict[tuple[int, int], in
     return {name: dict(cells) for name, cells in (problem.cell_regions or {}).items()}
 
 
+def _via_currents(
+    mesh: SheetMesh, solution: Any, name_by_key: Mapping[tuple[int, int, int, int], str]
+) -> dict[str, float]:
+    """The current each named vertical connection carries, in amperes.
+
+    A connection can stand on several cells -- a plated barrel on the cells its
+    wall runs through, each a vertical branch under the connection's name.  Its
+    current is the phasor sum of those branches, level by level; a connection
+    through several layers carries the largest of its levels.  A branch with no
+    name is its own connection.
+    """
+    offset = len(mesh.branch_x) + len(mesh.branch_y)
+    sums: dict[tuple[str, int, int], complex] = {}
+    for index, via in enumerate(mesh.via_branches):
+        key = (via.row, via.col, via.lower_layer, via.upper_layer)
+        name = name_by_key.get(key, f"vertical_{via.row}_{via.col}")
+        level = (name, via.lower_layer, via.upper_layer)
+        sums[level] = sums.get(level, 0.0) + complex(solution.branch_current[offset + index])
+    out: dict[str, float] = {}
+    for (name, _, _), value in sums.items():
+        out[name] = max(out.get(name, 0.0), float(abs(value)))
+    return out
+
+
 def _field_result(
     mesh: SheetMesh,
     operator: Any,
@@ -751,6 +783,7 @@ def _field_result(
     )
     metrics = dict(fields.metrics)
     metrics.update(backend_metrics)
+    via_current = _via_currents(mesh, solution, context.via_name_by_key)
     metrics.update(
         {
             "bulk_p99_current_density_a_per_mm2": (
@@ -791,6 +824,8 @@ def _field_result(
                 "two_axis_branch_mean_magnitude"
             ),
             "physical_conductor_cell_count": len(density),
+            "max_via_current_a": max(via_current.values(), default=0.0),
+            "via_current_a_by_connection": via_current,
         }
     )
     return CurrentFieldSolveResult(

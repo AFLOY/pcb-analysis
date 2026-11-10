@@ -308,3 +308,23 @@ def test_a_connection_s_barrel_gives_its_vias_the_barrel_s_own_inductance() -> N
     value["vertical_connections"][0]["barrel"] = {"outer_diameter_mm": 0.3, "drill_diameter_mm": 0.3}
     with pytest.raises(ValueError, match="drill_diameter_mm"):
         CurrentFieldProblem.from_mapping(value)
+
+
+def test_a_connection_on_several_cells_carries_their_sum() -> None:
+    # 1 A enters F.Cu at x = 0 and leaves B.Cu at x = 2; F.Cu has no other
+    # way down, so the two vertical connections together carry the whole
+    # ampere from F.Cu to In1.Cu.  Named as one barrel standing on both
+    # cells, that is its current; named apart, each carries its share.
+    apart = _problem(frequency_hz=1000.0)
+    one = _problem(frequency_hz=1000.0)
+    for connection in one["vertical_connections"]:
+        connection["name"] = "barrel"
+    shares = solve_current_field_problem(apart).metrics
+    together = solve_current_field_problem(one).metrics
+    assert set(shares["via_current_a_by_connection"]) == {"vertical_0000", "vertical_0001"}
+    assert max(shares["via_current_a_by_connection"].values()) < 1.0
+    assert shares["max_via_current_a"] == max(shares["via_current_a_by_connection"].values())
+    assert together["via_current_a_by_connection"] == {"barrel": pytest.approx(1.0, rel=1e-6)}
+    assert together["max_via_current_a"] == pytest.approx(1.0, rel=1e-6)
+    # the branches alone each carry part of it
+    assert together["max_vertical_connection_current_a"] < 1.0
