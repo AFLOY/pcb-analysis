@@ -836,76 +836,62 @@ def _solve_group_cuda(
     floor = 100.0 * np.finfo(np.float64).eps
 
     try:
-        _solve_members_cuda(
-            cp, csl, mesh, members, cases, given_list, saddle, precondition, linear_system, active_branches, keep,
-            branches, unknowns, size, tolerance, max_iterations, effective_restart, floor, finish, factor_backend,
-            prepare_ms,
-        )
+        for index in members:
+            solve_started = time.perf_counter()
+            injected_device = cp.asarray(cases[index][0])
+            right_hand_side = cp.concatenate([cp.zeros(branches, dtype=cp.complex128), injected_device[keep]])
+            left_right_hand_side = precondition(right_hand_side)
+            counter = {"restarts": 0}
+
+            def count(_value: Any) -> None:
+                counter["restarts"] += 1
+
+            rhs_norm = float(cp.linalg.norm(right_hand_side).get())
+            left_norm = float(cp.linalg.norm(left_right_hand_side).get())
+            given = given_list[index]
+            if given is not None:
+                result = _cuda_start(cp, saddle, given, mesh, active_branches, keep, branches, unknowns, right_hand_side)
+                residual = float(cp.linalg.norm(saddle(result) - right_hand_side).get()) / max(rhs_norm, 1e-30)
+            else:
+                result = cp.zeros(size, dtype=cp.complex128)
+                residual = 1.0 if rhs_norm > 0.0 else 0.0
+            # GMRES is run one restart cycle at a time and the public saddle-point
+            # residual is checked between cycles, so the solve stops when the
+            # requested tolerance is met and ``max_iterations`` counts cycles as on
+            # the CPU path.  Aiming CuPy's own (left-preconditioned) criterion
+            # three decades below the tolerance ran every solve to its cap.
+            cycles = 0
+            while residual > tolerance and cycles < max_iterations:
+                # Cycles grow from ten inner iterations towards ``restart``: a
+                # well-preconditioned solve converges in a few tens of iterations
+                # and must not pay for a full cycle to find out.
+                cycle_length = min(effective_restart, 10 * 2**cycles)
+                # CuPy judges the left-preconditioned residual; scale its target by
+                # the current ratio of the two residuals so that meeting it brings
+                # the saddle-point residual to the requested tolerance, and stop
+                # when that target falls below what float64 can resolve.
+                raw = saddle(result) - right_hand_side
+                preconditioned = float(cp.linalg.norm(precondition(raw)).get()) / max(left_norm, 1e-30)
+                ratio = preconditioned / max(residual, 1e-300) if residual > 0.0 else 1.0
+                target = 0.5 * tolerance * ratio
+                if target < floor:
+                    break
+                result, _info = csl.gmres(
+                    linear_system, left_right_hand_side, x0=result, rtol=target, restart=cycle_length,
+                    maxiter=cycle_length, callback=count, callback_type="pr_norm",
+                )
+                cycles += 1
+                residual = float((cp.linalg.norm(saddle(result) - right_hand_side)).get()) / max(rhs_norm, 1e-30)
+            current_device = cp.zeros(mesh.branch_count, dtype=cp.complex128)
+            current_device[active_branches_device] = result[:branches]
+            voltage_device = cp.zeros(mesh.node_count, dtype=cp.complex128)
+            voltage_device[keep] = result[branches:]
+            finish(index, voltage_device, current_device, counter["restarts"], residual, residual <= tolerance,
+                   factor_backend, prepare_ms, solve_started)
     finally:
         release = getattr(factored, "free", None)
         if release is not None:
             release()
-
-
-def _solve_members_cuda(
-    cp: Any, csl: Any, mesh: SheetMesh, members: list[int], cases: list, given_list: list, saddle: Any,
-    precondition: Any, linear_system: Any, active_branches: np.ndarray, keep: np.ndarray, branches: int,
-    unknowns: int, size: int, tolerance: float, max_iterations: int, effective_restart: int, floor: float,
-    finish: Any, factor_backend: str, prepare_ms: float,
-) -> None:
-    """Each excitation of a prepared group, solved in turn by restarted left-preconditioned GMRES."""
-    for index in members:
-        solve_started = time.perf_counter()
-        injected_device = cp.asarray(cases[index][0])
-        right_hand_side = cp.concatenate([cp.zeros(branches, dtype=cp.complex128), injected_device[keep]])
-        left_right_hand_side = precondition(right_hand_side)
-        counter = {"restarts": 0}
-
-        def count(_value: Any) -> None:
-            counter["restarts"] += 1
-
-        rhs_norm = float(cp.linalg.norm(right_hand_side).get())
-        left_norm = float(cp.linalg.norm(left_right_hand_side).get())
-        given = given_list[index]
-        if given is not None:
-            result = _cuda_start(cp, saddle, given, mesh, active_branches, keep, branches, unknowns, right_hand_side)
-            residual = float(cp.linalg.norm(saddle(result) - right_hand_side).get()) / max(rhs_norm, 1e-30)
-        else:
-            result = cp.zeros(size, dtype=cp.complex128)
-            residual = 1.0 if rhs_norm > 0.0 else 0.0
-        # GMRES is run one restart cycle at a time and the public saddle-point
-        # residual is checked between cycles, so the solve stops when the
-        # requested tolerance is met and ``max_iterations`` counts cycles as on
-        # the CPU path.  Aiming CuPy's own (left-preconditioned) criterion
-        # three decades below the tolerance ran every solve to its cap.
-        cycles = 0
-        while residual > tolerance and cycles < max_iterations:
-            # Cycles grow from ten inner iterations towards ``restart``: a
-            # well-preconditioned solve converges in a few tens of iterations
-            # and must not pay for a full cycle to find out.
-            cycle_length = min(effective_restart, 10 * 2**cycles)
-            # CuPy judges the left-preconditioned residual; scale its target by
-            # the current ratio of the two residuals so that meeting it brings
-            # the saddle-point residual to the requested tolerance, and stop
-            # when that target falls below what float64 can resolve.
-            raw = saddle(result) - right_hand_side
-            preconditioned = float(cp.linalg.norm(precondition(raw)).get()) / max(left_norm, 1e-30)
-            ratio = preconditioned / max(residual, 1e-300) if residual > 0.0 else 1.0
-            target = 0.5 * tolerance * ratio
-            if target < floor:
-                break
-            result, _info = csl.gmres(
-                linear_system, left_right_hand_side, x0=result, rtol=target, restart=cycle_length,
-                maxiter=cycle_length, callback=count, callback_type="pr_norm",
-            )
-            cycles += 1
-            residual = float((cp.linalg.norm(saddle(result) - right_hand_side)).get()) / max(rhs_norm, 1e-30)
-        current_device = cp.zeros(mesh.branch_count, dtype=cp.complex128)
-        current_device[active_branches_device] = result[:branches]
-        voltage_device = cp.zeros(mesh.node_count, dtype=cp.complex128)
-        voltage_device[keep] = result[branches:]
-        finish(index, voltage_device, current_device, counter["restarts"], residual, residual <= tolerance,
-               factor_backend, prepare_ms, solve_started)
 
 
 def _cuda_start(
