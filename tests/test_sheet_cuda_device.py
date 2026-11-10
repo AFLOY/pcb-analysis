@@ -116,3 +116,17 @@ def test_port_impedance_on_cuda_as_on_the_cpu() -> None:
     cold = solve_port_impedance_problem(problem, {**common, "execution_backend": "cuda", "warm_start": False})
     assert (sum(r["maximum_iterations"] for r in cuda.metrics["frequencies"][1:])
             < sum(r["maximum_iterations"] for r in cold.metrics["frequencies"][1:]))
+
+
+def test_the_cudss_quasi_definite_near_preconditioner_solves_as_superlu_does() -> None:
+    _require_cuda_device()
+    pytest.importorskip("nvmath.sparse.advanced")
+    problem = _problem(frequency_hz=3e7)
+    common = {"relative_tolerance": 1e-9, "maximum_iterations": 240, "restart": 60,
+              "execution_backend": "cuda", "device_id": 0, "preconditioner": "near"}
+    superlu = solve_current_field_problem(problem, common)
+    cudss = solve_current_field_problem(problem, {**common, "near_factorization": "cudss_quasi_definite"})
+    assert cudss.metrics["converged"] and superlu.metrics["converged"]
+    assert cudss.metrics["preconditioner_factorization_backend"] == "cudss_quasi_definite_ldlt"
+    assert cudss.metrics["solver_relative_residual"] < 1e-9
+    assert max(abs(superlu.voltage_phasor[node] - cudss.voltage_phasor[node]) for node in superlu.voltage_phasor) < 1e-9
