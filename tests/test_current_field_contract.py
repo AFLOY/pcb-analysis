@@ -308,3 +308,13 @@ def test_a_connection_s_barrel_gives_its_vias_the_barrel_s_own_inductance() -> N
     value["vertical_connections"][0]["barrel"] = {"outer_diameter_mm": 0.3, "drill_diameter_mm": 0.3}
     with pytest.raises(ValueError, match="drill_diameter_mm"):
         CurrentFieldProblem.from_mapping(value)
+
+
+def test_the_near_preconditioner_keeps_a_cut_layer_s_filaments_together() -> None:
+    """A layer cut into skin filaments converges about as fast as one left whole."""
+    settings = {"relative_tolerance": 1e-9, "preconditioner": "near"}
+    whole = solve_current_field_problem(_problem(frequency_hz=3e7), {**settings, "maximum_filaments": 1})
+    cut = solve_current_field_problem(_problem(frequency_hz=3e7), {**settings, "maximum_filaments": 64})
+    assert cut.metrics["converged"] and max(cut.metrics["filament_counts"].values()) > 5
+    # 31 iterations when the filaments' mutual terms were dropped from the near matrix
+    assert cut.metrics["solver_iterations"] <= 3 * whole.metrics["solver_iterations"]
