@@ -41,3 +41,36 @@ def test_the_quasi_definite_near_matrix_is_the_saddle_point_one_signed_and_regul
     # and a large regularization is a different system
     loose, sign_loose, _ = quasi_definite_near_matrix(near, reduced, 1.0)
     assert np.linalg.norm(spl.spsolve(sp.csc_matrix(loose), rhs * sign_loose) - exact) / np.linalg.norm(exact) > 1e-3
+
+
+def test_the_batched_layer_pair_product_is_the_pairwise_convolution() -> None:
+    """The stacked (F, L, L) product gives what the loop over layer pairs gives.
+
+    CuPy and NumPy share the calls the device operator makes, so NumPy stands
+    in for the device here and the two paths run on the same arrays.
+    """
+    from electrical.sheet_peec.current_field_contract import CurrentFieldProblem, _sheet_geometry
+    from electrical.sheet_peec.sheet_cuda import CudaSheetInductanceOperator
+
+    from test_current_field_contract import _problem
+
+    problem = CurrentFieldProblem.from_mapping(_problem(frequency_hz=3e7))
+    _mesh, operator, _geometry = _sheet_geometry(problem, {"maximum_filaments": 8})
+    device = CudaSheetInductanceOperator(operator, np)
+    assert device._stack is not None and device.layer_count > 3  # the thick layer is cut
+    rng = np.random.default_rng(7)
+    rows, cols = device.shape
+    x = rng.standard_normal((2, device.layer_count, rows, cols))
+    y = rng.standard_normal((2, device.layer_count, rows, cols))
+    z = rng.standard_normal((2, len(device.vertical_levels), rows, cols))
+    batched = device.apply_batch(x, y, z)
+    for b in range(2):
+        single = _pairwise(device, x[b], y[b], z[b])
+        for got, want in zip(batched, single):
+            assert np.allclose(got[b], want, rtol=1e-12, atol=1e-12 * np.abs(want).max())
+
+
+def _pairwise(device, x, y, z):
+    """The operator by its loop over layer pairs (the path the stack replaces)."""
+    spectra = lambda a: np.fft.rfft2(a, s=device.padded, axes=(-2, -1))  # noqa: E731
+    return device._convolve(spectra(x), "x"), device._convolve(spectra(y), "y"), device._convolve_z(spectra(z))
