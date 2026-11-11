@@ -706,14 +706,23 @@ def solve_current_field_problems(
                 )
                 solved.append((solution, telemetry.as_metrics()))
         else:
+            near_factorization = str(settings.get("near_factorization", "superlu"))
             backend_metrics = {
                 "backend": "sheet_peec",
                 "resolved_backend": "numpy-scipy-sheet-peec",
                 "fallback_used": False,
+                "near_factorization": near_factorization,
             }
             solved = [
                 (solution, dict(backend_metrics, lockstep_columns=solution.lockstep_columns))
-                for solution in solve_sheet_cases(mesh, operator, terminal_sets, **solve_arguments)
+                for solution in solve_sheet_cases(
+                    mesh, operator, terminal_sets, near_factorization=near_factorization,
+                    near_regularization=(
+                        None if settings.get("near_regularization") is None
+                        else float(settings["near_regularization"])
+                    ),
+                    **solve_arguments,
+                )
             ]
         for index, terminals, (solution, backend_metrics) in zip(members, terminal_sets, solved):
             results[index] = _field_result(
