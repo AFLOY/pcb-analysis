@@ -184,9 +184,12 @@ class CudssQuasiDefiniteNear:
             # nvmath drops the plan when an operand is reset, so the values
             # are written into the planned matrix itself and only the
             # numerical factorization is repeated.
+            stream = cp.cuda.get_current_stream()
             with cp.cuda.using_allocator(entry.pool.malloc):
                 entry.matrix.data[...] = cp.asarray(matrix.data)
-                entry.solver.factorize()
+                stream.synchronize()
+                entry.solver.factorize(stream=stream)
+                stream.synchronize()
             self._solver, self._rhs, self._pool = entry.solver, entry.rhs, entry.pool
             return
         pool = cp.cuda.MemoryPool()
@@ -217,12 +220,15 @@ class CudssQuasiDefiniteNear:
         return solver
 
     def solve(self, vector: Any) -> Any:
+        stream = self._cp.cuda.get_current_stream()
         self._rhs[...] = vector * self._sign
+        stream.synchronize()
         # cuDSS's solve workspace comes from the entry's pool too: drawn from
         # a call's own pool, it was freed under the cached plan at the end of
         # that call and the next frequency's GMRES read NaNs.
         with self._cp.cuda.using_allocator(self._pool.malloc):
-            solution = self._solver.solve()
+            solution = self._solver.solve(stream=stream)
+        stream.synchronize()
         return solution.copy()
 
     def free(self) -> None:
