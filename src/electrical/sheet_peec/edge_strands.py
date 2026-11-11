@@ -139,12 +139,50 @@ class EdgeStrands:
         return np.unique(self.branch)
 
 
-def plan_edge_strands(mesh: SheetMesh, first_width_m: float, growth: float = EDGE_STRAND_GROWTH) -> EdgeStrands:
-    """Cut every in-plane branch with an open side across its width."""
+# Face coverage is rounded to this fraction of a cell, so that the strand
+# layouts of an edge's branches repeat and the correction's blocks are shared.
+FACE_QUANTUM = 1.0 / 64.0
+# A face between two copper cells that the copper does not cross keeps a
+# branch this narrow (in cells): joined in name, it carries next to nothing.
+FACE_BLOCKED_WIDTH = 1.0e-3
+
+
+def _covered_interval(coverage: tuple[float, float] | None) -> tuple[float, float]:
+    """``(low, high)`` across the branch, in cells from its centre line, quantised."""
+    if coverage is None:
+        return -0.5, 0.5
+    cover, offset = coverage
+    low = round((offset - cover / 2.0) / FACE_QUANTUM) * FACE_QUANTUM
+    high = round((offset + cover / 2.0) / FACE_QUANTUM) * FACE_QUANTUM
+    low, high = max(low, -0.5), min(high, 0.5)
+    if high - low < FACE_QUANTUM / 2.0:
+        middle = min(max(offset, -0.5 + FACE_BLOCKED_WIDTH), 0.5 - FACE_BLOCKED_WIDTH)
+        return middle - FACE_BLOCKED_WIDTH / 2.0, middle + FACE_BLOCKED_WIDTH / 2.0
+    return low, high
+
+
+def plan_edge_strands(
+    mesh: SheetMesh,
+    first_width_m: float | None,
+    growth: float = EDGE_STRAND_GROWTH,
+    coverage: dict[int, tuple[float, float]] | None = None,
+) -> EdgeStrands:
+    """Cut the in-plane branches across their width.
+
+    ``coverage`` (``{branch: (covered fraction, centroid offset)}`` of the
+    face each crosses, see :func:`geometry.cad_import.plane_face_coverage`)
+    narrows a branch to the part of its face the copper covers.  With
+    ``first_width_m`` every branch with an open side -- a missing neighbour,
+    or an uncovered part of its face -- is graded into strands toward it;
+    without, a narrowed branch is one strand.
+    """
     if mesh.pitch_m is None or not mesh.is_uniform:
         raise ValueError("edge strands need a uniform grid")
-    if not first_width_m > 0.0 or not growth > 1.0:
-        raise ValueError("first_width_m must be positive and growth above 1")
+    if first_width_m is not None and not first_width_m > 0.0:
+        raise ValueError("first_width_m must be positive")
+    if not growth > 1.0:
+        raise ValueError("growth must be above 1")
+    coverage = coverage or {}
     pitch = float(mesh.pitch_m)
     occupancy = mesh.occupancy
     layers, rows, cols = occupancy.shape
@@ -168,8 +206,18 @@ def plan_edge_strands(mesh: SheetMesh, first_width_m: float, growth: float = EDG
             else:
                 open_plus = not (filled(layer, row, col + 1) and filled(layer, row + 1, col + 1))
                 open_minus = not (filled(layer, row, col - 1) and filled(layer, row + 1, col - 1))
-            strands = graded_widths(pitch, open_minus, open_plus, first_width_m, growth)
-            if len(strands) > 1:
+            low, high = _covered_interval(coverage.get(position))
+            partial = low > -0.5 + 1e-12 or high < 0.5 - 1e-12
+            open_minus = open_minus or low > -0.5 + 1e-12
+            open_plus = open_plus or high < 0.5 - 1e-12
+            width_cells = high - low
+            centre_cells = 0.5 * (low + high)
+            if first_width_m is None:
+                strands = [(0.0, width_cells * pitch)]
+            else:
+                strands = graded_widths(width_cells * pitch, open_minus, open_plus, first_width_m, growth)
+            strands = [(centre + centre_cells * pitch, size) for centre, size in strands]
+            if len(strands) > 1 or partial:
                 for k, (centre, size) in enumerate(strands):
                     branch.append(position)
                     strand_index.append(position if k == 0 else next_index)
@@ -613,14 +661,20 @@ def compact_strand_correction(
     return CompactStrandCorrection(native, mesh.branch_count)
 
 
-def stranded_mesh(mesh: SheetMesh, operator: Any, first_width_m: float, growth: float = EDGE_STRAND_GROWTH,
-                  radius_cells: int = EDGE_STRAND_RADIUS_CELLS, compact: bool | None = None) -> StrandedSheetMesh:
-    """The mesh with its edge branches cut and the correction built for ``operator``.
+def stranded_mesh(mesh: SheetMesh, operator: Any, first_width_m: float | None, growth: float = EDGE_STRAND_GROWTH,
+                  radius_cells: int = EDGE_STRAND_RADIUS_CELLS, compact: bool | None = None,
+                  coverage: dict[int, tuple[float, float]] | None = None,
+                  inductance: bool = True) -> StrandedSheetMesh:
+    """The mesh with its branches cut (edge strands, face coverage) and the correction built for ``operator``.
 
     ``compact`` (default: whenever the C++ core is built) keeps the correction
     as blocks applied by the core; otherwise it is an explicit sparse matrix.
+    ``inductance=False`` (a DC solve) builds no correction.
     """
-    stranded = StrandedSheetMesh.from_mesh(mesh, plan_edge_strands(mesh, first_width_m, growth))
+    stranded = StrandedSheetMesh.from_mesh(mesh, plan_edge_strands(mesh, first_width_m, growth, coverage))
+    if not inductance:
+        stranded.inductance_correction = None
+        return stranded
     if compact is None:
         compact = _backend.core() is not None
     if compact:

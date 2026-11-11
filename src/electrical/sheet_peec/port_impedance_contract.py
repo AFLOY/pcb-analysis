@@ -96,6 +96,8 @@ class PortImpedanceProblem:
     merge_pins: bool = False
     grid: TensorGrid | None = None
     cell_regions: Mapping[str, Mapping[tuple[int, int], int]] | None = None
+    # Face coverage by layer, as the current-field contract parses it.
+    copper_faces: Mapping[str, tuple[Mapping[tuple[int, int], tuple[float, float]], Mapping[tuple[int, int], tuple[float, float]]]] | None = None
     source_board_sha256: str | None = None
 
     @property
