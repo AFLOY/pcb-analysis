@@ -668,7 +668,6 @@ def solve_current_field_problems(
                     device_id=int(settings.get("device_id", 0)),
                     near_factorization=str(settings.get("near_factorization", "superlu")),
                     near_regularization=float(settings.get("near_regularization", 1e-8)),
-                    near_filament_coupling=str(settings.get("near_filament_coupling", "full")),
                     **solve_arguments,
                 )
             ]
