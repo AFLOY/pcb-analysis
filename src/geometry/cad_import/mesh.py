@@ -180,6 +180,40 @@ def plane_section_coverage(
     )
 
 
+def plane_face_coverage(
+    meshes: "list[TriangleMesh]",
+    z_m: float,
+    *,
+    origin_m: tuple[float, float],
+    pitch_m: float,
+    shape: tuple[int, int],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Covered length of every grid face by the solids' section at ``z``, uniform grid.
+
+    ``(vertical, vertical_offset, horizontal, horizontal_offset,
+    vertical_crossings, horizontal_crossings)``: the
+    vertical faces ``x = c`` are ``(rows, cols + 1)``, the horizontal faces
+    ``y = r`` ``(rows + 1, cols)``; a coverage is the covered fraction of the
+    face (0..1) and an offset the covered part's centroid from the face's
+    middle, in cells along the face (``+y`` for a vertical face, ``+x`` for a
+    horizontal one); the crossings count the section's boundary crossing each
+    face, half their sum round a cell being the separate pieces of copper its
+    boundary meets.  Rows count upwards.  A sheet branch crosses one face and
+    carries what that face's copper carries: the cells' areas say nothing of
+    whether two corner-touching cells are joined.  Needs the native extension.
+    """
+
+    if _native is None:
+        raise ImportError("the face rasteriser needs the geometry native extension")
+    rows, cols = (int(axis) for axis in shape)
+    sets = [mesh.triangles_m for mesh in meshes if mesh.bounds_m[0][2] <= z_m <= mesh.bounds_m[1][2]]
+    if not sets:
+        return (np.zeros((rows, cols + 1)), np.zeros((rows, cols + 1)), np.zeros((rows + 1, cols)), np.zeros((rows + 1, cols)),
+                np.zeros((rows, cols + 1), dtype=np.int32), np.zeros((rows + 1, cols), dtype=np.int32))
+    parts = _native.plane_face_coverage(sets, float(z_m), float(origin_m[0]), float(origin_m[1]), float(pitch_m), rows, cols)
+    return tuple(np.asarray(part) for part in parts)  # type: ignore[return-value]
+
+
 def section_segments_numpy(triangles_m: np.ndarray, z_m: float) -> np.ndarray:
     """Reference implementation of the oriented plane section, ``(m, 2, 2)``."""
 

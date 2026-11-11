@@ -372,6 +372,123 @@ py::array_t<double> plane_section_coverage_graded(const std::vector<ArrF64>& tri
     return result;
 }
 
+// Covered length of every grid face, for the sheet mesh's branch widths.
+//
+// A sheet branch crosses the face between two cells, and what it can carry
+// is the part of that face the copper covers, not the cells' areas: on a
+// 45-degree edge the cells that touch only at a corner leave their staircase
+// teeth dead, and a mesh that joins whole cells overstated R by 6 % at DC on
+// a 1.2 mm strip whatever the pitch.  Along a grid line the copper's winding
+// number is the sum of the signed crossings of the section's segments on one
+// side, so the covered length of a face is a prefix sum over crossings.
+// Returns, in cell units, the covered length (0..1) and its centroid's
+// offset from the face's middle (-0.5..0.5) of the vertical faces x = c
+// (rows x cols + 1) and the horizontal faces y = r (rows + 1 x cols), and the
+// number of section crossings inside each face: going round a cell's
+// perimeter every crossing turns copper on or off, so half their sum is the
+// number of separate pieces of copper the cell's boundary meets -- two of
+// them, and one node for the cell would join what the clearance keeps apart.
+py::tuple plane_face_coverage(const std::vector<ArrF64>& triangle_sets, double z, double origin_x, double origin_y,
+                              double pitch, int rows, int cols) {
+    if (rows < 1 || cols < 1 || pitch <= 0.0) throw std::invalid_argument("grid must be positive");
+    const std::size_t vsize = static_cast<std::size_t>(rows) * (cols + 1);
+    const std::size_t hsize = static_cast<std::size_t>(rows + 1) * cols;
+    // Per face: full-row counts (a difference array along the line), and the
+    // partial length and first moment of the row a crossing falls in.
+    std::vector<double> v_diff(static_cast<std::size_t>(rows + 1) * (cols + 1), 0.0), v_len(vsize, 0.0), v_mom(vsize, 0.0);
+    std::vector<double> h_diff(static_cast<std::size_t>(rows + 1) * (cols + 1), 0.0), h_len(hsize, 0.0), h_mom(hsize, 0.0);
+    std::vector<std::int32_t> v_cross(vsize, 0), h_cross(hsize, 0);
+    {
+        py::gil_scoped_release release;
+        for (const ArrF64& triangles : triangle_sets) {
+            const std::vector<Triangle> mesh = load_triangles(triangles);
+            for (const Segment& seg : plane_section(mesh, z)) {
+                const double x0 = (seg.x0 - origin_x) / pitch, y0 = (seg.y0 - origin_y) / pitch;
+                const double x1 = (seg.x1 - origin_x) / pitch, y1 = (seg.y1 - origin_y) / pitch;
+                // Vertical lines x = c: the winding at (c, y) counts the crossings above y.
+                if (x0 != x1) {
+                    const double sign = x1 > x0 ? 1.0 : -1.0;
+                    const int c_lo = std::max(0, static_cast<int>(std::ceil(std::min(x0, x1))));
+                    const int c_hi = std::min(cols, static_cast<int>(std::floor(std::max(x0, x1))));
+                    for (int c = c_lo; c <= c_hi; ++c) {
+                        if ((x0 < c) == (x1 < c)) continue;  // half-open, like the area rasteriser
+                        const double y = y0 + (c - x0) * (y1 - y0) / (x1 - x0);
+                        if (y <= 0.0) continue;
+                        if (y >= rows) {
+                            v_diff[static_cast<std::size_t>(c)] += sign;  // every row
+                            continue;
+                        }
+                        const int r = static_cast<int>(std::floor(y));
+                        const double f = y - r;
+                        v_cross[static_cast<std::size_t>(r) * (cols + 1) + c] += 1;
+                        v_diff[static_cast<std::size_t>(c)] += sign;                                   // rows 0..
+                        v_diff[static_cast<std::size_t>(r) * (cols + 1) + c] -= sign;                  // ..r-1
+                        v_len[static_cast<std::size_t>(r) * (cols + 1) + c] += sign * f;
+                        v_mom[static_cast<std::size_t>(r) * (cols + 1) + c] += sign * 0.5 * f * f;
+                    }
+                }
+                // Horizontal lines y = r: the winding at (x, r) counts the crossings right of x.
+                if (y0 != y1) {
+                    const double sign = y1 > y0 ? 1.0 : -1.0;
+                    const int r_lo = std::max(0, static_cast<int>(std::ceil(std::min(y0, y1))));
+                    const int r_hi = std::min(rows, static_cast<int>(std::floor(std::max(y0, y1))));
+                    for (int r = r_lo; r <= r_hi; ++r) {
+                        if ((y0 < r) == (y1 < r)) continue;
+                        const double x = x0 + (r - y0) * (x1 - x0) / (y1 - y0);
+                        if (x <= 0.0) continue;
+                        if (x >= cols) {
+                            h_diff[static_cast<std::size_t>(r) * (cols + 1)] += sign;
+                            continue;
+                        }
+                        const int c = static_cast<int>(std::floor(x));
+                        const double f = x - c;
+                        h_cross[static_cast<std::size_t>(r) * cols + c] += 1;
+                        h_diff[static_cast<std::size_t>(r) * (cols + 1)] += sign;
+                        h_diff[static_cast<std::size_t>(r) * (cols + 1) + c] -= sign;
+                        h_len[static_cast<std::size_t>(r) * cols + c] += sign * f;
+                        h_mom[static_cast<std::size_t>(r) * cols + c] += sign * 0.5 * f * f;
+                    }
+                }
+            }
+        }
+    }
+    py::array_t<double> v_cover({static_cast<py::ssize_t>(rows), static_cast<py::ssize_t>(cols + 1)});
+    py::array_t<double> v_offset({static_cast<py::ssize_t>(rows), static_cast<py::ssize_t>(cols + 1)});
+    py::array_t<double> h_cover({static_cast<py::ssize_t>(rows + 1), static_cast<py::ssize_t>(cols)});
+    py::array_t<double> h_offset({static_cast<py::ssize_t>(rows + 1), static_cast<py::ssize_t>(cols)});
+    auto finish = [](double length, double moment, double* cover, double* offset) {
+        // One sign throughout (the loops' orientation); a covered length is its magnitude.
+        if (std::fabs(length) <= 1.0e-12) {
+            *cover = 0.0;
+            *offset = 0.0;
+            return;
+        }
+        *cover = std::min(1.0, std::fabs(length));
+        *offset = std::min(0.5, std::max(-0.5, moment / length - 0.5));
+    };
+    for (int c = 0; c <= cols; ++c) {
+        double full = 0.0;
+        for (int r = 0; r < rows; ++r) {
+            full += v_diff[static_cast<std::size_t>(r) * (cols + 1) + c];
+            const std::size_t i = static_cast<std::size_t>(r) * (cols + 1) + c;
+            finish(full + v_len[i], 0.5 * full + v_mom[i], v_cover.mutable_data() + i, v_offset.mutable_data() + i);
+        }
+    }
+    for (int r = 0; r <= rows; ++r) {
+        double full = 0.0;
+        for (int c = 0; c < cols; ++c) {
+            full += h_diff[static_cast<std::size_t>(r) * (cols + 1) + c];
+            const std::size_t i = static_cast<std::size_t>(r) * cols + c;
+            finish(full + h_len[i], 0.5 * full + h_mom[i], h_cover.mutable_data() + i, h_offset.mutable_data() + i);
+        }
+    }
+    py::array_t<std::int32_t> v_count({static_cast<py::ssize_t>(rows), static_cast<py::ssize_t>(cols + 1)});
+    py::array_t<std::int32_t> h_count({static_cast<py::ssize_t>(rows + 1), static_cast<py::ssize_t>(cols)});
+    std::copy(v_cross.begin(), v_cross.end(), v_count.mutable_data());
+    std::copy(h_cross.begin(), h_cross.end(), h_count.mutable_data());
+    return py::make_tuple(v_cover, v_offset, h_cover, h_offset, v_count, h_count);
+}
+
 }  // namespace
 
 void register_module(py::module_& m) {
@@ -382,6 +499,8 @@ void register_module(py::module_& m) {
     m.def("section_segments", &section_segments, py::arg("triangles"), py::arg("z"));
     m.def("plane_section_coverage_graded", &plane_section_coverage_graded, py::arg("triangle_sets"), py::arg("z"),
           py::arg("x_edges"), py::arg("y_edges"));
+    m.def("plane_face_coverage", &plane_face_coverage, py::arg("triangle_sets"), py::arg("z"), py::arg("origin_x"),
+          py::arg("origin_y"), py::arg("pitch"), py::arg("rows"), py::arg("cols"));
     m.def("plane_section_coverage", &plane_section_coverage, py::arg("triangle_sets"), py::arg("z"),
           py::arg("origin_x"), py::arg("origin_y"), py::arg("pitch"), py::arg("rows"), py::arg("cols"));
 }

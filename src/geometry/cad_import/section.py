@@ -27,7 +27,7 @@ from .bodymap import BoardSpec, CopperSpec, LayerSpec, ResolvedBodies
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
 
 from .barrel import barrels_of
-from .mesh import ClassifyMethod, default_plane_method, plane_section_coverage
+from .mesh import ClassifyMethod, default_plane_method, plane_face_coverage, plane_section_coverage
 from .reader import MM, StepSolid
 
 
@@ -85,6 +85,35 @@ def sample_plane_fill(
     return fine.mean(axis=(1, 3))
 
 
+# A cell partly covered is resampled this many times finer per axis to count
+# the separate pieces of copper in it.
+SPLIT_SUBDIVISION = 4
+
+
+def _split_cells(meshes: list, z_m: float, grid: TensorGrid, fill: np.ndarray, footprints: list[np.ndarray]) -> np.ndarray:
+    """The cells whose copper falls apart into two or more pieces (4-connected on a finer grid).
+
+    Only partly covered cells are looked at; a plated barrel's footprint is
+    filled copper and never split.
+    """
+    from scipy import ndimage
+
+    rows, cols = fill.shape
+    split = np.zeros((rows, cols), dtype=bool)
+    partial = (fill > 0.0) & (fill < 1.0)
+    for footprint in footprints:
+        partial &= ~(footprint > 0.0)
+    if not partial.any() or not meshes:
+        return split
+    n = SPLIT_SUBDIVISION
+    pitch = float(grid.pitch_x_m[0])
+    fine = plane_section_coverage(meshes, z_m, origin_m=grid.origin_m, pitch_m=pitch / n, shape=(rows * n, cols * n)) >= 0.5
+    for row, col in np.argwhere(partial):
+        _, count = ndimage.label(fine[row * n:(row + 1) * n, col * n:(col + 1) * n])
+        split[row, col] = count > 1
+    return split
+
+
 @dataclass(frozen=True)
 class BoardRaster:
     """The board on the routing grid: outline and per-layer copper fill.
@@ -106,6 +135,14 @@ class BoardRaster:
     y_down: bool = False
     measured_thickness_mm: tuple[float | None, ...] = ()
     grid: TensorGrid | None = None
+    # Per layer, when asked for (``rasterize_board(faces=True)``): the covered
+    # fraction and centroid offset of every grid face, as
+    # :func:`~geometry.cad_import.mesh.plane_face_coverage` returns them, in
+    # the raster's row order (offsets along a vertical face follow it too).
+    faces: tuple[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray], ...] | None = None
+    # With ``faces``: per layer, the cells whose copper is two or more separate
+    # pieces (a clearance narrower than the cell runs through it), (layers, rows, cols).
+    split_cells: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         outline = np.asarray(self.outline, dtype=bool)
@@ -260,6 +297,7 @@ def rasterize_board(
     y_down: bool = False,
     thickness_tolerance: float = 0.05,
     grid: TensorGrid | None = None,
+    faces: bool = False,
 ) -> BoardRaster:
     """Sample the board outline and each layer's copper onto the grid.
 
@@ -272,6 +310,11 @@ def rasterize_board(
     y-down convention (KiCad exports STEP with ``y`` negated,
     so a KiCad grid whose rows count downwards maps onto STEP rows counted
     from the top).
+
+    ``faces`` also records how much of every grid face each layer's copper
+    covers (exact sections, uniform grids), for a sheet mesh that sizes its
+    branches by the faces they cross; a plated barrel's footprint covers the
+    faces between the cells it fills.
     """
 
     board = resolved.board
@@ -314,6 +357,10 @@ def rasterize_board(
         by_layer[name].extend(via_solids)
     found = barrels_of(via_solids)
     fill = np.zeros((len(spec.layers), rows, cols))
+    if faces and not grid.is_uniform:
+        raise ValueError("face coverage needs a uniform grid")
+    face_layers: list[tuple[np.ndarray, ...]] = []
+    split_layers: list[np.ndarray] = []
     measured: list[float | None] = []
     for index, layer in enumerate(spec.layers):
         solids = by_layer[layer.name]
@@ -331,16 +378,55 @@ def rasterize_board(
             fill[index] = sample_plane_fill(
                 solids, z_m=z_m, grid=grid, supersample=supersample, method=method
             )
+        footprints = []
         for barrel in found:
             if barrel.crosses(z_m):
-                fill[index] = np.maximum(
-                    fill[index], barrel.footprint_fill(grid, supersample=supersample)
-                )
+                footprint = barrel.footprint_fill(grid, supersample=supersample)
+                footprints.append(footprint)
+                fill[index] = np.maximum(fill[index], footprint)
+        if faces:
+            pitch = float(grid.pitch_x_m[0])
+            meshes = [solid.tessellate() for solid in solids
+                      if solid.bounds_m[0][2] - 1.0e-12 <= z_m <= solid.bounds_m[1][2] + 1.0e-12]
+            vertical, vertical_offset, horizontal, horizontal_offset, vertical_cross, horizontal_cross = plane_face_coverage(
+                meshes, z_m, origin_m=grid.origin_m, pitch_m=pitch, shape=(rows, cols)
+            )
+            # A barrel's footprint is filled copper: the faces between two of
+            # its cells are covered whole, whatever the tube's section gives.
+            for footprint in footprints:
+                inside = footprint > 0.0
+                joined_x = np.zeros_like(vertical, dtype=bool)
+                joined_x[:, 1:-1] = inside[:, :-1] & inside[:, 1:]
+                joined_y = np.zeros_like(horizontal, dtype=bool)
+                joined_y[1:-1, :] = inside[:-1, :] & inside[1:, :]
+                vertical = np.where(joined_x, 1.0, vertical)
+                vertical_offset = np.where(joined_x, 0.0, vertical_offset)
+                horizontal = np.where(joined_y, 1.0, horizontal)
+                horizontal_offset = np.where(joined_y, 0.0, horizontal_offset)
+                # Nor is the tube's ring two pieces of copper in a cell.
+                vertical_cross = vertical_cross.copy()
+                horizontal_cross = horizontal_cross.copy()
+                vertical_cross[:, :-1][inside] = 0
+                vertical_cross[:, 1:][inside] = 0
+                horizontal_cross[:-1, :][inside] = 0
+                horizontal_cross[1:, :][inside] = 0
+            face_layers.append((vertical, vertical_offset, horizontal, horizontal_offset, vertical_cross, horizontal_cross))
+            split_layers.append(_split_cells(meshes, z_m, grid, fill[index], footprints))
     if y_down:
         outline = outline[::-1].copy()
         fill = fill[:, ::-1].copy()
+        # Rows reversed: a vertical face's offset along y changes sign, and
+        # the horizontal face lines reverse with the rows they separate.
+        face_layers = [
+            (vertical[::-1].copy(), -vertical_offset[::-1], horizontal[::-1].copy(), horizontal_offset[::-1].copy(),
+             vertical_cross[::-1].copy(), horizontal_cross[::-1].copy())
+            for vertical, vertical_offset, horizontal, horizontal_offset, vertical_cross, horizontal_cross in face_layers
+        ]
+        split_layers = [split[::-1].copy() for split in split_layers]
     raster = BoardRaster(
-        spec, None, (float(origin[0]), float(origin[1])), outline, fill, threshold, y_down, tuple(measured), grid=grid
+        spec, None, (float(origin[0]), float(origin[1])), outline, fill, threshold, y_down, tuple(measured), grid=grid,
+        faces=tuple(face_layers) if faces else None,
+        split_cells=np.asarray(split_layers) if faces else None,
     )
     for name, stackup_mm, measured_mm in raster.thickness_mismatches(relative_tolerance=thickness_tolerance):
         warnings.warn(
