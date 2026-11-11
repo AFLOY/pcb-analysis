@@ -57,7 +57,7 @@ from .reader import (
     synthetic_model,
     write_step,
 )
-from .mesh import TriangleMesh, default_method, default_plane_method, plane_section_coverage, section_segments_numpy, winding_numbers_numpy
+from .mesh import TriangleMesh, default_method, default_plane_method, plane_face_coverage, plane_section_coverage, section_segments_numpy, winding_numbers_numpy
 from .mesh import native_available as native_classify_available
 from .refinement import RefinementBox, board_refined_grid, component_boxes, refinement_summary
 from .barrel import Barrel, barrel_of, barrels_of
@@ -127,6 +127,7 @@ __all__ = [
     "read_kicad_stackup",
     "kicad_grid_origin_mm",
     "default_plane_method",
+    "plane_face_coverage",
     "plane_section_coverage",
     "section_segments_numpy",
     "LayerSkin",
