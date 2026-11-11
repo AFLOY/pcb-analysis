@@ -267,6 +267,31 @@ def _parse_geometry(value: Mapping[str, Any]) -> dict[str, Any]:
             if any(cell not in copper[name] for cell in regions[name]):
                 raise ValueError(f"{name}: a cell region lies off the conductor")
 
+    # Optional covered fraction of the faces the branches cross (from
+    # ``rasterize_board(faces=True)``): per layer, ``x`` and ``y`` lists of
+    # [x, y, coverage, offset] for the branch from cell (x, y) to (x + 1, y),
+    # respectively (x, y + 1); an unlisted branch's face is covered whole.
+    faces: dict[str, tuple[dict[tuple[int, int], tuple[float, float]], dict[tuple[int, int], tuple[float, float]]]] | None = None
+    if value.get("copper_faces_by_layer"):
+        faces = {}
+        for name, item in (value.get("copper_faces_by_layer") or {}).items():
+            if name not in names_set:
+                raise ValueError(f"copper_faces_by_layer names an unknown layer {name!r}")
+            parsed = []
+            for axis, step in (("x", (1, 0)), ("y", (0, 1))):
+                table: dict[tuple[int, int], tuple[float, float]] = {}
+                for x, y, cover, offset in item.get(axis) or []:
+                    cell, other = (int(x), int(y)), (int(x) + step[0], int(y) + step[1])
+                    if cell not in copper[name] or other not in copper[name]:
+                        raise ValueError(f"{name}: a {axis} face lies between cells that are not both copper")
+                    if not (0.0 <= float(cover) <= 1.0 and -0.5 <= float(offset) <= 0.5):
+                        raise ValueError(f"{name}: a face's coverage must lie in [0, 1] and its offset in [-0.5, 0.5]")
+                    table[cell] = (float(cover), float(offset))
+                parsed.append(table)
+            faces[name] = (parsed[0], parsed[1])
+        if pitch_mm is None:
+            raise ValueError("face coverage needs a uniform grid")
+
     return {
         "rows": rows,
         "columns": columns,
@@ -276,6 +301,7 @@ def _parse_geometry(value: Mapping[str, Any]) -> dict[str, Any]:
         "copper_by_layer": copper,
         "vertical_segments": tuple(vertical),
         "cell_regions": regions,
+        "copper_faces": faces,
     }
 
 
@@ -299,6 +325,9 @@ class CurrentFieldProblem:
     # different non-zero regions are not joined (two nets closer than a cell);
     # region 0, the default for an unlisted cell, joins any neighbour.
     cell_regions: Mapping[str, Mapping[tuple[int, int], int]] | None = None
+    # Optional face coverage by layer: (x-branch faces, y-branch faces), each
+    # {cell: (coverage, offset)}; see _parse_geometry.
+    copper_faces: Mapping[str, tuple[Mapping[tuple[int, int], tuple[float, float]], Mapping[tuple[int, int], tuple[float, float]]]] | None = None
 
     @property
     def is_uniform(self) -> bool:
@@ -593,13 +622,17 @@ def _sheet_geometry(
     # their width, the first strand half a skin depth wide at this frequency
     # unless ``edge_strand_first_um`` says otherwise.  See :mod:`.edge_strands`.
     strand_frequency = problem.frequency_hz if frequency_hz is None else frequency_hz
-    if settings.get("edge_strands", False) and strand_frequency > 0.0:
+    edge = bool(settings.get("edge_strands", False)) and strand_frequency > 0.0
+    coverage = _branch_coverage(mesh, problem, filament_of) if problem.copper_faces else None
+    if edge or coverage:
         if not isinstance(operator, SheetInductanceOperator):
-            raise ValueError("edge strands need the uniform convolution operator")
+            raise ValueError("edge strands and face coverage need the uniform convolution operator")
         from .edge_strands import EDGE_STRAND_GROWTH, EDGE_STRAND_RADIUS_CELLS, stranded_mesh
 
         first = settings.get("edge_strand_first_um")
-        if first is None:
+        if not edge:
+            first_m = None
+        elif first is None:
             resistivity = min(layer.resistivity_ohm_m for layer in problem.layers)
             first_m = 0.5 * skin_depth_m(strand_frequency, resistivity)
         else:
@@ -608,11 +641,39 @@ def _sheet_geometry(
             mesh, operator, first_m,
             growth=float(settings.get("edge_strand_growth", EDGE_STRAND_GROWTH)),
             radius_cells=int(settings.get("edge_strand_radius_cells", EDGE_STRAND_RADIUS_CELLS)),
+            coverage=coverage,
+            inductance=strand_frequency > 0.0,
         )
 
     return mesh, operator, _SheetGeometry(
         filament_of=filament_of, layer_by_name=layer_by_name, via_name_by_key=via_name_by_key
     )
+
+
+def _branch_coverage(
+    mesh: SheetMesh, problem: CurrentFieldProblem, filament_of: Mapping[str, tuple[int, ...]]
+) -> dict[int, tuple[float, float]]:
+    """``{branch: (coverage, offset)}`` for the in-plane branches whose face the copper covers in part.
+
+    A layer cut into filaments has its face coverage on every filament: the
+    copper's outline does not change through its thickness.
+    """
+    by_layer: dict[int, tuple[Mapping, Mapping]] = {}
+    for name, (x_faces, y_faces) in (problem.copper_faces or {}).items():
+        for index in filament_of[name]:
+            by_layer[index] = (x_faces, y_faces)
+    coverage: dict[int, tuple[float, float]] = {}
+    position = 0
+    for axis, group in ((0, mesh.branch_x), (1, mesh.branch_y)):
+        for layer, row, col in group:
+            faces = by_layer.get(layer)
+            if faces is not None:
+                # The contract's cells are (x, y) = (col, row).
+                found = faces[axis].get((col, row))
+                if found is not None:
+                    coverage[position] = found
+            position += 1
+    return coverage
 
 
 def _sheet_terminals(problem: CurrentFieldProblem, geometry: _SheetGeometry) -> list[Terminal]:
@@ -774,7 +835,12 @@ def _same_geometry(first: CurrentFieldProblem, second: CurrentFieldProblem) -> b
         and dict(first.copper_by_layer) == dict(second.copper_by_layer)
         and first.vertical_segments == second.vertical_segments
         and _regions(first) == _regions(second)
+        and _faces(first) == _faces(second)
     )
+
+
+def _faces(problem: CurrentFieldProblem) -> dict[str, tuple[dict, dict]]:
+    return {name: (dict(x), dict(y)) for name, (x, y) in (problem.copper_faces or {}).items()}
 
 
 def _regions(problem: CurrentFieldProblem) -> dict[str, dict[tuple[int, int], int]]:
