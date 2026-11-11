@@ -104,3 +104,25 @@ def test_the_device_near_matrix_is_the_host_one(filaments: int, barrels: bool) -
     assert np.array_equal(host.indptr, device.indptr) and np.array_equal(host.indices, device.indices)
     assert np.array_equal(host.data, device.data)
     assert host_delta == device_delta and np.array_equal(host_sign, device_sign)
+
+
+def test_the_device_near_matrix_is_the_same_in_any_blocks_and_refuses_what_will_not_fit() -> None:
+    from electrical.sheet_peec import current_field_contract as cfc
+    from electrical.sheet_peec import sheet_peec as sheet
+    from electrical.sheet_peec.sheet_cuda import NearMatrixTooLarge, device_quasi_definite_near
+
+    from test_current_field_contract import _problem
+
+    problem = cfc.CurrentFieldProblem.from_mapping(_problem(frequency_hz=3e7))
+    mesh, operator, geometry = cfc._sheet_geometry(problem, {"maximum_filaments": 64})
+    terminals = cfc._sheet_terminals(problem, geometry)
+    reduction = sheet._reduce(mesh, mesh.incidence(), sheet._source_vector(mesh, terminals), None)
+    arguments = (mesh, operator, 2 * np.pi * 3e7, mesh.resistances(), reduction.active_branches,
+                 reduction.reduced, 1e-8, np, sp)
+    whole, _, _ = device_quasi_definite_near(*arguments)
+    pieces, _, _ = device_quasi_definite_near(*arguments, block_entries=7)  # many blocks
+    assert whole.indices.dtype == np.int32
+    assert np.array_equal(whole.indptr, pieces.indptr) and np.array_equal(whole.indices, pieces.indices)
+    assert np.array_equal(whole.data, pieces.data)
+    with pytest.raises(NearMatrixTooLarge):
+        device_quasi_definite_near(*arguments, memory_budget=1)
