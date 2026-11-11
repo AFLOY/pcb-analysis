@@ -127,7 +127,7 @@ def test_the_cudss_quasi_definite_near_preconditioner_solves_as_superlu_does() -
     superlu = solve_current_field_problem(problem, common)
     cudss = solve_current_field_problem(problem, {**common, "near_factorization": "cudss_quasi_definite"})
     assert cudss.metrics["converged"] and superlu.metrics["converged"]
-    assert cudss.metrics["preconditioner_factorization_backend"] == "cudss_quasi_definite_ldlt"
+    assert cudss.metrics["preconditioner_factorization_backend"] == "cudss_quasi_definite_ldlt_double"
     assert cudss.metrics["solver_relative_residual"] < 1e-9
     assert max(abs(superlu.voltage_phasor[node] - cudss.voltage_phasor[node]) for node in superlu.voltage_phasor) < 1e-9
 
@@ -154,3 +154,17 @@ def test_the_layer_pair_kernel_mixes_as_the_batched_product_does() -> None:
         want = host.apply_batch(x, y, z)
         for a, b in zip(got, want):
             assert np.allclose(cp.asnumpy(a), b, rtol=1e-11, atol=1e-11 * np.abs(b).max())
+
+
+def test_single_precision_near_factors_reach_the_same_solution() -> None:
+    _require_cuda_device()
+    pytest.importorskip("nvmath.sparse.advanced")
+    problem = _problem(frequency_hz=3e7)
+    common = {"relative_tolerance": 1e-9, "maximum_iterations": 240, "restart": 60, "execution_backend": "cuda",
+              "device_id": 0, "preconditioner": "near", "near_factorization": "cudss_quasi_definite"}
+    double = solve_current_field_problem(problem, common)
+    single = solve_current_field_problem(problem, {**common, "near_precision": "single"})
+    assert single.metrics["converged"]
+    assert single.metrics["preconditioner_factorization_backend"] == "cudss_quasi_definite_ldlt_single"
+    assert single.metrics["solver_relative_residual"] < 1e-9
+    assert max(abs(double.voltage_phasor[n] - single.voltage_phasor[n]) for n in double.voltage_phasor) < 1e-8
