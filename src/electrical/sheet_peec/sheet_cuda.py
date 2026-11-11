@@ -91,6 +91,7 @@ class _CudssEntry:
     pool: Any
     solver: Any
     rhs: Any
+    matrix: Any  # the device CSR the solver was planned on; its values are overwritten in place
 
 
 # How the ``near`` preconditioner is factored and applied on the device.
@@ -176,21 +177,25 @@ class CudssQuasiDefiniteNear:
         self.reused_plan = entry is not None
         if entry is not None:
             _CUDSS_CACHE.move_to_end(key)
+            # nvmath drops the plan when an operand is reset, so the values
+            # are written into the planned matrix itself and only the
+            # numerical factorization is repeated.
             with cp.cuda.using_allocator(entry.pool.malloc):
-                entry.solver.reset_operands(a=csp.csr_matrix(matrix), b=entry.rhs)
+                entry.matrix.data[...] = cp.asarray(matrix.data)
                 entry.solver.factorize()
             self._solver, self._rhs = entry.solver, entry.rhs
             return
         pool = cp.cuda.MemoryPool()
         with cp.cuda.using_allocator(pool.malloc):
             self._rhs = cp.zeros(matrix.shape[0], dtype=cp.complex128)
-            self._solver = self._planned(matrix, cp, csp, nsa, cudss_bindings)
-        _CUDSS_CACHE[key] = _CudssEntry(pool, self._solver, self._rhs)
+            device_matrix = csp.csr_matrix(matrix)
+            self._solver = self._planned(device_matrix, nsa, cudss_bindings)
+        _CUDSS_CACHE[key] = _CudssEntry(pool, self._solver, self._rhs, device_matrix)
         while len(_CUDSS_CACHE) > CUDA_CACHE_ENTRIES:
             _old, evicted = _CUDSS_CACHE.popitem(last=False)
             evicted.solver.free()
 
-    def _planned(self, matrix: Any, cp: Any, csp: Any, nsa: Any, cudss_bindings: Any) -> Any:
+    def _planned(self, device_matrix: Any, nsa: Any, cudss_bindings: Any) -> Any:
         options = {
             "sparse_system_type": nsa.DirectSolverMatrixType.SYMMETRIC,
             "sparse_system_view": nsa.DirectSolverMatrixViewType.FULL,
@@ -200,7 +205,7 @@ class CudssQuasiDefiniteNear:
             # cuDSS orders and plans on the host; single-threaded that took
             # 5.6 s of a 0.4 mm filament hot loop on a Colab host
             options["multithreading_lib"] = threading
-        solver = nsa.DirectSolver(csp.csr_matrix(matrix), self._rhs, execution="cuda", options=options)
+        solver = nsa.DirectSolver(device_matrix, self._rhs, execution="cuda", options=options)
         solver.plan_config.pivot_type = cudss_bindings.PivotType.PIVOT_NONE
         solver.plan()
         solver.factorize()
