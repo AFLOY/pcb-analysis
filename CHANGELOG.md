@@ -4,6 +4,17 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
+## Unreleased
+
+- The AC `voltage_span_v` of a sheet solve is the largest phasor difference
+  between two nodes, max |V_i - V_j| (the diameter of the phasors,
+  `voltage_span_definition` `maximum_phasor_difference`), not the departure
+  from the first node of the component in mesh order, which moved with the
+  mesh: on a two-layer EVM's real fill a sliver cell moved the VIN and SW
+  spans by +56 % and -35 % with the loss within 0.7 %; the diameter moved by
+  under 0.4 %.  An AC span is now at least the old one, so gates reading it
+  see larger values.  DC keeps max - min.
+
 ## 0.13.0
 
 The sheet solve's defaults change: `preconditioner="auto"` is `near` at every

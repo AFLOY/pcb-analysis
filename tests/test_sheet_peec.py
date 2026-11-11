@@ -1,3 +1,4 @@
+import dataclasses
 import unittest
 
 import numpy as np
@@ -505,10 +506,30 @@ class AlternatingCurrentTests(unittest.TestCase):
             self.mesh, self.operator, self.terminals, frequency_hz=3e5
         )
         self.assertEqual(direct.voltage_span_definition, "signed_max_minus_min")
-        self.assertEqual(
-            alternating.voltage_span_definition,
-            "maximum_phasor_magnitude_from_reference",
-        )
+        self.assertEqual(alternating.voltage_span_definition, "maximum_phasor_difference")
+
+    def test_the_alternating_span_does_not_depend_on_the_grounded_node(self):
+        alternating = solve_sheet_case(self.mesh, self.operator, self.terminals, frequency_hz=3e5)
+        voltages = alternating.node_voltage
+        brute = max(abs(a - b) for a in voltages for b in voltages)
+        self.assertAlmostEqual(alternating.voltage_span_v(), brute, delta=1e-12 * brute)
+        # Any other node as the reference: the same span.
+        for node in (0, len(voltages) // 2, len(voltages) - 1):
+            moved = dataclasses.replace(alternating, node_voltage=voltages - voltages[node])
+            self.assertAlmostEqual(moved.voltage_span_v(), brute, delta=1e-12 * brute)
+
+    def test_the_phasor_diameter_is_the_farthest_pair(self):
+        from electrical.sheet_peec.sheet_peec import phasor_diameter
+
+        rng = np.random.default_rng(4)
+        for count in (2, 3, 50, 400):
+            values = rng.standard_normal(count) + 1j * rng.standard_normal(count)
+            brute = np.abs(values[:, None] - values[None, :]).max()
+            self.assertAlmostEqual(phasor_diameter(values), brute, delta=1e-12 * brute)
+        line = (1.0 + 2.0j) * rng.standard_normal(30) + 0.5j  # collinear: no hull
+        brute = np.abs(line[:, None] - line[None, :]).max()
+        self.assertAlmostEqual(phasor_diameter(line), brute, delta=1e-12 * brute)
+        self.assertEqual(phasor_diameter(np.full(5, 1.0 + 1.0j)), 0.0)
 
     def test_impedance_grows_with_frequency(self):
         # Compared under one definition, so the growth is the physics and not

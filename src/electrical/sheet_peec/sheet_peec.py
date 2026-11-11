@@ -512,28 +512,58 @@ class SheetSolution:
     def voltage_span_v(self) -> float:
         """Give the potential spread the gate reads, in volts.
 
-        Two definitions, because two regimes.  At zero frequency the potentials
-        are real and signed and the spread is the difference between the
-        extremes.  Above it they are phasors with no common sign to take a
-        difference of, and the quantity that means anything is the largest
-        departure from the reference node.  This follows the convention the
-        optimizer's other backends already report under
-        ``voltage_span_definition``, so the numbers stay comparable.
+        The largest difference between the potentials of two nodes.  At zero
+        frequency the potentials are real and that is the difference between
+        the extremes.  Above it they are phasors, and it is the diameter of
+        their cloud in the complex plane, ``max |V_i - V_j|``, which is the
+        same number at zero frequency and does not depend on which node the
+        solve grounded.  (It used to be the largest departure from the
+        grounded node, the first node in mesh order: a change that added a
+        sliver cell above the copper's top row moved that node across the
+        board and the EVM-2L's VIN and SW spans at 214 kHz by +56 % and
+        -35 %, the copper's conduction unchanged.)
         """
         if self.node_voltage.size == 0:
             return 0.0
         if self.frequency_hz == 0.0:
             real = self.node_voltage.real
             return float(real.max() - real.min())
-        return float(np.abs(self.node_voltage).max())
+        return phasor_diameter(self.node_voltage)
 
     @property
     def voltage_span_definition(self) -> str:
-        return (
-            "signed_max_minus_min"
-            if self.frequency_hz == 0.0
-            else "maximum_phasor_magnitude_from_reference"
-        )
+        return "signed_max_minus_min" if self.frequency_hz == 0.0 else "maximum_phasor_difference"
+
+
+def phasor_diameter(values: np.ndarray) -> float:
+    """``max |v_i - v_j|`` over a set of phasors: the diameter of their cloud in the complex plane.
+
+    The farthest pair lies on the convex hull, so the pairs are searched among
+    its vertices only; points on one line (a hull of no area) are measured
+    along that line.
+    """
+    from scipy.spatial import ConvexHull, QhullError
+
+    points = np.column_stack([np.real(values).ravel(), np.imag(values).ravel()]).astype(np.float64)
+    if points.shape[0] < 2:
+        return 0.0
+    centred = points - points.mean(axis=0)
+    scale = float(np.abs(centred).max())
+    if scale == 0.0:
+        return 0.0
+    try:
+        candidates = points[ConvexHull(centred / scale).vertices]
+    except QhullError:
+        # Collinear (or nearly): along the line's direction the diameter is max - min.
+        _, _, axes = np.linalg.svd(centred, full_matrices=False)
+        along = centred @ axes[0]
+        return float(along.max() - along.min())
+    best = 0.0
+    for start in range(0, candidates.shape[0], 1024):
+        block = candidates[start:start + 1024]
+        distance = np.sqrt(((block[:, None, :] - candidates[None, :, :]) ** 2).sum(axis=2))
+        best = max(best, float(distance.max()))
+    return best
 
 
 def _components(incidence: sp.csr_matrix, node_count: int) -> tuple[int, np.ndarray]:
