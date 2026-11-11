@@ -9,9 +9,12 @@ or raises.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
+import hashlib
 import math
 import time
+import weakref
 from typing import Any, Sequence
 
 import numpy as np
@@ -44,8 +47,62 @@ class CudaSheetUnavailableError(RuntimeError):
 MINIMUM_CUPY_MAJOR_VERSION = 14
 
 
+# Device objects kept between calls: an operator's spectra and the cuDSS
+# plans of near matrices.  A sweep solves one conductor at many frequencies
+# and a hot loop the same conductor for many capacitors; neither should move
+# the operator again or redo the host-side ordering of a matrix whose
+# pattern it has already planned.  Each entry owns the memory pool it was
+# allocated from, so the per-call pools can be emptied freely.
+CUDA_CACHE_ENTRIES = 2
+_OPERATOR_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
+_CUDSS_CACHE: "OrderedDict[tuple, _CudssEntry]" = OrderedDict()
+
+
+def clear_cuda_sheet_caches() -> None:
+    """Drop the device operators and cuDSS plans kept between calls."""
+    _OPERATOR_CACHE.clear()
+    while _CUDSS_CACHE:
+        _key, entry = _CUDSS_CACHE.popitem(last=False)
+        entry.solver.free()
+
+
+def _cached_device_operator(operator: Any, cp: Any, device_id: int) -> Any:
+    """The device form of a host operator, made once while the host operator lives."""
+    key = (device_id, id(operator))
+    entry = _OPERATOR_CACHE.get(key)
+    if entry is not None and entry[0]() is operator:
+        _OPERATOR_CACHE.move_to_end(key)
+        return entry[2]
+    pool = cp.cuda.MemoryPool()
+    with cp.cuda.using_allocator(pool.malloc):
+        device_operator = cuda_inductance_operator(operator, cp)
+    try:
+        reference = weakref.ref(operator)
+    except TypeError:  # an operator that cannot be weakly referenced is not cached
+        return device_operator
+    _OPERATOR_CACHE[key] = (reference, pool, device_operator)
+    while len(_OPERATOR_CACHE) > CUDA_CACHE_ENTRIES:
+        _OPERATOR_CACHE.popitem(last=False)
+    return device_operator
+
+
+@dataclass
+class _CudssEntry:
+    pool: Any
+    solver: Any
+    rhs: Any
+
+
 # How the ``near`` preconditioner is factored and applied on the device.
 NEAR_FACTORIZATIONS = ("superlu", "cudss_quasi_definite")
+
+
+def _pattern_digest(matrix: Any) -> str:
+    """A digest of a CSR matrix's sparsity pattern (row pointers and column indices)."""
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(np.ascontiguousarray(matrix.indptr).tobytes())
+    digest.update(np.ascontiguousarray(matrix.indices).tobytes())
+    return digest.hexdigest()
 
 
 def quasi_definite_near_matrix(near: Any, reduced: Any, regularization: float) -> tuple[Any, np.ndarray, float]:
@@ -113,7 +170,31 @@ class CudssQuasiDefiniteNear:
         matrix, sign, delta = quasi_definite_near_matrix(near, reduced, regularization)
         self._cp = cp
         self._sign = cp.asarray(sign)
-        self._rhs = cp.zeros(matrix.shape[0], dtype=cp.complex128)
+        self.regularization = float(regularization)
+        self.delta = delta
+        # The pattern of the near matrix depends on the mesh and its cut, not
+        # on the frequency: a matrix whose pattern was planned before only
+        # has its values replaced and is factored again.
+        key = (int(cp.cuda.Device().id), matrix.shape, _pattern_digest(matrix))
+        entry = _CUDSS_CACHE.get(key)
+        self.reused_plan = entry is not None
+        if entry is not None:
+            _CUDSS_CACHE.move_to_end(key)
+            with cp.cuda.using_allocator(entry.pool.malloc):
+                entry.solver.reset_operands(a=csp.csr_matrix(matrix), b=entry.rhs)
+                entry.solver.factorize()
+            self._solver, self._rhs = entry.solver, entry.rhs
+            return
+        pool = cp.cuda.MemoryPool()
+        with cp.cuda.using_allocator(pool.malloc):
+            self._rhs = cp.zeros(matrix.shape[0], dtype=cp.complex128)
+            self._solver = self._planned(matrix, cp, csp, nsa, cudss_bindings)
+        _CUDSS_CACHE[key] = _CudssEntry(pool, self._solver, self._rhs)
+        while len(_CUDSS_CACHE) > CUDA_CACHE_ENTRIES:
+            _old, evicted = _CUDSS_CACHE.popitem(last=False)
+            evicted.solver.free()
+
+    def _planned(self, matrix: Any, cp: Any, csp: Any, nsa: Any, cudss_bindings: Any) -> Any:
         options = {
             "sparse_system_type": nsa.DirectSolverMatrixType.SYMMETRIC,
             "sparse_system_view": nsa.DirectSolverMatrixViewType.FULL,
@@ -123,21 +204,19 @@ class CudssQuasiDefiniteNear:
             # cuDSS orders and plans on the host; single-threaded that took
             # 5.6 s of a 0.4 mm filament hot loop on a Colab host
             options["multithreading_lib"] = threading
-        self._solver = nsa.DirectSolver(csp.csr_matrix(matrix), self._rhs, execution="cuda", options=options)
-        self._solver.plan_config.pivot_type = cudss_bindings.PivotType.PIVOT_NONE
-        self._solver.plan()
-        self._solver.factorize()
-        self.regularization = float(regularization)
-        self.delta = delta
+        solver = nsa.DirectSolver(csp.csr_matrix(matrix), self._rhs, execution="cuda", options=options)
+        solver.plan_config.pivot_type = cudss_bindings.PivotType.PIVOT_NONE
+        solver.plan()
+        solver.factorize()
+        return solver
 
     def solve(self, vector: Any) -> Any:
         self._rhs[...] = vector * self._sign
         return self._solver.solve().copy()
 
     def free(self) -> None:
-        solver, self._solver = getattr(self, "_solver", None), None
-        if solver is not None:
-            solver.free()
+        """Nothing to release: the plan and its factors stay cached for the next call."""
+        self._solver = None
 
 
 def _cudss_threading_library() -> str | None:
@@ -814,10 +893,10 @@ def solve_sheet_cases_cuda(
                 prepare_started = time.perf_counter()
                 if isinstance(operator, _BarrelSelf):
                     cuda_operator = _CudaBarrelSelf(
-                        cuda_inductance_operator(operator._base, cp), cp.asarray(operator._delta_grid)
+                        _cached_device_operator(operator._base, cp, device_id), cp.asarray(operator._delta_grid)
                     )
                 else:
-                    cuda_operator = cuda_inductance_operator(operator, cp)
+                    cuda_operator = _cached_device_operator(operator, cp, device_id)
                 indices = _branch_indices(mesh, cp)
                 cp.cuda.get_current_stream().synchronize()
                 shared_prepare_ms = (time.perf_counter() - prepare_started) * 1000.0
