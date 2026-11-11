@@ -96,7 +96,7 @@ class CudssQuasiDefiniteNear:
     ``solve(v)`` returns ``M^-1 v`` for the unregularized sign convention.
     """
 
-    def __init__(self, near: Any, reduced: Any, regularization: float, cp: Any, precision: str = "double") -> None:
+    def __init__(self, near: Any, reduced: Any, regularization: float, cp: Any) -> None:
         try:
             import nvmath.bindings.cudss as cudss_bindings
             import nvmath.sparse.advanced as nsa
@@ -106,16 +106,14 @@ class CudssQuasiDefiniteNear:
             ) from error
         import cupyx.scipy.sparse as csp
 
-        if precision not in ("double", "single"):
-            raise ValueError("near_precision must be 'double' or 'single'")
+        # Double precision: complex64 factors were measured on a Colab A100
+        # (0.4 mm filament hot loop, 30 MHz) and did not precondition at all --
+        # GMRES ran to its cap at residuals 1.0 (delta 1e-8, under single
+        # precision's resolution), 0.036 (1e-4) and 0.016 (1e-3).
         matrix, sign, delta = quasi_definite_near_matrix(near, reduced, regularization)
-        # A preconditioner, not the solution: in single precision the factors
-        # and their triangular solves move half the bytes.
-        dtype = np.complex64 if precision == "single" else np.complex128
-        matrix = matrix.astype(dtype)
         self._cp = cp
-        self._sign = cp.asarray(sign.astype(dtype))
-        self._rhs = cp.zeros(matrix.shape[0], dtype=dtype)
+        self._sign = cp.asarray(sign)
+        self._rhs = cp.zeros(matrix.shape[0], dtype=cp.complex128)
         options = {
             "sparse_system_type": nsa.DirectSolverMatrixType.SYMMETRIC,
             "sparse_system_view": nsa.DirectSolverMatrixViewType.FULL,
@@ -134,7 +132,7 @@ class CudssQuasiDefiniteNear:
 
     def solve(self, vector: Any) -> Any:
         self._rhs[...] = vector * self._sign
-        return self._solver.solve().astype(self._cp.complex128)
+        return self._solver.solve().copy()
 
     def free(self) -> None:
         solver, self._solver = getattr(self, "_solver", None), None
@@ -695,7 +693,6 @@ def solve_sheet_case_cuda(
     initial: SheetSolution | None = None,
     near_factorization: str = "superlu",
     near_regularization: float = 1e-8,
-    near_precision: str = "double",
 ) -> tuple[SheetSolution, CudaSheetTelemetry]:
     """Solve one sheet case with cuFFT, CuPy sparse algebra, and CUDA GMRES."""
     return solve_sheet_cases_cuda(
@@ -704,7 +701,6 @@ def solve_sheet_case_cuda(
         preconditioner=preconditioner, keep_terminal_components=keep_terminal_components,
         initial=None if initial is None else [initial],
         near_factorization=near_factorization, near_regularization=near_regularization,
-        near_precision=near_precision,
     )[0]
 
 
@@ -724,7 +720,6 @@ def solve_sheet_cases_cuda(
     initial: Sequence[SheetSolution | None] | None = None,
     near_factorization: str = "superlu",
     near_regularization: float = 1e-8,
-    near_precision: str = "double",
 ) -> list[tuple[SheetSolution, CudaSheetTelemetry]]:
     """Solve several excitations of one mesh on the device, in the order given.
 
@@ -830,7 +825,7 @@ def solve_sheet_cases_cuda(
                     _solve_group_cuda(
                         cp, csp, csl, mesh, operator, cuda_operator, indices, resistance, cases, members,
                         given_list, solved, frequency_hz, tolerance, max_iterations, restart, preconditioner,
-                        shared_prepare_ms, near_factorization, near_regularization, near_precision,
+                        shared_prepare_ms, near_factorization, near_regularization,
                     )
                 pool_peak = int(pool.total_bytes())
                 free_after, _ = cp.cuda.runtime.memGetInfo()
@@ -878,7 +873,6 @@ def _solve_group_cuda(
     resistance: np.ndarray, cases: list, members: list[int], given_list: list, solved: list,
     frequency_hz: float, tolerance: float, max_iterations: int, restart: int, preconditioner: str,
     shared_prepare_ms: float, near_factorization: str = "superlu", near_regularization: float = 1e-8,
-    near_precision: str = "double",
 ) -> None:
     """The excitations ``members`` of one reduction: their system prepared once, each solved in turn."""
     group_started = time.perf_counter()
@@ -987,8 +981,8 @@ def _solve_group_cuda(
 
         near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
         if near_factorization == "cudss_quasi_definite":
-            factored = CudssQuasiDefiniteNear(near_cpu, reduced_cpu, near_regularization, cp, near_precision)
-            factor_backend = f"cudss_quasi_definite_ldlt_{near_precision}"
+            factored = CudssQuasiDefiniteNear(near_cpu, reduced_cpu, near_regularization, cp)
+            factor_backend = "cudss_quasi_definite_ldlt"
         else:
             saddle_cpu = sp.bmat([[near_cpu, -reduced_cpu], [reduced_cpu.T, None]], format="csc")
             factored = csl.splu(csp.csc_matrix(saddle_cpu))
