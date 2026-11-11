@@ -88,3 +88,33 @@ def test_the_near_preconditioner_keeps_a_cut_layer_s_filaments_together() -> Non
     assert cut.metrics["converged"] and max(cut.metrics["filament_counts"].values()) > 5
     # 31 iterations when the filaments' mutual terms were dropped from the near matrix
     assert cut.metrics["solver_iterations"] <= 3 * whole.metrics["solver_iterations"]
+
+
+@pytest.mark.parametrize("filaments, barrels", [(1, False), (64, False), (64, True)])
+def test_the_device_near_matrix_is_the_host_one(filaments: int, barrels: bool) -> None:
+    """device_quasi_definite_near, run on NumPy and SciPy, gives the host path's matrix bit for bit."""
+    from electrical.sheet_peec import current_field_contract as cfc
+    from electrical.sheet_peec import sheet_peec as sheet
+    from electrical.sheet_peec.sheet_cuda import device_quasi_definite_near
+
+    from test_current_field_contract import _problem
+
+    value = _problem(frequency_hz=3e7)
+    if barrels:
+        for connection in value["vertical_connections"]:
+            connection["barrel"] = {"outer_diameter_mm": 0.3, "drill_diameter_mm": 0.25}
+    problem = cfc.CurrentFieldProblem.from_mapping(value)
+    mesh, operator, geometry = cfc._sheet_geometry(problem, {"maximum_filaments": filaments})
+    operator = sheet._with_barrels(mesh, operator)
+    assert hasattr(operator, "_delta_branch") == barrels
+    terminals = cfc._sheet_terminals(problem, geometry)
+    reduction = sheet._reduce(mesh, mesh.incidence(), sheet._source_vector(mesh, terminals), None)
+    omega, resistance = 2 * np.pi * 3e7, mesh.resistances()
+    near = sheet._near_impedance(mesh, operator, omega, resistance, reduction.active_branches)
+    host, host_sign, host_delta = quasi_definite_near_matrix(near, reduction.reduced, 1e-8)
+    device, device_sign, device_delta = device_quasi_definite_near(
+        mesh, operator, omega, resistance, reduction.active_branches, reduction.reduced, 1e-8, np, sp
+    )
+    assert np.array_equal(host.indptr, device.indptr) and np.array_equal(host.indices, device.indices)
+    assert np.array_equal(host.data, device.data)
+    assert host_delta == device_delta and np.array_equal(host_sign, device_sign)
