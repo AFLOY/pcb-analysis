@@ -154,3 +154,24 @@ def test_the_layer_pair_kernel_mixes_as_the_batched_product_does() -> None:
         want = host.apply_batch(x, y, z)
         for a, b in zip(got, want):
             assert np.allclose(cp.asnumpy(a), b, rtol=1e-11, atol=1e-11 * np.abs(b).max())
+
+
+
+def test_a_second_frequency_reuses_the_near_plan_and_solves_as_a_fresh_plan_does() -> None:
+    _require_cuda_device()
+    pytest.importorskip("nvmath.sparse.advanced")
+    from electrical.sheet_peec import sheet_cuda
+
+    common = {"relative_tolerance": 1e-9, "maximum_iterations": 240, "restart": 60, "execution_backend": "cuda",
+              "device_id": 0, "preconditioner": "near", "near_factorization": "cudss_quasi_definite",
+              "maximum_filaments": 1}
+    sheet_cuda.clear_cuda_sheet_caches()
+    solve_current_field_problem(_problem(frequency_hz=1e6), common)
+    planned = dict(sheet_cuda._CUDSS_CACHE)
+    reused = solve_current_field_problem(_problem(frequency_hz=3e7), common)
+    assert set(sheet_cuda._CUDSS_CACHE) == set(planned)  # one pattern, planned once
+    sheet_cuda.clear_cuda_sheet_caches()
+    fresh = solve_current_field_problem(_problem(frequency_hz=3e7), common)
+    assert reused.metrics["converged"] and fresh.metrics["converged"]
+    assert max(abs(reused.voltage_phasor[n] - fresh.voltage_phasor[n]) for n in fresh.voltage_phasor) < 1e-10
+    sheet_cuda.clear_cuda_sheet_caches()
