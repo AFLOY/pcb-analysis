@@ -187,13 +187,14 @@ class CudssQuasiDefiniteNear:
             with cp.cuda.using_allocator(entry.pool.malloc):
                 entry.matrix.data[...] = cp.asarray(matrix.data)
                 entry.solver.factorize()
-            self._solver, self._rhs = entry.solver, entry.rhs
+            self._solver, self._rhs, self._pool = entry.solver, entry.rhs, entry.pool
             return
         pool = cp.cuda.MemoryPool()
         with cp.cuda.using_allocator(pool.malloc):
             self._rhs = cp.zeros(matrix.shape[0], dtype=cp.complex128)
             device_matrix = csp.csr_matrix(matrix)
             self._solver = self._planned(device_matrix, nsa, cudss_bindings)
+        self._pool = pool
         _CUDSS_CACHE[key] = _CudssEntry(pool, self._solver, self._rhs, device_matrix)
         while len(_CUDSS_CACHE) > CUDA_CACHE_ENTRIES:
             _old, evicted = _CUDSS_CACHE.popitem(last=False)
@@ -217,7 +218,12 @@ class CudssQuasiDefiniteNear:
 
     def solve(self, vector: Any) -> Any:
         self._rhs[...] = vector * self._sign
-        return self._solver.solve().copy()
+        # cuDSS's solve workspace comes from the entry's pool too: drawn from
+        # a call's own pool, it was freed under the cached plan at the end of
+        # that call and the next frequency's GMRES read NaNs.
+        with self._cp.cuda.using_allocator(self._pool.malloc):
+            solution = self._solver.solve()
+        return solution.copy()
 
     def free(self) -> None:
         """Nothing to release: the plan and its factors stay cached for the next call."""
