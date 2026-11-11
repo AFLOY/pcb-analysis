@@ -380,7 +380,8 @@ class CudssQuasiDefiniteNear:
     """
 
     def __init__(
-        self, near: Any, reduced: Any, regularization: float, cp: Any, prepared: tuple[Any, Any, float] | None = None
+        self, near: Any, reduced: Any, regularization: float, cp: Any, prepared: tuple[Any, Any, float] | None = None,
+        columns: int = 1,
     ) -> None:
         try:
             import nvmath.bindings.cudss as cudss_bindings
@@ -407,7 +408,10 @@ class CudssQuasiDefiniteNear:
         # The pattern of the near matrix depends on the mesh and its cut, not
         # on the frequency: a matrix whose pattern was planned before only
         # has its values replaced and is factored again.
-        key = (int(cp.cuda.Device().id), matrix.shape, _pattern_digest(matrix))
+        # the right-hand side's shape is fixed with the plan: one column, or a
+        # column per excitation solved in lockstep (solve_many)
+        self.columns = int(columns)
+        key = (int(cp.cuda.Device().id), matrix.shape, _pattern_digest(matrix), self.columns)
         entry = _CUDSS_CACHE.get(key)
         self.reused_plan = entry is not None
         if entry is not None:
@@ -425,7 +429,10 @@ class CudssQuasiDefiniteNear:
             return
         pool = cp.cuda.MemoryPool()
         with cp.cuda.using_allocator(pool.malloc):
-            self._rhs = cp.zeros(matrix.shape[0], dtype=cp.complex128)
+            self._rhs = (
+                cp.zeros(matrix.shape[0], dtype=cp.complex128) if self.columns == 1
+                else cp.zeros((matrix.shape[0], self.columns), dtype=cp.complex128, order="F")
+            )
             # copied into the entry's own pool: a matrix formed on the device
             # lives in the calling solve's pool, which is emptied when it ends
             device_matrix = csp.csr_matrix(
@@ -467,6 +474,26 @@ class CudssQuasiDefiniteNear:
             solution = self._solver.solve(stream=stream)
         stream.synchronize()
         return solution.copy()
+
+    def solve_many(self, vectors: Any) -> Any:
+        """``M^-1`` of each row of ``vectors`` (k, n), k up to ``columns``, in one solve.
+
+        The factors are read once for all the columns: the bytes a
+        triangular solve moves are the factors', whatever the column count.
+        """
+        cp = self._cp
+        count = vectors.shape[0]
+        if count > self.columns:
+            raise ValueError(f"{count} right-hand sides for factors planned with {self.columns}")
+        stream = cp.cuda.get_current_stream()
+        self._rhs[:, :count] = (vectors * self._sign[None, :]).T
+        if count < self.columns:
+            self._rhs[:, count:] = 0.0
+        stream.synchronize()
+        with cp.cuda.using_allocator(self._pool.malloc):
+            solution = self._solver.solve(stream=stream)
+        stream.synchronize()
+        return cp.ascontiguousarray(solution[:, :count].T)
 
     def free(self) -> None:
         """Nothing to release: the plan and its factors stay cached for the next call."""
@@ -1402,6 +1429,25 @@ def _solve_group_cuda(
         voltages = vector[branches:]
         return cp.concatenate([impedance(currents) - reduced @ voltages, reduced.T @ currents])
 
+    def saddle_many(vectors: Any) -> Any:
+        """``saddle`` of each row of ``vectors`` (k, size): one operator application for all."""
+        currents = vectors[:, :branches]
+        voltages = vectors[:, branches:]
+        count = vectors.shape[0]
+        parts = _flux(cp.concatenate([currents.real, currents.imag]))
+        flux = parts[:count] + 1j * parts[count:]
+        top = resistance_device[None, :] * currents + 1j * omega * flux - (reduced @ voltages.T).T
+        return cp.concatenate([top, (reduced.T @ currents.T).T], axis=1)
+
+    # Excitations of one reduction share the factors; with cuDSS they are also
+    # solved together, every product and preconditioner application taking
+    # all of them at once (_lockstep_gmres).  One excitation keeps CuPy's GMRES.
+    lockstep = (
+        len(members)
+        if len(members) > 1 and preconditioner == "near" and near_factorization == "cudss_quasi_definite"
+        and hasattr(operator, "near_inductance")
+        else 1
+    )
     if preconditioner == "near" and hasattr(operator, "near_inductance"):
         # Sparse near-field impedance in the saddle-point matrix, factored
         # once (SciPy SuperLU factors, CUDA triangular solves as for the
@@ -1420,11 +1466,11 @@ def _solve_group_cuda(
                 except NearMatrixTooLarge:
                     prepared = None
             if prepared is not None:
-                factored = CudssQuasiDefiniteNear(None, None, near_regularization, cp, prepared)
+                factored = CudssQuasiDefiniteNear(None, None, near_regularization, cp, prepared, columns=lockstep)
                 factor_backend = "cudss_quasi_definite_ldlt"
             else:
                 near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
-                factored = CudssQuasiDefiniteNear(near_cpu, reduced_cpu, near_regularization, cp)
+                factored = CudssQuasiDefiniteNear(near_cpu, reduced_cpu, near_regularization, cp, columns=lockstep)
                 factor_backend = "cudss_quasi_definite_ldlt_host_near"
         else:
             near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
@@ -1466,6 +1512,16 @@ def _solve_group_cuda(
     effective_restart = min(restart, size)
     floor = 100.0 * np.finfo(np.float64).eps
 
+    if lockstep > 1:
+        try:
+            _lockstep_gmres(
+                cp, mesh, members, cases, given_list, saddle, saddle_many, factored, active_branches,
+                active_branches_device, keep, branches, unknowns, size, tolerance, max_iterations, effective_restart,
+                floor, finish, factor_backend, prepare_ms,
+            )
+        finally:
+            factored.free()
+        return
     try:
         for index in members:
             solve_started = time.perf_counter()
@@ -1523,6 +1579,118 @@ def _solve_group_cuda(
         release = getattr(factored, "free", None)
         if release is not None:
             release()
+
+
+# Device memory the lockstep Krylov basis may take, as a share of the free memory.
+LOCKSTEP_BASIS_SHARE = 0.5
+
+
+def _lockstep_gmres(
+    cp: Any, mesh: SheetMesh, members: list[int], cases: list, given_list: list, saddle: Any, saddle_many: Any,
+    factored: Any, active_branches: np.ndarray, active_branches_device: Any, keep: np.ndarray, branches: int,
+    unknowns: int, size: int, tolerance: float, max_iterations: int, restart: int, floor: float, finish: Any,
+    factor_backend: str, prepare_ms: float,
+) -> None:
+    """Restarted, left-preconditioned GMRES for the excitations ``members``, all at once.
+
+    Every excitation keeps its own Krylov basis and least-squares problem,
+    but they advance together: each step applies the saddle-point operator
+    to all the active ones in one batched product and the near factors to
+    them in one multi-column cuDSS solve, so the stack and the factors --
+    the bytes a step moves -- are read once for the lot.  Orthogonalization
+    is classical Gram-Schmidt twice, batched; the Givens rotations and the
+    residual estimates are on the host.  As on the single-excitation path,
+    a cycle grows from ten steps towards ``restart``, stops when every
+    active excitation's preconditioned residual meets a target scaled so
+    that its saddle-point residual meets ``tolerance``, and an excitation
+    leaves once its saddle-point residual is below it.  The basis is capped
+    so that it fits in a share of the free device memory.
+    """
+    started = time.perf_counter()
+    count = len(members)
+    rhs = cp.empty((count, size), dtype=cp.complex128)
+    rhs[:, :branches] = 0.0
+    for row, index in enumerate(members):
+        rhs[row, branches:] = cp.asarray(cases[index][0])[keep]
+    x = cp.zeros((count, size), dtype=cp.complex128)
+    for row, index in enumerate(members):
+        given = given_list[index]
+        if given is not None:
+            x[row] = _cuda_start(cp, saddle, given, mesh, active_branches, keep, branches, unknowns, rhs[row])
+    rhs_norm = cp.maximum(cp.linalg.norm(rhs, axis=1), 1e-30)
+    residual = cp.asnumpy(cp.linalg.norm(saddle_many(x) - rhs, axis=1) / rhs_norm)
+    residual[cp.asnumpy(cp.linalg.norm(rhs, axis=1)) == 0.0] = 0.0
+    steps = np.zeros(count, dtype=np.int64)
+    free = int(cp.cuda.runtime.memGetInfo()[0])
+    cap = max(2, int(LOCKSTEP_BASIS_SHARE * free // (16 * size * count)) - 1)
+    cycles = 0
+    while (residual > tolerance).any() and cycles < max_iterations:
+        active = np.flatnonzero(residual > tolerance)
+        k = len(active)
+        length = max(1, min(restart, 10 * 2**cycles, cap))
+        current = x[active]
+        start = factored.solve_many(rhs[active] - saddle_many(current))
+        beta = cp.linalg.norm(start, axis=1)
+        beta_host = cp.asnumpy(beta)
+        # the preconditioned residual each excitation has to reach in this cycle
+        target = 0.5 * tolerance * beta_host / np.maximum(residual[active], 1e-300)
+        if (target < floor * np.maximum(beta_host, 1e-300)).all():
+            break
+        basis = cp.empty((k, length + 1, size), dtype=cp.complex128)
+        basis[:, 0] = start / cp.maximum(beta, 1e-300)[:, None]
+        hessenberg = np.zeros((k, length + 1, length), dtype=np.complex128)
+        cosine = np.zeros((k, length), dtype=np.complex128)
+        sine = np.zeros((k, length), dtype=np.complex128)
+        g = np.zeros((k, length + 1), dtype=np.complex128)
+        g[:, 0] = beta_host
+        done = 0
+        for j in range(length):
+            w = factored.solve_many(saddle_many(basis[:, j]))
+            column = cp.zeros((k, j + 1), dtype=cp.complex128)
+            for _ in range(2):  # classical Gram-Schmidt, twice
+                h = cp.matmul(basis[:, : j + 1].conj(), w[:, :, None])[:, :, 0]
+                w = w - cp.matmul(h[:, None, :], basis[:, : j + 1])[:, 0]
+                column += h
+            norm = cp.linalg.norm(w, axis=1)
+            basis[:, j + 1] = w / cp.maximum(norm, 1e-300)[:, None]
+            hessenberg[:, : j + 1, j] = cp.asnumpy(column)
+            hessenberg[:, j + 1, j] = cp.asnumpy(norm)
+            # Givens rotations on the host: each excitation's residual estimate
+            for i in range(k):
+                for m in range(j):
+                    a, b = hessenberg[i, m, j], hessenberg[i, m + 1, j]
+                    hessenberg[i, m, j] = np.conj(cosine[i, m]) * a + np.conj(sine[i, m]) * b
+                    hessenberg[i, m + 1, j] = -sine[i, m] * a + cosine[i, m] * b
+                a, b = hessenberg[i, j, j], hessenberg[i, j + 1, j]
+                radius = np.hypot(abs(a), abs(b))
+                if radius == 0.0:
+                    cosine[i, j], sine[i, j] = 1.0, 0.0
+                else:
+                    cosine[i, j], sine[i, j] = a / radius, b / radius
+                hessenberg[i, j, j] = radius
+                hessenberg[i, j + 1, j] = 0.0
+                g[i, j + 1] = -sine[i, j] * g[i, j]
+                g[i, j] = np.conj(cosine[i, j]) * g[i, j]
+            done = j + 1
+            steps[active] += 1
+            if (np.abs(g[:, j + 1]) <= target).all():
+                break
+        # each excitation's least-squares update from its triangular system
+        update = np.zeros((k, done), dtype=np.complex128)
+        for i in range(k):
+            r = hessenberg[i, :done, :done]
+            update[i] = np.linalg.solve(np.triu(r), g[i, :done]) if done else update[i]
+        current = current + cp.matmul(cp.asarray(update)[:, None, :], basis[:, :done])[:, 0]
+        x[active] = current
+        cycles += 1
+        residual[active] = cp.asnumpy(cp.linalg.norm(saddle_many(current) - rhs[active], axis=1) / rhs_norm[active])
+    for row, index in enumerate(members):
+        current_device = cp.zeros(mesh.branch_count, dtype=cp.complex128)
+        current_device[active_branches_device] = x[row, :branches]
+        voltage_device = cp.zeros(mesh.node_count, dtype=cp.complex128)
+        voltage_device[keep] = x[row, branches:]
+        finish(index, voltage_device, current_device, int(steps[row]), float(residual[row]),
+               bool(residual[row] <= tolerance), f"{factor_backend}_lockstep{count}", prepare_ms, started)
 
 
 def _cuda_start(
