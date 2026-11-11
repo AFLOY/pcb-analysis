@@ -146,7 +146,7 @@ def test_the_layer_pair_kernel_mixes_as_the_batched_product_does() -> None:
     host = CudaSheetInductanceOperator(operator, np)  # NumPy: the batched matmul path
     rng = np.random.default_rng(11)
     rows, cols = device.shape
-    for batch in (1, 2, 3):
+    for batch in (1, 2, 3, 5):
         x = rng.standard_normal((batch, device.layer_count, rows, cols))
         y = rng.standard_normal((batch, device.layer_count, rows, cols))
         z = rng.standard_normal((batch, len(device.vertical_levels), rows, cols))

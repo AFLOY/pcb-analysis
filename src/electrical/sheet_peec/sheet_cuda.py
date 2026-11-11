@@ -583,12 +583,26 @@ class CudaSheetInductanceOperator:
             return None
         sample = next(iter(kernels.values()))
         frequencies = int(np.prod(sample.shape))
-        needed = 16 * frequencies * (2 * layers * layers + levels * levels)
+        # On a device the pairs are kept once, the upper triangle packed per
+        # frequency (the coupling is symmetric in the layers); NumPy standing
+        # in for CuPy gets the full (F, L, L) stack its matmul path reads.
+        packed = _layer_pair_mix_kernel(cp) is not None
+        pairs = (lambda n: n * (n + 1) // 2) if packed else (lambda n: n * n)
+        needed = 16 * frequencies * (2 * pairs(layers) + pairs(levels))
         budget = _device_memory_budget(cp)
         if budget is not None and needed > budget:
             return None
+        self.packed = packed
 
         def stack(pick: Any, count: int) -> Any:
+            if packed:
+                out = cp.empty((frequencies, count * (count + 1) // 2), dtype=cp.complex128)
+                position = 0
+                for first in range(count):
+                    for second in range(first, count):
+                        out[:, position] = cp.asarray(pick(first, second)).reshape(-1)
+                        position += 1
+                return out
             out = cp.empty((frequencies, count, count), dtype=cp.complex128)
             for first in range(count):
                 for second in range(count):
@@ -602,6 +616,9 @@ class CudaSheetInductanceOperator:
         if levels:
             stacked["z"] = stack(lambda a, b: kernels_z[(min(a, b), max(a, b))], levels)
         self.spectrum_shape = tuple(sample.shape)
+        if packed:
+            # the pairwise spectra are in the stack now; apply goes through it too
+            self._kernels, self._kernels_z = {}, {}
         return stacked
 
     def _kernel(self, axis: str, first: int, second: int) -> Any:
@@ -634,13 +651,9 @@ class CudaSheetInductanceOperator:
         spectra = cp.fft.rfft2(currents, s=self.padded, axes=(-2, -1))
         frequencies = spectra.shape[-2] * spectra.shape[-1]
         flat = spectra.reshape(batch, count, frequencies)
-        kernel = _layer_pair_mix_kernel(cp) if batch <= LAYER_PAIR_MIX_MAX_BATCH else None
-        if kernel is not None:
+        if getattr(self, "packed", False):
             mixed = cp.empty_like(flat)
-            threads = 256
-            blocks = (frequencies * count + threads - 1) // threads
-            kernel((blocks,), (threads,), (matrix, cp.ascontiguousarray(flat), mixed,
-                                           np.int64(frequencies), np.int32(count), np.int32(batch)))
+            _mix_packed(cp, matrix, cp.ascontiguousarray(flat), mixed, frequencies, count, batch)
             accumulated = mixed.reshape(spectra.shape)
         else:
             # (B, L, F) -> (F, L, B): each frequency's layers a column per batch member
@@ -665,6 +678,12 @@ class CudaSheetInductanceOperator:
         if not self.vertical_levels:
             return flux_x, flux_y, self.cp.zeros_like(currents_z)
         return flux_x, flux_y, self._convolve_batch(currents_z, self._stack["z"])
+
+    def _apply_via_stack(self, currents_x: Any, currents_y: Any, currents_z: Any | None) -> Any:
+        flux = self.apply_batch(
+            currents_x[None], currents_y[None], None if currents_z is None else currents_z[None]
+        )
+        return tuple(part[0] for part in flux)
 
     def _convolve(self, spectra: Any, axis: str) -> Any:
         cp = self.cp
@@ -702,6 +721,8 @@ class CudaSheetInductanceOperator:
         currents_y: Any,
         currents_z: Any | None = None,
     ) -> tuple[Any, Any] | tuple[Any, Any, Any]:
+        if getattr(self, "packed", False):
+            return self._apply_via_stack(currents_x, currents_y, currents_z)
         cp = self.cp
         rows, cols = self.shape
         expected = (self.layer_count, rows, cols)
@@ -884,6 +905,75 @@ extern "C" __global__ void layer_pair_mix(
     if (B > 3) out[3LL * L * F] = a3;
 }
 """
+_LAYER_PAIR_MIX_PACKED_SOURCE = r"""
+#include <cupy/complex.cuh>
+// O[b, t, f] = sum_s K[f, p(t, s)] S[b, s, f] with K the upper triangle of the
+// symmetric layer coupling packed per frequency (p(t, s) for t <= s, row by
+// row).  A block takes FC consecutive frequencies: it copies their packed
+// rows (contiguous) and their source spectra into shared memory with every
+// thread loading, then forms its (b, t, f) outputs, f fastest, and writes
+// them contiguously along f.  The pairs are read once from global memory,
+// half the full stack, in long coalesced runs.
+extern "C" __global__ void layer_pair_mix_packed(
+    const complex<double>* __restrict__ K,
+    const complex<double>* __restrict__ S,
+    complex<double>* __restrict__ O,
+    const long long F, const int L, const int B, const int FC)
+{
+    extern __shared__ unsigned char raw[];
+    complex<double>* Ks = reinterpret_cast<complex<double>*>(raw);  // [p][fi]
+    const int P = L * (L + 1) / 2;
+    complex<double>* Ss = Ks + (long long)P * FC;                      // [b*L + s][fi]
+    const long long f0 = (long long)blockIdx.x * FC;
+    const int fc = (int)(F - f0 < FC ? F - f0 : FC);
+    const complex<double>* rows = K + f0 * P;
+    for (int i = threadIdx.x; i < fc * P; i += blockDim.x) {
+        const int fi = i / P, p = i - fi * P;
+        Ks[p * FC + fi] = rows[i];
+    }
+    for (int i = threadIdx.x; i < B * L * fc; i += blockDim.x) {
+        const int bs = i / fc, fi = i - bs * fc;
+        Ss[bs * FC + fi] = S[(long long)bs * F + f0 + fi];
+    }
+    __syncthreads();
+    for (int i = threadIdx.x; i < B * L * fc; i += blockDim.x) {
+        const int bt = i / fc, fi = i - bt * fc;
+        const int b = bt / L, t = bt - b * L;
+        complex<double> acc(0.0, 0.0);
+        const complex<double>* column = Ss + (b * L) * FC + fi;
+        for (int s = 0; s < L; ++s) {
+            const int lo = t < s ? t : s, hi = t < s ? s : t;
+            const int p = lo * L - (lo * (lo - 1)) / 2 + (hi - lo);
+            acc += Ks[p * FC + fi] * column[s * FC];
+        }
+        O[(long long)bt * F + f0 + fi] = acc;
+    }
+}
+"""
+_LAYER_PAIR_MIX_PACKED: dict[int, Any] = {}
+# Shared memory a mixing block takes: 48 KiB, the size every device gives a
+# block without opting in.
+LAYER_PAIR_MIX_SHARED_BYTES = 48 * 1024
+LAYER_PAIR_MIX_MAX_FREQUENCIES = 64
+
+
+def _mix_packed(cp: Any, packed: Any, spectra: Any, out: Any, frequencies: int, count: int, batch: int) -> None:
+    """Launch layer_pair_mix_packed over ``spectra`` (B, L, F) into ``out``."""
+    key = id(cp)
+    if key not in _LAYER_PAIR_MIX_PACKED:
+        _LAYER_PAIR_MIX_PACKED[key] = cp.RawKernel(_LAYER_PAIR_MIX_PACKED_SOURCE, "layer_pair_mix_packed")
+    kernel = _LAYER_PAIR_MIX_PACKED[key]
+    pairs = count * (count + 1) // 2
+    per_frequency = 16 * (pairs + batch * count)
+    block_frequencies = max(1, min(LAYER_PAIR_MIX_MAX_FREQUENCIES, LAYER_PAIR_MIX_SHARED_BYTES // per_frequency))
+    shared = per_frequency * block_frequencies
+    if shared > LAYER_PAIR_MIX_SHARED_BYTES:
+        raise ValueError(f"{count} layers and a batch of {batch} need {shared} bytes of shared memory a frequency")
+    blocks = (frequencies + block_frequencies - 1) // block_frequencies
+    kernel((blocks,), (256,), (packed, spectra, out, np.int64(frequencies), np.int32(count), np.int32(batch),
+                               np.int32(block_frequencies)), shared_mem=shared)
+
+
 _LAYER_PAIR_MIX: dict[int, Any] = {}
 
 
