@@ -123,6 +123,7 @@ def device_quasi_definite_near(
     *,
     block_entries: int = NEAR_BLOCK_ENTRIES,
     memory_budget: int | None = None,
+    filament_coupling: str = "full",
 ) -> tuple[Any, Any, float]:
     """:func:`quasi_definite_near_matrix` of :func:`_near_impedance`, built where ``xp`` lives.
 
@@ -147,9 +148,17 @@ def device_quasi_definite_near(
     :class:`NearMatrixTooLarge` is raised before anything is allocated, and
     the caller forms it on the host instead.
 
+    ``filament_coupling`` ``"column"`` keeps a branch's coupling to the other
+    filaments of its own layer only straight above and below it (its own
+    filament keeps the whole near radius): a sparser preconditioner, whose
+    factors -- what each Krylov step reads -- are smaller.  ``"full"`` is the
+    host path's matrix.
+
     Only for the uniform convolution operator (``_tables``); returns the
     CSR matrix, the row signs and ``delta``.
     """
+    if filament_coupling not in ("full", "column"):
+        raise ValueError("filament_coupling must be 'full' or 'column'")
     base = getattr(operator, "_base", operator)
     barrel_delta = getattr(operator, "_delta_branch", None)
     if not hasattr(base, "_tables"):
@@ -192,10 +201,16 @@ def device_quasi_definite_near(
                 continue
             for dr in span:
                 for dc in span:
+                    reach = reaches
+                    if group_of is not None and filament_coupling == "column" and (dr, dc) != (0, 0):
+                        # another filament of the layer only straight above or below
+                        reach = reaches & (np.arange(levels_count) == other)
+                    if not reach.any():
+                        continue
                     values = np.array(
                         [table_of(lvl, other)[dr % padded_rows, dc % padded_cols] for lvl in range(levels_count)]
                     )
-                    slots.append((other, dr, dc, reaches, values))
+                    slots.append((other, dr, dc, reach, values))
         groups.append((sources, number, active_lookup, slots))
 
     offset = 0
@@ -1116,6 +1131,7 @@ def solve_sheet_case_cuda(
     initial: SheetSolution | None = None,
     near_factorization: str = "superlu",
     near_regularization: float = 1e-8,
+    near_filament_coupling: str = "full",
 ) -> tuple[SheetSolution, CudaSheetTelemetry]:
     """Solve one sheet case with cuFFT, CuPy sparse algebra, and CUDA GMRES."""
     return solve_sheet_cases_cuda(
@@ -1124,6 +1140,7 @@ def solve_sheet_case_cuda(
         preconditioner=preconditioner, keep_terminal_components=keep_terminal_components,
         initial=None if initial is None else [initial],
         near_factorization=near_factorization, near_regularization=near_regularization,
+        near_filament_coupling=near_filament_coupling,
     )[0]
 
 
@@ -1143,6 +1160,7 @@ def solve_sheet_cases_cuda(
     initial: Sequence[SheetSolution | None] | None = None,
     near_factorization: str = "superlu",
     near_regularization: float = 1e-8,
+    near_filament_coupling: str = "full",
 ) -> list[tuple[SheetSolution, CudaSheetTelemetry]]:
     """Solve several excitations of one mesh on the device, in the order given.
 
@@ -1248,7 +1266,7 @@ def solve_sheet_cases_cuda(
                     _solve_group_cuda(
                         cp, csp, csl, mesh, operator, cuda_operator, indices, resistance, cases, members,
                         given_list, solved, frequency_hz, tolerance, max_iterations, restart, preconditioner,
-                        shared_prepare_ms, near_factorization, near_regularization,
+                        shared_prepare_ms, near_factorization, near_regularization, near_filament_coupling,
                     )
                 pool_peak = int(pool.total_bytes())
                 free_after, _ = cp.cuda.runtime.memGetInfo()
@@ -1302,6 +1320,7 @@ def _solve_group_cuda(
     resistance: np.ndarray, cases: list, members: list[int], given_list: list, solved: list,
     frequency_hz: float, tolerance: float, max_iterations: int, restart: int, preconditioner: str,
     shared_prepare_ms: float, near_factorization: str = "superlu", near_regularization: float = 1e-8,
+    near_filament_coupling: str = "full",
 ) -> None:
     """The excitations ``members`` of one reduction: their system prepared once, each solved in turn."""
     group_started = time.perf_counter()
@@ -1415,7 +1434,7 @@ def _solve_group_cuda(
                 try:
                     prepared = device_quasi_definite_near(
                         mesh, operator, omega, resistance, active_branches, reduced_cpu, near_regularization, cp, csp,
-                        memory_budget=_device_memory_budget(cp),
+                        memory_budget=_device_memory_budget(cp), filament_coupling=near_filament_coupling,
                     )
                 except NearMatrixTooLarge:
                     prepared = None
