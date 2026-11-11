@@ -870,6 +870,12 @@ def solve_sheet_cases(
     factor_threads = resolve_near_factor_threads(near_factor_threads)
     if preconditioner not in ("auto", "near", "block", "diagonal"):
         raise ValueError("preconditioner must be 'auto', 'near', 'block' or 'diagonal'")
+    if getattr(mesh, "strands", None) is not None:
+        # The block and diagonal variants read one self inductance per grid
+        # branch; only the near factor knows the strands.
+        if preconditioner not in ("auto", "near"):
+            raise ValueError("a mesh with edge strands is solved with the near preconditioner")
+        preconditioner = "near"
     near_tiles = DEFAULT_NEAR_TILES if near_tiles is None else int(near_tiles)
     if near_tiles < 1:
         raise ValueError("near_tiles must be at least 1")
@@ -1056,6 +1062,9 @@ def _solve_ac(
             "build it with vertical_levels=mesh.vertical_levels"
         )
     has_vertical = bool(levels)
+    # Edge strands (:mod:`.edge_strands`): what the grid gets wrong about the
+    # strands, added to the grid's flux at branch level.
+    correction = getattr(mesh, "inductance_correction", None)
 
     def _flux(currents: np.ndarray) -> np.ndarray:
         """Apply the partial inductance to a real vector of branch currents."""
@@ -1071,6 +1080,8 @@ def _solve_ac(
         flux = mesh.gather(flux_x, flux_y)
         if flux_z is not None:
             mesh.gather_vertical(flux_z, flux)
+        if correction is not None:
+            flux += correction @ full_currents
         return flux[active_branches]
 
     def impedance(currents: np.ndarray) -> np.ndarray:
@@ -1096,10 +1107,14 @@ def _solve_ac(
         else:
             applied = [operator.apply(*grid) if grid[2] is not None else operator.apply(grid[0], grid[1]) for grid in grids]
         fluxes = []
-        for result in applied:
+        for part, result in zip(parts, applied):
             flux = mesh.gather(result[0], result[1])
             if len(result) == 3:
                 mesh.gather_vertical(result[2], flux)
+            if correction is not None:
+                full_currents = np.zeros(mesh.branch_count, dtype=np.float64)
+                full_currents[active_branches] = part
+                flux += correction @ full_currents
             fluxes.append(flux[active_branches])
         count = currents.shape[1]
         flux = np.stack(fluxes[:count], axis=1).astype(np.complex128) + 1j * np.stack(fluxes[count:], axis=1)
@@ -1450,9 +1465,13 @@ def _branch_layers(mesh: SheetMesh) -> np.ndarray:
     """The layer of every branch in mesh order; -1 for the vertical branches."""
 
     planar = [layer for layer, _row, _col in mesh.branch_x] + [layer for layer, _row, _col in mesh.branch_y]
-    return np.concatenate(
+    layers = np.concatenate(
         [np.asarray(planar, dtype=np.int64), np.full(len(mesh.via_branches), -1, dtype=np.int64)]
     )
+    strands = getattr(mesh, "strands", None)
+    if strands is not None:
+        layers = np.concatenate([layers, layers[strands.extra_parent]])
+    return layers
 
 
 def _conductor_of_layer(name: str) -> str:
@@ -1477,7 +1496,21 @@ def _near_impedance(
     the loop inductance unchanged to 1e-6 of itself.
     """
 
-    near = operator.near_inductance(mesh).tocoo()
+    near = operator.near_inductance(mesh)
+    strands = getattr(mesh, "strands", None)
+    if strands is not None:
+        # The grid's near field between uncut branches, and the exact partial
+        # inductances of every pair with a strand in it (``near_exact``).
+        base = strands.base_count
+        count = mesh.branch_count
+        keep = np.ones(count)
+        keep[strands.cut_branches] = 0.0
+        keep[base:] = 0.0
+        mask = sp.diags(keep)
+        grid = sp.csr_matrix(near)[:base, :base]
+        grid = sp.bmat([[grid, None], [None, sp.csr_matrix((count - base, count - base))]], format="csr")
+        near = (mask @ grid @ mask + mesh.near_exact).tocsr()
+    near = near.tocoo()
     # A layer cut into skin filaments is one conductor: its filaments sit
     # microns apart and couple almost as strongly as a filament to itself, so
     # their mutual terms stay (dropped, a 71 um plane cut seven ways took the
