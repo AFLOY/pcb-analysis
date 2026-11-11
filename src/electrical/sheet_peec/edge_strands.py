@@ -38,6 +38,9 @@ from typing import Any
 import numpy as np
 import scipy.sparse as sp
 
+from electrical import backend as _backend
+from electrical.threads import thread_budget
+
 from .sheet_inductance import closed_form_mutual_inductance_arrays
 from .sheet_peec import SheetMesh, _conductor_of_layer
 
@@ -207,13 +210,12 @@ class StrandedSheetMesh(SheetMesh):
     ``gather`` reads it back with the same weights; ``fold`` sums strand
     currents onto their branches (what a cell carries).
     ``inductance_correction`` is the precorrection ``C`` the solver adds to the
-    grid's flux; ``near_exact`` the exact partial inductances of the pairs it
-    covers, for the near preconditioner.
+    grid's flux (``@`` applies it); :meth:`near_exact_matrix` the exact partial
+    inductances of the pairs it covers, for the near preconditioner.
     """
 
     strands: EdgeStrands
-    inductance_correction: sp.csr_matrix
-    near_exact: sp.csr_matrix
+    inductance_correction: Any
 
     @classmethod
     def from_mesh(cls, mesh: SheetMesh, strands: EdgeStrands) -> "StrandedSheetMesh":
@@ -224,7 +226,6 @@ class StrandedSheetMesh(SheetMesh):
         stranded.__dict__.pop("_positions", None)
         stranded.strands = strands
         stranded.inductance_correction = sp.csr_matrix((0, 0))
-        stranded.near_exact = sp.csr_matrix((0, 0))
         rows, cols = mesh.shape
         layer, row, col = strands.cell[:, 0], strands.cell[:, 1], strands.cell[:, 2]
         across_row = np.where(strands.axis[:, None] == 0, strands.node, 0)
@@ -237,6 +238,18 @@ class StrandedSheetMesh(SheetMesh):
     @property
     def base_branch_count(self) -> int:
         return self.strands.base_count
+
+    def correction_matrix(self) -> sp.csr_matrix:
+        """``C`` as a sparse matrix (built on request when it is kept as blocks)."""
+        correction = self.inductance_correction
+        return correction.matrix(False) if isinstance(correction, CompactStrandCorrection) else correction
+
+    def near_exact_matrix(self) -> sp.csr_matrix:
+        """The exact partial inductance of every pair ``C`` covers, for the near preconditioner."""
+        correction = self.inductance_correction
+        if isinstance(correction, CompactStrandCorrection):
+            return correction.matrix(True)
+        return self.__dict__["_near_exact"]
 
     @property
     def branch_count(self) -> int:  # type: ignore[override]
@@ -432,9 +445,187 @@ def strand_correction(
     return ((correction + correction.T) * 0.5).tocsr(), ((exact + exact.T) * 0.5).tocsr()
 
 
+class CompactStrandCorrection:
+    """``C`` kept as blocks by strand layout, layer pair and offset, applied by the C++ core.
+
+    ``correction @ x`` is ``C x``; :meth:`matrix` gives ``C`` or the exact
+    partial inductances as a sparse matrix when one is wanted (the near
+    preconditioner, tests).
+    """
+
+    def __init__(self, native: Any, size: int) -> None:
+        self._native = native
+        self.shape = (size, size)
+
+    def __matmul__(self, x: np.ndarray) -> np.ndarray:
+        return self._native.apply(np.ascontiguousarray(x, dtype=np.float64), thread_budget())
+
+    def matrix(self, exact: bool = False) -> sp.csr_matrix:
+        row, col, value = self._native.entries(exact)
+        return sp.csr_matrix((value, (row, col)), shape=self.shape)
+
+    @property
+    def stored_bytes(self) -> int:
+        return int(self._native.stored_bytes)
+
+
+def compact_strand_correction(
+    mesh: StrandedSheetMesh, operator: Any, radius_cells: int = EDGE_STRAND_RADIUS_CELLS
+) -> CompactStrandCorrection:
+    """The precorrection of :func:`strand_correction` as blocks, for the C++ core to apply.
+
+    A block is the m x m correction between the strands of a source branch of
+    one layout ("type") and those of a target of another, for one offset and
+    one layer pair; on a straight edge it repeats along the whole edge.  The
+    two directions of a pair of cut branches are transposes and are made so
+    exactly.
+    """
+    core = _backend.core()
+    strands = mesh.strands
+    tables = operator._tables
+    padded_rows, padded_cols = operator.padded
+    pitch = float(mesh.pitch_m)  # type: ignore[arg-type]
+    layers, rows, cols = mesh.occupancy.shape
+    conductor = [_conductor_of_layer(layer.name) for layer in mesh.stackup.layers]
+    partners = [[b for b in range(layers) if conductor[b] == conductor[a]] for a in range(layers)]
+    partner_start = np.concatenate([[0], np.cumsum([len(p) for p in partners])]).astype(np.int32)
+    partner = np.asarray([b for p in partners for b in p], dtype=np.int32)
+    z = np.asarray([layer.z_m for layer in mesh.stackup.layers], dtype=np.float64)
+    thickness = np.asarray([layer.thickness_m for layer in mesh.stackup.layers], dtype=np.float64)
+    span = list(range(-radius_cells, radius_cells + 1))
+    slots = [(d_along, d_across) for d_along in span for d_across in span]
+    slot_of = {slot: k for k, slot in enumerate(slots)}
+
+    native = core.sheet.StrandCorrection(mesh.branch_count)
+    position = 0
+    for axis, group in ((0, mesh.branch_x), (1, mesh.branch_y)):
+        count = len(group)
+        if count == 0:
+            continue
+        name = "x" if axis == 0 else "y"
+        cells = np.asarray(group, dtype=np.int64).reshape(-1, 3)
+        lookup = np.full((layers, rows, cols), -1, dtype=np.int32)
+        lookup[cells[:, 0], cells[:, 1], cells[:, 2]] = np.arange(count, dtype=np.int32)
+        # Layouts: type 0 an uncut branch, one strand at the centre.
+        layouts: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = [
+            (np.zeros(1), np.full(1, pitch), np.zeros((1, 3), dtype=np.int64), np.array([[1.0, 0.0, 0.0]]))
+        ]
+        layout_of: dict[bytes, int] = {}
+        branch_type = np.zeros(count, dtype=np.int32)
+        strand_lists: dict[int, np.ndarray] = {}
+        mine = np.flatnonzero((strands.branch >= position) & (strands.branch < position + count))
+        if mine.size:
+            order = mine[np.argsort(strands.branch[mine], kind="stable")]
+            bounds = np.flatnonzero(np.diff(strands.branch[order])) + 1
+            for members in np.split(order, bounds):
+                local = int(strands.branch[members[0]] - position)
+                key = np.concatenate([
+                    np.round(strands.offset_m[members] / pitch, 12), np.round(strands.width_m[members] / pitch, 12),
+                    strands.node[members].reshape(-1).astype(np.float64),
+                ]).tobytes()
+                if key not in layout_of:
+                    layout_of[key] = len(layouts)
+                    layouts.append((strands.offset_m[members], strands.width_m[members],
+                                    strands.node[members], strands.weight[members]))
+                branch_type[local] = layout_of[key]
+                strand_lists[local] = strands.strand_index[members]
+        types = len(layouts)
+        width = max(len(layout[0]) for layout in layouts)
+        sizes = np.ones(count, dtype=np.int64)
+        for local, ids in strand_lists.items():
+            sizes[local] = ids.size
+        strand_start = np.concatenate([[0], np.cumsum(sizes)]).astype(np.int64)
+        strand_id = np.empty(int(strand_start[-1]), dtype=np.int64)
+        strand_id[strand_start[:-1]] = position + np.arange(count)
+        for local, ids in strand_lists.items():
+            strand_id[strand_start[local]: strand_start[local + 1]] = ids
+        sources = np.asarray(sorted(strand_lists), dtype=np.int32)
+
+        # The (slot, source layer, target layer, source type, target type) that occur.
+        keys: set[tuple[int, int, int, int, int]] = set()
+        for (d_along, d_across), k in slot_of.items():
+            dr, dc = (d_across, d_along) if axis == 0 else (d_along, d_across)
+            row = cells[sources, 1] + dr
+            col = cells[sources, 2] + dc
+            inside = (row >= 0) & (row < rows) & (col >= 0) & (col < cols)
+            for la in np.unique(cells[sources, 0]):
+                at = inside & (cells[sources, 0] == la)
+                for lb in partners[int(la)]:
+                    target = lookup[lb, row[at], col[at]]
+                    hit = target >= 0
+                    combos = np.unique(
+                        np.stack([branch_type[sources[at][hit]], branch_type[target[hit]]], axis=1), axis=0
+                    )
+                    keys.update((k, int(la), lb, int(a), int(b)) for a, b in combos)
+        key_list = sorted(keys)
+        block_index = {key: n for n, key in enumerate(key_list)}
+        correction = np.zeros((len(key_list), width, width))
+        exact_blocks = np.zeros((len(key_list), width, width))
+        for (la, lb) in sorted({(key[1], key[2]) for key in key_list}):
+            table = tables[(name, min(la, lb), max(la, lb))]
+            chosen = [key for key in key_list if key[1] == la and key[2] == lb]
+            for key in chosen:
+                k, _, _, ts, tt = key
+                d_along, d_across = slots[k]
+                off_s, wid_s, node_s, wt_s = layouts[ts]
+                off_t, wid_t, node_t, wt_t = layouts[tt]
+                a, b = np.meshgrid(np.arange(off_s.size), np.arange(off_t.size), indexing="ij")
+                a, b = a.ravel(), b.ravel()
+                n = a.size
+                exact = closed_form_mutual_inductance_arrays(
+                    (np.full(n, pitch), wid_s[a], np.full(n, thickness[la])),
+                    (np.full(n, pitch), wid_t[b], np.full(n, thickness[lb])),
+                    (np.full(n, d_along * pitch), d_across * pitch + off_t[b] - off_s[a], np.full(n, z[lb] - z[la])),
+                )
+                shift = d_across + node_t[b][:, None, :] - node_s[a][:, :, None]
+                if axis == 0:
+                    values = table[shift % padded_rows, d_along % padded_cols]
+                else:
+                    values = table[d_along % padded_rows, shift % padded_cols]
+                grid = np.einsum("pm,pmn,pn->p", wt_s[a], values, wt_t[b])
+                exact_blocks[block_index[key], a, b] = exact
+                correction[block_index[key], a, b] = exact - grid
+        # Both directions of a pair of cut branches: exact transposes.
+        for key, n in block_index.items():
+            k, la, lb, ts, tt = key
+            if ts == 0 or tt == 0:
+                continue
+            d_along, d_across = slots[k]
+            reverse = block_index.get((slot_of[(-d_along, -d_across)], lb, la, tt, ts))
+            if reverse is not None and reverse >= n:
+                # (reverse == n: a branch with itself, or two of one layout facing
+                # each other across a symmetric offset.)
+                for blocks in (correction, exact_blocks):
+                    mean = 0.5 * (blocks[n] + blocks[reverse].T)
+                    blocks[n], blocks[reverse] = mean, mean.T
+        block = np.full((len(slots), layers, layers, types, types), -1, dtype=np.int32)
+        for key, n in block_index.items():
+            block[key] = n
+        native.add_family(
+            layers, rows, cols, lookup.reshape(-1), cells.astype(np.int32).reshape(-1), branch_type,
+            strand_start, strand_id, sources,
+            np.asarray([s[1] if axis == 0 else s[0] for s in slots], dtype=np.int32),
+            np.asarray([s[0] if axis == 0 else s[1] for s in slots], dtype=np.int32),
+            partner_start, partner, types, block.reshape(-1), width,
+            correction.reshape(-1), exact_blocks.reshape(-1),
+        )
+        position += count
+    return CompactStrandCorrection(native, mesh.branch_count)
+
+
 def stranded_mesh(mesh: SheetMesh, operator: Any, first_width_m: float, growth: float = EDGE_STRAND_GROWTH,
-                  radius_cells: int = EDGE_STRAND_RADIUS_CELLS) -> StrandedSheetMesh:
-    """The mesh with its edge branches cut and the correction built for ``operator``."""
+                  radius_cells: int = EDGE_STRAND_RADIUS_CELLS, compact: bool | None = None) -> StrandedSheetMesh:
+    """The mesh with its edge branches cut and the correction built for ``operator``.
+
+    ``compact`` (default: whenever the C++ core is built) keeps the correction
+    as blocks applied by the core; otherwise it is an explicit sparse matrix.
+    """
     stranded = StrandedSheetMesh.from_mesh(mesh, plan_edge_strands(mesh, first_width_m, growth))
-    stranded.inductance_correction, stranded.near_exact = strand_correction(stranded, operator, radius_cells)
+    if compact is None:
+        compact = _backend.core() is not None
+    if compact:
+        stranded.inductance_correction = compact_strand_correction(stranded, operator, radius_cells)
+    else:
+        stranded.inductance_correction, exact = strand_correction(stranded, operator, radius_cells)
+        stranded.__dict__["_near_exact"] = exact
     return stranded

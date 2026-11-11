@@ -162,6 +162,7 @@ add_library(pcbcore STATIC
   cpp/src/sheet/convolution_operator.cpp
   cpp/src/sheet/hoer_love.cpp
   cpp/src/sheet/near_field.cpp
+  cpp/src/sheet/strand_correction.cpp
   cpp/src/sheet/pfft_operator.cpp
   cpp/src/sheet/sheet_solve.cpp
   cpp/src/sheet/mesh.cpp
