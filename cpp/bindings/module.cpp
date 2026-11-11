@@ -26,6 +26,7 @@
 #include "pcbcore/sheet/pfft_build.hpp"
 #include "pcbcore/sheet/pfft_operator.hpp"
 #include "pcbcore/sheet/sheet_solve.hpp"
+#include "pcbcore/sheet/strand_correction.hpp"
 
 namespace py = pybind11;
 
@@ -305,6 +306,48 @@ py::tuple uniform_near_field(const std::int64_t layers, const std::int64_t rows,
     }
     return py::make_tuple(to_array(std::move(entries.row)), to_array(std::move(entries.col)),
                           to_array(std::move(entries.value)));
+}
+
+template <typename T>
+std::vector<T> vector_of(const Input<T>& array) {
+    return std::vector<T>(array.data(), array.data() + array.size());
+}
+
+void strand_add_family(pcbcore::sheet::StrandCorrection& self, const std::int64_t planes, const std::int64_t rows,
+                       const std::int64_t cols, const Input<std::int32_t>& lookup, const Input<std::int32_t>& cells,
+                       const Input<std::int32_t>& type, const Input<std::int64_t>& strand_start,
+                       const Input<std::int64_t>& strand_id, const Input<std::int32_t>& sources,
+                       const Input<std::int32_t>& slot_row, const Input<std::int32_t>& slot_col,
+                       const Input<std::int32_t>& partner_start, const Input<std::int32_t>& partner,
+                       const std::int32_t types, const Input<std::int32_t>& block, const std::int32_t width,
+                       const Input<double>& correction, const Input<double>& exact) {
+    self.add_family(planes, rows, cols, vector_of(lookup), vector_of(cells), vector_of(type), vector_of(strand_start),
+                    vector_of(strand_id), vector_of(sources), vector_of(slot_row), vector_of(slot_col),
+                    vector_of(partner_start), vector_of(partner), types, vector_of(block), width,
+                    vector_of(correction), vector_of(exact));
+}
+
+py::array_t<double> strand_apply(const pcbcore::sheet::StrandCorrection& self, const Input<double>& x,
+                                 const int threads) {
+    if (x.ndim() != 1 || x.size() != self.size()) {
+        throw pcbcore::InvalidInput("x must be 1-D with the correction's size");
+    }
+    std::vector<double> y(static_cast<size_t>(self.size()));
+    {
+        py::gil_scoped_release release;
+        self.apply(x.data(), y.data(), threads);
+    }
+    return to_array(std::move(y));
+}
+
+py::tuple strand_entries(const pcbcore::sheet::StrandCorrection& self, const bool exact) {
+    std::vector<std::int64_t> row, col;
+    std::vector<double> value;
+    {
+        py::gil_scoped_release release;
+        self.entries(exact, row, col, value);
+    }
+    return py::make_tuple(to_array(std::move(row)), to_array(std::move(col)), to_array(std::move(value)));
 }
 
 pcbcore::sheet::CsrMatrix csr_from(const std::int64_t rows, const std::int64_t cols, const Input<std::int64_t>& indptr,
@@ -723,6 +766,17 @@ PYBIND11_MODULE(_pcbcore, m) {
               py::arg("auto_block_from_unknowns"), py::arg("op"), py::arg("family"), py::arg("position"),
               py::arg("family_sizes"), py::arg("near_indptr") = py::none(), py::arg("near_indices") = py::none(),
               py::arg("near_data") = py::none(), py::arg("self_inductance") = py::none(), py::arg("threads"));
+    py::class_<pcbcore::sheet::StrandCorrection>(sheet, "StrandCorrection",
+                                                 "The edge-strand precorrection, kept as blocks and applied by lookup")
+        .def(py::init<std::int64_t>(), py::arg("size"))
+        .def("add_family", &strand_add_family, py::arg("planes"), py::arg("rows"), py::arg("cols"), py::arg("lookup"),
+             py::arg("cells"), py::arg("type"), py::arg("strand_start"), py::arg("strand_id"), py::arg("sources"),
+             py::arg("slot_row"), py::arg("slot_col"), py::arg("partner_start"), py::arg("partner"), py::arg("types"),
+             py::arg("block"), py::arg("width"), py::arg("correction"), py::arg("exact"))
+        .def("apply", &strand_apply, py::arg("x"), py::arg("threads") = 1)
+        .def("entries", &strand_entries, py::arg("exact") = false)
+        .def_property_readonly("size", &pcbcore::sheet::StrandCorrection::size)
+        .def_property_readonly("stored_bytes", &pcbcore::sheet::StrandCorrection::stored_bytes);
     sheet.def("uniform_near_field", &uniform_near_field, py::arg("layers"), py::arg("rows"), py::arg("cols"),
               py::arg("levels"), py::arg("radius"), py::arg("tables_x"), py::arg("tables_y"), py::arg("tables_z"),
               py::arg("branch_x"), py::arg("branch_y"), py::arg("vias"));

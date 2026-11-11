@@ -114,11 +114,11 @@ def test_a_stranded_mesh_conducts_like_its_mesh_at_dc_and_its_grid_maps_are_adjo
 
 def test_the_correction_and_the_exact_near_field_are_symmetric() -> None:
     mesh, _ = _stranded()
-    for matrix in (mesh.inductance_correction, mesh.near_exact):
+    for matrix in (mesh.correction_matrix(), mesh.near_exact_matrix()):
         difference = abs(matrix - matrix.T).max()
         assert difference <= 1e-12 * abs(matrix).max()
     # Every strand's own exact inductance is on the diagonal and positive.
-    diagonal = mesh.near_exact.diagonal()[mesh.strands.strand_index]
+    diagonal = mesh.near_exact_matrix().diagonal()[mesh.strands.strand_index]
     assert np.all(diagonal > 0)
 
 
@@ -154,3 +154,22 @@ def test_edge_strands_are_refused_where_they_are_not_built() -> None:
 
     with pytest.raises(ValueError, match="near preconditioner"):
         solve_sheet_cases(mesh, operator, [], frequency_hz=3e7, preconditioner="block")
+
+
+@pytest.mark.skipif(not __import__("electrical.backend", fromlist=["core"]).core(), reason="needs the C++ core")
+def test_the_compact_correction_is_the_explicit_one() -> None:
+    """Kept as blocks by layout, layer pair and offset, applied by the core: the same C, a fraction of the memory."""
+    from electrical.sheet_peec import edge_strands as es
+
+    problem = cfc.CurrentFieldProblem.from_mapping(_strip_pair(1.2, 4.0, 0.2, 3e7))
+    base, operator, _ = cfc._sheet_geometry(problem, {"maximum_filaments": 64})
+    mesh = es.StrandedSheetMesh.from_mesh(base, es.plan_edge_strands(base, 6e-6))
+    explicit, exact = es.strand_correction(mesh, operator)
+    compact = es.compact_strand_correction(mesh, operator)
+    x = np.random.default_rng(2).standard_normal(mesh.branch_count)
+    assert np.allclose(compact @ x, explicit @ x, rtol=0, atol=1e-10 * np.abs(explicit @ x).max())
+    for built, reference in ((compact.matrix(False), explicit), (compact.matrix(True), exact)):
+        assert built.nnz == reference.nnz
+        assert abs(built - reference).max() <= 1e-10 * abs(reference).max()
+    stored = sum(m.data.nbytes + m.indices.nbytes + m.indptr.nbytes for m in (explicit, exact))
+    assert compact.stored_bytes < stored / 5  # 8x on this short strip, 16x at 1.2 x 20 mm, 0.4 mm

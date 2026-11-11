@@ -1509,7 +1509,7 @@ def _near_impedance(
         mask = sp.diags(keep)
         grid = sp.csr_matrix(near)[:base, :base]
         grid = sp.bmat([[grid, None], [None, sp.csr_matrix((count - base, count - base))]], format="csr")
-        near = (mask @ grid @ mask + mesh.near_exact).tocsr()
+        near = (mask @ grid @ mask + mesh.near_exact_matrix()).tocsr()
     near = near.tocoo()
     # A layer cut into skin filaments is one conductor: its filaments sit
     # microns apart and couple almost as strongly as a filament to itself, so
