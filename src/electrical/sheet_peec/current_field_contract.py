@@ -694,20 +694,25 @@ def solve_current_field_problems(
             "preconditioner": str(settings.get("preconditioner", "auto")),
         }
         if execution_backend == "cuda":
-            from .sheet_cuda import solve_sheet_case_cuda
+            from .sheet_cuda import solve_sheet_cases_cuda
 
-            solved = []
-            for terminals in terminal_sets:
-                solution, telemetry = solve_sheet_case_cuda(
+            # Every case of one conductor in one call: the operator goes to
+            # the device once and cases that drive the same components share
+            # the factored preconditioner, as on the CPU.  (One call a case
+            # moved the operator and refactored for each of a hot loop's
+            # capacitors.)
+            solved = [
+                (solution, telemetry.as_metrics())
+                for solution, telemetry in solve_sheet_cases_cuda(
                     mesh,
                     operator,
-                    terminals,
+                    terminal_sets,
                     device_id=int(settings.get("device_id", 0)),
                     near_factorization=str(settings.get("near_factorization", "superlu")),
                     near_regularization=float(settings.get("near_regularization", 1e-8)),
                     **solve_arguments,
                 )
-                solved.append((solution, telemetry.as_metrics()))
+            ]
         else:
             near_factorization = resolve_near_factorization(str(settings.get("near_factorization", "auto")))
             factor_threads = resolve_near_factor_threads(settings.get("near_factor_threads"))
