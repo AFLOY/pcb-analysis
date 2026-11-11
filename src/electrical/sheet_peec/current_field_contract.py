@@ -589,6 +589,27 @@ def _sheet_geometry(
             vertical_levels=mesh.vertical_levels,
         )
 
+    # Edge strands (opt-in): the branches along the copper's edges cut across
+    # their width, the first strand half a skin depth wide at this frequency
+    # unless ``edge_strand_first_um`` says otherwise.  See :mod:`.edge_strands`.
+    strand_frequency = problem.frequency_hz if frequency_hz is None else frequency_hz
+    if settings.get("edge_strands", False) and strand_frequency > 0.0:
+        if not isinstance(operator, SheetInductanceOperator):
+            raise ValueError("edge strands need the uniform convolution operator")
+        from .edge_strands import EDGE_STRAND_GROWTH, EDGE_STRAND_RADIUS_CELLS, stranded_mesh
+
+        first = settings.get("edge_strand_first_um")
+        if first is None:
+            resistivity = min(layer.resistivity_ohm_m for layer in problem.layers)
+            first_m = 0.5 * skin_depth_m(strand_frequency, resistivity)
+        else:
+            first_m = float(first) * 1e-6
+        mesh = stranded_mesh(
+            mesh, operator, first_m,
+            growth=float(settings.get("edge_strand_growth", EDGE_STRAND_GROWTH)),
+            radius_cells=int(settings.get("edge_strand_radius_cells", EDGE_STRAND_RADIUS_CELLS)),
+        )
+
     return mesh, operator, _SheetGeometry(
         filament_of=filament_of, layer_by_name=layer_by_name, via_name_by_key=via_name_by_key
     )
@@ -693,6 +714,8 @@ def solve_current_field_problems(
             "restart": int(settings.get("restart", 120)),
             "preconditioner": str(settings.get("preconditioner", "auto")),
         }
+        if execution_backend == "cuda" and getattr(mesh, "strands", None) is not None:
+            raise ValueError("edge strands are solved on the CPU only")
         if execution_backend == "cuda":
             from .sheet_cuda import solve_sheet_case_cuda
 
