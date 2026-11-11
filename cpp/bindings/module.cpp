@@ -43,6 +43,7 @@ void register_fem(py::module_& m);
 void register_thermal(py::module_& m);
 void register_emc(py::module_& m);
 void register_coupling(py::module_& m);
+void register_linalg(py::module_& m);
 }  // namespace pcbcore_bindings
 
 namespace {
@@ -577,6 +578,11 @@ PYBIND11_MODULE(_pcbcore, m) {
     {
         py::module_ sub = m.def_submodule("coupling", "Staggered electro-thermal coupling loops");
         pcbcore_bindings::register_coupling(sub);
+    }
+
+    {
+        py::module_ sub = m.def_submodule("linalg", "Sparse factorisations: MUMPS LDL^T when linked");
+        pcbcore_bindings::register_linalg(sub);
     }
 
     py::module_ network = m.def_submodule("network", "Conductance networks: the zero-frequency sheet mesh");
