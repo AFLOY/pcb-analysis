@@ -65,6 +65,9 @@ def cell_current_density_phasor(
     """
     rows, cols = mesh.shape
     layers = len(mesh.stackup)
+    # A mesh with edge strands: a cell carries the sum of its branch's strands.
+    fold = getattr(mesh, "fold", None)
+    branch_current = fold(solution.branch_current) if fold is not None else solution.branch_current
     if thickness_m is None:
         thickness_m = [layer.thickness_m for layer in mesh.stackup.layers]
     if len(thickness_m) != layers:
@@ -73,7 +76,7 @@ def cell_current_density_phasor(
     topology = mesh.__dict__.get("_topology")
     if topology is not None:
         density_x, density_y = topology.cell_density(
-            np.ascontiguousarray(solution.branch_current, dtype=np.complex128),
+            np.ascontiguousarray(branch_current, dtype=np.complex128),
             np.ascontiguousarray(mesh.grid.pitch_x_m, dtype=np.float64),  # type: ignore[union-attr]
             np.ascontiguousarray(mesh.grid.pitch_y_m, dtype=np.float64),  # type: ignore[union-attr]
             np.asarray(thickness_m, dtype=np.float64),
@@ -83,12 +86,12 @@ def cell_current_density_phasor(
     along_x = np.zeros((layers, rows, cols), dtype=np.complex128)
     along_y = np.zeros_like(along_x)
     for index, (layer, row, col) in enumerate(mesh.branch_x):
-        value = solution.branch_current[index]
+        value = branch_current[index]
         along_x[layer, row, col] += value
         along_x[layer, row, col + 1] += value
     offset = len(mesh.branch_x)
     for index, (layer, row, col) in enumerate(mesh.branch_y):
-        value = solution.branch_current[offset + index]
+        value = branch_current[offset + index]
         along_y[layer, row, col] += value
         along_y[layer, row + 1, col] += value
 
