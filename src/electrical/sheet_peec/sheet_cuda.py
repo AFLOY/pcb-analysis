@@ -292,10 +292,20 @@ class CudaSheetInductanceOperator:
         batch, count = currents.shape[0], currents.shape[1]
         spectra = cp.fft.rfft2(currents, s=self.padded, axes=(-2, -1))
         frequencies = spectra.shape[-2] * spectra.shape[-1]
-        # (B, L, F) -> (F, L, B): each frequency's layers a column per batch member
-        columns = cp.ascontiguousarray(spectra.reshape(batch, count, frequencies).transpose(2, 1, 0))
-        mixed = cp.matmul(matrix, columns)
-        accumulated = mixed.transpose(2, 1, 0).reshape(batch, count, *spectra.shape[-2:])
+        flat = spectra.reshape(batch, count, frequencies)
+        kernel = _layer_pair_mix_kernel(cp) if batch <= LAYER_PAIR_MIX_MAX_BATCH else None
+        if kernel is not None:
+            mixed = cp.empty_like(flat)
+            threads = 256
+            blocks = (frequencies * count + threads - 1) // threads
+            kernel((blocks,), (threads,), (matrix, cp.ascontiguousarray(flat), mixed,
+                                           np.int64(frequencies), np.int32(count), np.int32(batch)))
+            accumulated = mixed.reshape(spectra.shape)
+        else:
+            # (B, L, F) -> (F, L, B): each frequency's layers a column per batch member
+            columns = cp.ascontiguousarray(flat.transpose(2, 1, 0))
+            mixed = cp.matmul(matrix, columns)
+            accumulated = mixed.transpose(2, 1, 0).reshape(spectra.shape)
         product = cp.fft.irfft2(accumulated, s=self.padded, axes=(-2, -1))
         return cp.ascontiguousarray(product[..., :rows, :cols])
 
@@ -493,6 +503,58 @@ class _CudaBarrelSelf:
             return self._base.apply_batch(currents_x, currents_y)
         flux_x, flux_y, flux_z = self._base.apply_batch(currents_x, currents_y, currents_z)
         return flux_x, flux_y, flux_z + self._delta_grid * currents_z
+
+
+# Members of a batch the layer-pair kernel accumulates in registers at once.
+LAYER_PAIR_MIX_MAX_BATCH = 4
+
+_LAYER_PAIR_MIX_SOURCE = r"""
+#include <cupy/complex.cuh>
+// O[b, t, f] = sum_s K[f, s, t] S[b, s, f]: the layer-pair mixing of a sheet
+// convolution in the frequency domain.  One thread per (frequency, target
+// layer), the target layer fastest: a warp reads the coupling row K[f, s, :]
+// contiguously and every lane of one frequency shares S[b, s, f], so the
+// pairs' spectra are read once per application and nothing is transposed.
+// K is symmetric in its last two axes, so K[f, s, t] is the (t, s) coupling.
+extern "C" __global__ void layer_pair_mix(
+    const complex<double>* __restrict__ K,
+    const complex<double>* __restrict__ S,
+    complex<double>* __restrict__ O,
+    const long long F, const int L, const int B)
+{
+    const long long index = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= F * (long long)L) return;
+    const long long f = index / L;
+    const int t = (int)(index - f * L);
+    const complex<double>* row = K + f * (long long)L * L + t;
+    complex<double> a0(0.0, 0.0), a1(0.0, 0.0), a2(0.0, 0.0), a3(0.0, 0.0);
+    for (int s = 0; s < L; ++s) {
+        const complex<double> k = row[(long long)s * L];
+        const complex<double>* column = S + (long long)s * F + f;
+        a0 += k * column[0];
+        if (B > 1) a1 += k * column[(long long)L * F];
+        if (B > 2) a2 += k * column[2LL * L * F];
+        if (B > 3) a3 += k * column[3LL * L * F];
+    }
+    complex<double>* out = O + (long long)t * F + f;
+    out[0] = a0;
+    if (B > 1) out[(long long)L * F] = a1;
+    if (B > 2) out[2LL * L * F] = a2;
+    if (B > 3) out[3LL * L * F] = a3;
+}
+"""
+_LAYER_PAIR_MIX: dict[int, Any] = {}
+
+
+def _layer_pair_mix_kernel(cp: Any) -> Any | None:
+    """The layer-pair mixing kernel of a CuPy module, or None for NumPy standing in for it."""
+    raw = getattr(cp, "RawKernel", None)
+    if raw is None:
+        return None
+    key = id(cp)
+    if key not in _LAYER_PAIR_MIX:
+        _LAYER_PAIR_MIX[key] = raw(_LAYER_PAIR_MIX_SOURCE, "layer_pair_mix")
+    return _LAYER_PAIR_MIX[key]
 
 
 def _device_memory_budget(cp: Any) -> int | None:

@@ -130,3 +130,27 @@ def test_the_cudss_quasi_definite_near_preconditioner_solves_as_superlu_does() -
     assert cudss.metrics["preconditioner_factorization_backend"] == "cudss_quasi_definite_ldlt"
     assert cudss.metrics["solver_relative_residual"] < 1e-9
     assert max(abs(superlu.voltage_phasor[node] - cudss.voltage_phasor[node]) for node in superlu.voltage_phasor) < 1e-9
+
+
+def test_the_layer_pair_kernel_mixes_as_the_batched_product_does() -> None:
+    _require_cuda_device()
+    import cupy as cp
+    import numpy as np
+
+    from electrical.sheet_peec.current_field_contract import CurrentFieldProblem, _sheet_geometry
+    from electrical.sheet_peec.sheet_cuda import CudaSheetInductanceOperator
+
+    problem = CurrentFieldProblem.from_mapping(_problem(frequency_hz=3e7))
+    _mesh, operator, _geometry = _sheet_geometry(problem, {"maximum_filaments": 8})
+    device = CudaSheetInductanceOperator(operator, cp)
+    host = CudaSheetInductanceOperator(operator, np)  # NumPy: the batched matmul path
+    rng = np.random.default_rng(11)
+    rows, cols = device.shape
+    for batch in (1, 2, 3):
+        x = rng.standard_normal((batch, device.layer_count, rows, cols))
+        y = rng.standard_normal((batch, device.layer_count, rows, cols))
+        z = rng.standard_normal((batch, len(device.vertical_levels), rows, cols))
+        got = device.apply_batch(cp.asarray(x), cp.asarray(y), cp.asarray(z))
+        want = host.apply_batch(x, y, z)
+        for a, b in zip(got, want):
+            assert np.allclose(cp.asnumpy(a), b, rtol=1e-11, atol=1e-11 * np.abs(b).max())
