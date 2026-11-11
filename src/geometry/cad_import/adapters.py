@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import math
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
@@ -82,6 +84,13 @@ class BoardVias:
 
     def __len__(self) -> int:
         return len(self.vias)
+
+
+# With face coverage, a cell is copper when the section covers more than this
+# fraction of it (a sliver below it is numerical dust), and a face counts as
+# fully covered within this of one.
+FACE_NODE_FILL = 1.0e-6
+FACE_FULL_TOLERANCE = 1.0e-9
 
 
 def board_occupancy(raster: BoardRaster) -> np.ndarray:
@@ -298,12 +307,52 @@ def current_field_problem_mapping(
         }
         for index, layer in enumerate(raster.layers)
     ]
+    faces = raster.faces
+    if faces is not None:
+        # Every cell the copper touches is a node (on a 45-degree edge the
+        # cells under half covered are the ones that join the staircase), and
+        # how much a branch carries is the covered part of the face it
+        # crosses, listed below.  A cell whose copper is two separate pieces --
+        # a clearance narrower than the cell runs through it -- would join
+        # them as one node, so it is left out.  (A count of the copper on a
+        # cell's boundary cannot tell that from one trace crossing the cell.)
+        occupancy = (raster.fill > FACE_NODE_FILL).astype(np.float64)
+        split = raster.split_cells if raster.split_cells is not None else np.zeros(occupancy.shape, dtype=bool)
+        dropped = int(np.count_nonzero(split & (occupancy > 0.0)))
+        occupancy[split] = 0.0
+        if dropped:
+            warnings.warn(
+                f"{dropped} cell(s) hold two separate pieces of copper (a clearance narrower than a cell); "
+                "they are left out of the conductor rather than joined",
+                stacklevel=2,
+            )
     copper_by_layer = {
         layer.name: [
             {"x": int(col), "y": int(row)} for row, col in np.argwhere(occupancy[index] > 0.0)
         ]
         for index, layer in enumerate(raster.layers)
     }
+    copper_faces_by_layer = None
+    if faces is not None:
+        copper_faces_by_layer = {}
+        for index, layer in enumerate(raster.layers):
+            vertical, vertical_offset, horizontal, horizontal_offset = faces[index][:4]
+            copper = occupancy[index] > 0.0
+            # The x branch of cells (row, col) and (row, col + 1) crosses the
+            # vertical face col + 1; the y branch of (row, col) and (row + 1, col)
+            # the horizontal face row + 1.  Only partly covered faces are listed.
+            x_branch = copper[:, :-1] & copper[:, 1:]
+            y_branch = copper[:-1, :] & copper[1:, :]
+            cover_x, offset_x = vertical[:, 1:-1], vertical_offset[:, 1:-1]
+            cover_y, offset_y = horizontal[1:-1, :], horizontal_offset[1:-1, :]
+            partial_x = x_branch & (cover_x < 1.0 - FACE_FULL_TOLERANCE)
+            partial_y = y_branch & (cover_y < 1.0 - FACE_FULL_TOLERANCE)
+            copper_faces_by_layer[layer.name] = {
+                "x": [[int(col), int(row), float(cover_x[row, col]), float(offset_x[row, col])]
+                      for row, col in np.argwhere(partial_x)],
+                "y": [[int(col), int(row), float(cover_y[row, col]), float(offset_y[row, col])]
+                      for row, col in np.argwhere(partial_y)],
+            }
     connections = []
     for via in (vias.vias if vias is not None else ()):
         segments = [
@@ -335,6 +384,7 @@ def current_field_problem_mapping(
         "grid": _current_field_grid(raster),
         "layers": layers,
         "copper_by_layer": copper_by_layer,
+        **({"copper_faces_by_layer": copper_faces_by_layer} if copper_faces_by_layer is not None else {}),
         "vertical_connections": connections,
         "terminals": list(terminals),
     }
