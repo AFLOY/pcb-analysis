@@ -12,7 +12,7 @@ import pytest
 import scipy.sparse as sp
 import scipy.sparse.linalg as spl
 
-from electrical.sheet_peec.sheet_cuda import quasi_definite_near_matrix
+from electrical.sheet_peec.near_factor import quasi_definite_near_matrix
 
 
 def _near_system(seed: int = 0):

@@ -20,6 +20,7 @@ from typing import Any, Sequence
 import numpy as np
 import scipy.sparse as sp
 
+from .near_factor import quasi_definite_near_matrix
 from .sheet_operator import SheetInductanceOperator
 from .sheet_peec import (
     _conductor_of_layer,
@@ -329,30 +330,6 @@ def _pattern_digest(matrix: Any) -> str:
         host = array.get() if hasattr(array, "get") else array
         digest.update(np.ascontiguousarray(host).tobytes())
     return digest.hexdigest()
-
-
-def quasi_definite_near_matrix(near: Any, reduced: Any, regularization: float) -> tuple[Any, np.ndarray, float]:
-    """``(matrix, sign, delta)``: the near saddle-point matrix made quasi-definite.
-
-    ``matrix`` is ``[[Z, -A], [-A^T, -delta I]]`` (SciPy CSR, complex128,
-    sorted), ``sign`` the row signs that take the saddle-point right-hand side
-    to it (``+1`` on branches, ``-1`` on nodes), ``delta`` the regularization
-    over the median ``|Z_ii|``.  See :class:`CudssQuasiDefiniteNear`.
-    """
-    import scipy.sparse as sp
-
-    near = sp.csr_matrix(near)
-    diagonal = np.abs(near.diagonal())
-    scale = float(np.median(diagonal[diagonal > 0.0])) if np.any(diagonal > 0.0) else 1.0
-    delta = float(regularization) / scale
-    nodes = reduced.shape[1]
-    matrix = sp.bmat(
-        [[near, -reduced], [-reduced.T, -delta * sp.identity(nodes, format="csr")]], format="csr"
-    ).astype(np.complex128)
-    matrix.sum_duplicates()
-    matrix.sort_indices()
-    sign = np.concatenate([np.ones(near.shape[0]), -np.ones(nodes)]).astype(np.complex128)
-    return matrix, sign, delta
 
 
 class CudssQuasiDefiniteNear:
