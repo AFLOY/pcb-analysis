@@ -937,6 +937,12 @@ def solve_sheet_cases_cuda(
     finally:
         if device is not None and pool is not None:
             with device:
+                # CuPy caches cuFFT plans process-wide, and a plan made here
+                # holds a work area from this call's pool.  Left cached past
+                # the pool, the next call of the same FFT size ran on freed
+                # memory: a 0.2 mm sweep's second frequency solved to zero
+                # and the third failed with CUFFT_EXEC_FAILED.
+                cp.fft.config.get_plan_cache().clear()
                 pool.free_all_blocks()
 
     total_ms = (time.perf_counter() - total_started) * 1000.0
