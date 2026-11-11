@@ -21,6 +21,7 @@ import numpy as np
 
 from .sheet_operator import SheetInductanceOperator
 from .sheet_peec import (
+    _conductor_of_layer,
     SheetMesh,
     SheetSolution,
     Terminal,
@@ -98,11 +99,153 @@ class _CudssEntry:
 NEAR_FACTORIZATIONS = ("superlu", "cudss_quasi_definite")
 
 
+def device_quasi_definite_near(
+    mesh: SheetMesh,
+    operator: Any,
+    omega: float,
+    resistance: np.ndarray,
+    active_branches: np.ndarray,
+    reduced: Any,
+    regularization: float,
+    xp: Any,
+    xsparse: Any,
+    radius_cells: int = 1,
+) -> tuple[Any, Any, float]:
+    """:func:`quasi_definite_near_matrix` of :func:`_near_impedance`, built where ``xp`` lives.
+
+    The near matrix of the CUDA solve was assembled on the host: the near
+    inductance read off the convolution tables, filtered to one copper layer
+    (a cut layer's filaments together), cut to the active branches, made
+    ``R + j omega L`` and stacked with the incidence.  On a 0.2 mm hot loop
+    with its planes cut into filaments that took 9.4 s on a Colab A100 host.
+    Here only the few table values the near radius reaches are read on the
+    host; the entries, their filtering and the quasi-definite matrix are
+    formed by ``xp`` (CuPy, or NumPy standing in) and ``xsparse``
+    (``cupyx.scipy.sparse`` or ``scipy.sparse``).  The result is the host
+    path's matrix: the same pattern and the same values, entry for entry.
+
+    Only for the uniform convolution operator (``_tables``); returns the
+    CSR matrix, the row signs and ``delta``.
+    """
+    base = getattr(operator, "_base", operator)
+    barrel_delta = getattr(operator, "_delta_branch", None)
+    if not hasattr(base, "_tables"):
+        raise TypeError("the device near matrix needs the uniform convolution operator")
+    rows, cols = mesh.shape
+    padded_rows, padded_cols = base.padded
+    span = list(range(-radius_cells, radius_cells + 1))
+    conductors = [_conductor_of_layer(layer.name) for layer in mesh.stackup.layers]
+    conductor_ids = {name: k for k, name in enumerate(dict.fromkeys(conductors))}
+    sheet = np.asarray([conductor_ids[name] for name in conductors], dtype=np.int64)
+    count = mesh.branch_count
+    parts_i: list[Any] = []
+    parts_j: list[Any] = []
+    parts_v: list[Any] = []
+
+    def couple(sources: np.ndarray, first: int, levels_count: int, table_of: Any, group_of: np.ndarray | None) -> None:
+        # the host path's lookup: a branch repeated at one place couples once, as its last copy
+        lookup = np.full((levels_count, rows, cols), -1, dtype=np.int64)
+        lookup[sources[:, 0], sources[:, 1], sources[:, 2]] = np.arange(first, first + len(sources))
+        keep = np.flatnonzero(lookup[sources[:, 0], sources[:, 1], sources[:, 2]] == np.arange(first, first + len(sources)))
+        sources = sources[keep]
+        lookup_device = xp.asarray(lookup)
+        level = xp.asarray(sources[:, 0])
+        row0 = xp.asarray(sources[:, 1])
+        col0 = xp.asarray(sources[:, 2])
+        index = xp.asarray(first + keep)
+        for other in range(levels_count):
+            if group_of is not None:
+                # planar branches couple near only within their own copper layer
+                same = xp.asarray(group_of[sources[:, 0]] == group_of[other])
+            else:
+                same = None
+            for dr in span:
+                for dc in span:
+                    values = xp.asarray(np.array(
+                        [table_of(lvl, other)[dr % padded_rows, dc % padded_cols] for lvl in range(levels_count)]
+                    ))
+                    row, col = row0 + dr, col0 + dc
+                    inside = (row >= 0) & (row < rows) & (col >= 0) & (col < cols)
+                    if same is not None:
+                        inside &= same
+                    target = xp.where(
+                        inside, lookup_device[other, xp.clip(row, 0, rows - 1), xp.clip(col, 0, cols - 1)], -1
+                    )
+                    hit = target >= 0
+                    parts_i.append(index[hit])
+                    parts_j.append(target[hit])
+                    parts_v.append(values[level[hit]])
+
+    offset = 0
+    for axis, group in (("x", mesh.branch_x), ("y", mesh.branch_y)):
+        if group:
+            couple(
+                np.asarray(group, dtype=np.int64).reshape(-1, 3), offset, len(mesh.stackup),
+                lambda layer, other, axis=axis: base._tables[(axis, min(layer, other), max(layer, other))],
+                sheet,
+            )
+        offset += len(group)
+    levels = list(base.vertical_levels)
+    if mesh.via_branches and levels:
+        index_of = {key: position for position, key in enumerate(levels)}
+        sources = np.array(
+            [(index_of[(via.lower_layer, via.upper_layer)], via.row, via.col) for via in mesh.via_branches],
+            dtype=np.int64,
+        )
+        couple(sources, offset, len(levels), lambda a, b: base._tables_z[(min(a, b), max(a, b))], None)
+    entries_i = xp.concatenate(parts_i)
+    entries_j = xp.concatenate(parts_j)
+    inductance = xp.concatenate(parts_v).astype(xp.float64)
+    if barrel_delta is not None:
+        # the barrels' own inductance on their diagonal, as _BarrelSelf adds it
+        via_offset = len(mesh.branch_x) + len(mesh.branch_y)
+        add = xp.zeros(count, dtype=xp.float64)
+        add[via_offset:] = xp.asarray(barrel_delta)
+        inductance = inductance + xp.where(entries_i == entries_j, add[entries_i], 0.0)
+    # cut to the active branches
+    position = np.full(count, -1, dtype=np.int64)
+    active_index = np.flatnonzero(active_branches)
+    position[active_index] = np.arange(len(active_index))
+    position_device = xp.asarray(position)
+    a, b = position_device[entries_i], position_device[entries_j]
+    kept = (a >= 0) & (b >= 0)
+    a, b, inductance = a[kept], b[kept], inductance[kept]
+    branches = len(active_index)
+    resistance_active = xp.asarray(np.asarray(resistance, dtype=np.float64)[active_branches])
+    on_diagonal = a == b
+    values = (1j * float(omega)) * inductance + xp.where(on_diagonal, resistance_active[a], 0.0)
+    diagonal = xp.abs(values[on_diagonal])
+    positive = diagonal[diagonal > 0.0]
+    scale = float(xp.median(positive)) if positive.size else 1.0
+    delta = float(regularization) / scale
+    incidence = reduced.tocoo()
+    nodes = incidence.shape[1]
+    inc_r = xp.asarray(incidence.row.astype(np.int64))
+    inc_c = xp.asarray(incidence.col.astype(np.int64))
+    inc_v = xp.asarray(incidence.data.astype(np.float64))
+    node_diagonal = xp.arange(branches, branches + nodes, dtype=xp.int64)
+    all_rows = xp.concatenate([a, inc_r, branches + inc_c, node_diagonal])
+    all_cols = xp.concatenate([b, branches + inc_c, inc_r, node_diagonal])
+    all_values = xp.concatenate([
+        values.astype(xp.complex128),
+        (-inc_v).astype(xp.complex128),
+        (-inc_v).astype(xp.complex128),
+        xp.full(nodes, -delta, dtype=xp.complex128),
+    ])
+    size = branches + nodes
+    matrix = xsparse.coo_matrix((all_values, (all_rows, all_cols)), shape=(size, size)).tocsr()
+    matrix.sum_duplicates()
+    matrix.sort_indices()
+    sign = xp.concatenate([xp.ones(branches), -xp.ones(nodes)]).astype(xp.complex128)
+    return matrix, sign, delta
+
+
 def _pattern_digest(matrix: Any) -> str:
     """A digest of a CSR matrix's sparsity pattern (row pointers and column indices)."""
     digest = hashlib.blake2b(digest_size=16)
-    digest.update(np.ascontiguousarray(matrix.indptr).tobytes())
-    digest.update(np.ascontiguousarray(matrix.indices).tobytes())
+    for array in (matrix.indptr, matrix.indices):
+        host = array.get() if hasattr(array, "get") else array
+        digest.update(np.ascontiguousarray(host).tobytes())
     return digest.hexdigest()
 
 
@@ -154,7 +297,9 @@ class CudssQuasiDefiniteNear:
     ``solve(v)`` returns ``M^-1 v`` for the unregularized sign convention.
     """
 
-    def __init__(self, near: Any, reduced: Any, regularization: float, cp: Any) -> None:
+    def __init__(
+        self, near: Any, reduced: Any, regularization: float, cp: Any, prepared: tuple[Any, Any, float] | None = None
+    ) -> None:
         try:
             import nvmath.bindings.cudss as cudss_bindings
             import nvmath.sparse.advanced as nsa
@@ -164,7 +309,15 @@ class CudssQuasiDefiniteNear:
             ) from error
         import cupyx.scipy.sparse as csp
 
-        matrix, sign, delta = quasi_definite_near_matrix(near, reduced, regularization)
+        # Double precision: complex64 factors were measured on a Colab A100
+        # (0.4 mm filament hot loop, 30 MHz) and did not precondition at all --
+        # GMRES ran to its cap at residuals 1.0 (delta 1e-8, under single
+        # precision's resolution), 0.036 (1e-4) and 0.016 (1e-3).
+        # ``prepared``: the matrix already formed on the device by
+        # device_quasi_definite_near, in place of the host's near matrix
+        matrix, sign, delta = (
+            prepared if prepared is not None else quasi_definite_near_matrix(near, reduced, regularization)
+        )
         self._cp = cp
         self._sign = cp.asarray(sign)
         self.regularization = float(regularization)
@@ -191,7 +344,13 @@ class CudssQuasiDefiniteNear:
         pool = cp.cuda.MemoryPool()
         with cp.cuda.using_allocator(pool.malloc):
             self._rhs = cp.zeros(matrix.shape[0], dtype=cp.complex128)
-            device_matrix = csp.csr_matrix(matrix)
+            # copied into the entry's own pool: a matrix formed on the device
+            # lives in the calling solve's pool, which is emptied when it ends
+            device_matrix = csp.csr_matrix(
+                (cp.array(matrix.data, copy=True), cp.array(matrix.indices, copy=True),
+                 cp.array(matrix.indptr, copy=True)),
+                shape=matrix.shape,
+            )
             self._solver = self._planned(device_matrix, nsa, cudss_bindings)
         self._pool = pool
         _CUDSS_CACHE[key] = _CudssEntry(pool, self._solver, self._rhs, device_matrix)
@@ -1073,11 +1232,19 @@ def _solve_group_cuda(
         # Schur complement).
         import scipy.sparse as sp
 
-        near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
         if near_factorization == "cudss_quasi_definite":
-            factored = CudssQuasiDefiniteNear(near_cpu, reduced_cpu, near_regularization, cp)
+            if hasattr(getattr(operator, "_base", operator), "_tables"):
+                # the near matrix formed on the device, not on the host
+                prepared = device_quasi_definite_near(
+                    mesh, operator, omega, resistance, active_branches, reduced_cpu, near_regularization, cp, csp
+                )
+                factored = CudssQuasiDefiniteNear(None, None, near_regularization, cp, prepared)
+            else:
+                near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
+                factored = CudssQuasiDefiniteNear(near_cpu, reduced_cpu, near_regularization, cp)
             factor_backend = "cudss_quasi_definite_ldlt"
         else:
+            near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
             saddle_cpu = sp.bmat([[near_cpu, -reduced_cpu], [reduced_cpu.T, None]], format="csc")
             factored = csl.splu(csp.csc_matrix(saddle_cpu))
             factor_backend = "scipy_superlu_factor_cupy_triangular_solve"
