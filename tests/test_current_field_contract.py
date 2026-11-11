@@ -308,3 +308,136 @@ def test_a_connection_s_barrel_gives_its_vias_the_barrel_s_own_inductance() -> N
     value["vertical_connections"][0]["barrel"] = {"outer_diameter_mm": 0.3, "drill_diameter_mm": 0.3}
     with pytest.raises(ValueError, match="drill_diameter_mm"):
         CurrentFieldProblem.from_mapping(value)
+
+
+def test_conductors_are_solved_side_by_side_to_the_bits_they_get_alone(monkeypatch) -> None:
+    # Three conductors (one problem each, at three frequencies) on a budget
+    # of four: they run at once, each in a process of its own on a budget of
+    # one, and each result is the one its own solve gives.
+    from electrical.sheet_peec import current_field_contract as contract
+    from electrical.threads import thread_budget_scope
+
+    monkeypatch.setattr(contract, "CONDUCTOR_PROCESS_FROM_UNKNOWNS", 1)  # these are tiny
+
+    problems = []
+    for k, frequency in enumerate((1000.0, 2000.0, 5000.0)):
+        value = _problem(frequency_hz=frequency)
+        value["name"] = f"three_layer_{k}"
+        problems.append(value)
+    with thread_budget_scope(4):
+        together = solve_current_field_problems(problems)
+    assert [result.metrics["problem_name"] for result in together] == [p["name"] for p in problems]
+    assert {result.metrics["conductor_width"] for result in together} == {3}
+    for value, result in zip(problems, together):
+        alone = solve_current_field_problem(value)
+        assert alone.metrics["conductor_width"] == 1
+        assert result.voltage_phasor == alone.voltage_phasor
+        assert result.current_density_phasor == alone.current_density_phasor
+        assert result.metrics["solver_iterations"] == alone.metrics["solver_iterations"]
+
+
+def test_only_the_conductors_that_fit_in_memory_run_side_by_side(monkeypatch) -> None:
+    from electrical.sheet_peec import current_field_contract as contract
+
+    estimates = [40, 30, 20, 10]
+    monkeypatch.setattr(contract, "_available_memory_bytes", lambda: None)
+    assert contract.conductor_width(estimates, 8) == 4  # memory unknown: the budget and the count bound it
+    assert contract.conductor_width(estimates, 2) == 2
+    assert contract.conductor_width(estimates[:1], 8) == 1
+    monkeypatch.setattr(contract, "_available_memory_bytes", lambda: 150)
+    assert contract.conductor_width(estimates, 8) == 2  # 40 + 30 fit in half of 150, 40 + 30 + 20 do not
+    monkeypatch.setattr(contract, "_available_memory_bytes", lambda: 10)
+    assert contract.conductor_width(estimates, 8) == 1  # not even the largest: one at a time
+
+
+def test_a_conductor_is_reckoned_by_its_unknowns() -> None:
+    from electrical.sheet_peec import current_field_contract as contract
+
+    problem = CurrentFieldProblem.from_mapping(_problem())
+    # three layers of three cells in a row, one filament each at DC: 3 nodes
+    # and 2 branches a layer, and the four vertical segments
+    assert contract.conductor_bytes(problem, {"maximum_filaments": 1}) == contract.CONDUCTOR_BYTES_PER_UNKNOWN * (
+        3 * (3 + 2) + len(problem.vertical_segments)
+    )
+
+
+def test_a_memory_share_scales_the_lockstep_cut(monkeypatch) -> None:
+    from electrical.sheet_peec import sheet_peec
+
+    monkeypatch.setattr(sheet_peec, "_available_memory_bytes", lambda: 1000)
+    assert sheet_peec.lockstep_width(10, 100) == 5  # half of 1000 in columns of 100
+    with sheet_peec.memory_share(0.5):
+        assert sheet_peec.lockstep_width(10, 100) == 2
+        with sheet_peec.memory_share(0.5):
+            assert sheet_peec.lockstep_width(10, 100) == 1
+    assert sheet_peec.lockstep_width(10, 100) == 5
+
+
+def test_small_conductors_stay_in_the_caller_s_process() -> None:
+    # below CONDUCTOR_PROCESS_FROM_UNKNOWNS a worker's start would cost more than the solve
+    problems = [_problem(frequency_hz=f) for f in (1000.0, 2000.0)]
+    assert {result.metrics["conductor_width"] for result in solve_current_field_problems(problems)} == {1}
+
+
+def test_a_connection_on_several_cells_carries_their_sum() -> None:
+    # 1 A enters F.Cu at x = 0 and leaves B.Cu at x = 2; F.Cu has no other
+    # way down, so the two vertical connections together carry the whole
+    # ampere from F.Cu to In1.Cu.  Named as one barrel standing on both
+    # cells, that is its current; named apart, each carries its share.
+    apart = _problem(frequency_hz=1000.0)
+    one = _problem(frequency_hz=1000.0)
+    for connection in one["vertical_connections"]:
+        connection["name"] = "barrel"
+    shares = solve_current_field_problem(apart).metrics
+    together = solve_current_field_problem(one).metrics
+    assert set(shares["via_current_a_by_connection"]) == {"vertical_0000", "vertical_0001"}
+    assert max(shares["via_current_a_by_connection"].values()) < 1.0
+    assert shares["max_via_current_a"] == max(shares["via_current_a_by_connection"].values())
+    assert together["via_current_a_by_connection"] == {"barrel": pytest.approx(1.0, rel=1e-6)}
+    assert together["max_via_current_a"] == pytest.approx(1.0, rel=1e-6)
+    # the branches alone each carry part of it
+    assert together["max_vertical_connection_current_a"] < 1.0
+
+
+def test_a_plated_barrel_s_resistance_follows_its_skin_depth() -> None:
+    from electrical.sheet_peec.skin_filaments import skin_depth_m, tube_internal_impedance, tube_resistance_ratio
+
+    outer, bore, rho = 0.127e-3, 0.102e-3, 1.724e-8  # a 0.254 mm drill plated 25 um
+    dc = rho / (math.pi * (outer**2 - bore**2))
+    assert tube_resistance_ratio(outer, bore, 0.0, rho) == 1.0
+    assert tube_internal_impedance(outer, bore, 10.0, rho).real == pytest.approx(dc, rel=1e-9)
+    ratios = [tube_resistance_ratio(outer, bore, f, rho) for f in (1e6, 3e7, 1.5e8, 3e8)]
+    assert ratios == sorted(ratios) and ratios[0] < 1.01 < ratios[1]
+    # a wall of many skin depths conducts one skin depth at its outer face only
+    f = 3e9
+    assert tube_internal_impedance(outer, bore, f, rho).real == pytest.approx(
+        rho / (skin_depth_m(f, rho) * 2 * math.pi * outer), rel=0.01)
+    # a solid pin tends to the same surface, over its whole section at DC
+    assert tube_internal_impedance(outer, 0.0, 10.0, rho).real == pytest.approx(rho / (math.pi * outer**2), rel=1e-9)
+    assert tube_internal_impedance(outer, 0.0, f, rho).real == pytest.approx(
+        tube_internal_impedance(outer, bore, f, rho).real, rel=1e-6)
+
+
+def test_a_barrel_section_scales_the_via_resistance_at_the_solve_frequency() -> None:
+    from electrical.sheet_peec.current_field_contract import _sheet_geometry
+    from electrical.sheet_peec.skin_filaments import tube_resistance_ratio
+
+    section = {"outer_diameter_mm": 0.254, "drill_diameter_mm": 0.204}
+    dc = CurrentFieldProblem.from_mapping(_problem(frequency_hz=0.0))
+    dc_values = [via.resistance_ohm for via in _sheet_geometry(dc, {"maximum_filaments": 1})[0].via_branches]
+    plain = set(dc_values)
+    ratio = tube_resistance_ratio(0.127e-3, 0.102e-3, 1.5e8, 1.724e-8)
+    for key in ("resistance_barrel", "barrel"):
+        value = _problem(frequency_hz=1.5e8)
+        for connection in value["vertical_connections"]:
+            connection[key] = dict(section)
+        problem = CurrentFieldProblem.from_mapping(value)
+        mesh = _sheet_geometry(problem, {"maximum_filaments": 1})[0]
+        assert sorted(via.resistance_ohm for via in mesh.via_branches) == pytest.approx(
+            sorted(r * ratio for r in dc_values), rel=1e-12)
+        # a resistance-only section leaves the inductance to the cells' columns
+        assert all((via.barrel_radius_m is None) == (key == "resistance_barrel") for via in mesh.via_branches)
+        # and at DC the stated resistance stands
+        value["frequency_hz"] = 0.0
+        at_dc = _sheet_geometry(CurrentFieldProblem.from_mapping(value), {"maximum_filaments": 1})[0]
+        assert {via.resistance_ohm for via in at_dc.via_branches} == plain

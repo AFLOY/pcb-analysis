@@ -9,18 +9,21 @@ owns only the physical sheet mesh and solve.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
 import numpy as np
 
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
+from electrical.threads import set_thread_budget, thread_budget
 
 from .sheet_pfft import PfftSheetInductanceOperator
 from .sheet_operator import SheetInductanceOperator, SheetStackup
-from .sheet_peec import SheetMesh, Terminal, ViaBranch, solve_sheet_cases
+from .sheet_peec import SheetMesh, Terminal, ViaBranch, _available_memory_bytes, memory_share, solve_sheet_cases
 from .sheet_results import cell_current_density_phasor, sheet_fields
-from .skin_filaments import filament_links, graded_filaments, skin_depth_m
+from .skin_filaments import filament_links, graded_filaments, skin_depth_m, tube_resistance_ratio
 
 CURRENT_FIELD_PROBLEM_SCHEMA = "current-field-problem/v1"
 # v2 carries the grid lines (``x_edges_mm``, ``y_edges_mm``) instead of one pitch,
@@ -98,6 +101,38 @@ class CurrentFieldVerticalSegment:
     # geometry.cad_import writes it from the STEP solid).
     barrel_outer_diameter_mm: float | None = None
     barrel_drill_diameter_mm: float = 0.0
+    # The cross-section whose skin effect scales ``resistance_ohm`` at the
+    # solve frequency: the barrel's, or ``resistance_barrel`` for a barrel the
+    # front end laid on several cells (each carrying a share of it), whose
+    # inductance is those cells' columns and not the barrel's own.
+    skin_outer_diameter_mm: float | None = None
+    skin_drill_diameter_mm: float = 0.0
+
+    def resistance_at(self, frequency_hz: float, resistivity_ohm_m: float) -> float:
+        """``resistance_ohm`` at a frequency: the DC value times the barrel's Rac/Rdc."""
+        if self.skin_outer_diameter_mm is None:
+            return self.resistance_ohm
+        return self.resistance_ohm * tube_resistance_ratio(
+            0.5e-3 * self.skin_outer_diameter_mm,
+            0.5e-3 * self.skin_drill_diameter_mm,
+            frequency_hz,
+            resistivity_ohm_m,
+        )
+
+
+def _barrel_section(barrel: Mapping[str, Any], name: Any) -> tuple[float | None, float]:
+    """``(outer, drill)`` diameters of a stated barrel in mm, or ``(None, 0)`` when none is stated."""
+    outer = barrel.get("outer_diameter_mm")
+    drill = 0.0 if barrel.get("solid_pin") else float(barrel.get("drill_diameter_mm") or 0.0)
+    if outer is None:
+        return None, 0.0
+    outer = float(outer)
+    if not math.isfinite(outer) or outer <= 0.0 or not (0.0 <= drill < outer):
+        raise ValueError(
+            f"vertical connection {name}: a barrel needs "
+            "0 <= drill_diameter_mm < outer_diameter_mm"
+        )
+    return outer, drill
 
 
 def _parse_geometry(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -168,15 +203,13 @@ def _parse_geometry(value: Mapping[str, Any]) -> dict[str, Any]:
         cell_value = connection.get("cell") or {}
         cell = (int(cell_value["x"]), int(cell_value["y"]))
         barrel = connection.get("barrel") or {}
-        outer = barrel.get("outer_diameter_mm")
-        drill = 0.0 if barrel.get("solid_pin") else float(barrel.get("drill_diameter_mm") or 0.0)
-        if outer is not None:
-            outer = float(outer)
-            if not math.isfinite(outer) or outer <= 0.0 or not (0.0 <= drill < outer):
-                raise ValueError(
-                    f"vertical connection {connection.get('name')}: a barrel needs "
-                    "0 <= drill_diameter_mm < outer_diameter_mm"
-                )
+        outer, drill = _barrel_section(barrel, connection.get("name"))
+        # ``resistance_barrel``: the section only scales the resistance with
+        # frequency; ``barrel`` also gives the connection its own inductance.
+        skin_outer, skin_drill = (
+            (outer, drill) if outer is not None
+            else _barrel_section(connection.get("resistance_barrel") or {}, connection.get("name"))
+        )
         for segment in connection.get("segments") or []:
             upper = str(segment["upper_layer"])
             lower = str(segment["lower_layer"])
@@ -220,6 +253,8 @@ def _parse_geometry(value: Mapping[str, Any]) -> dict[str, Any]:
                         length_mm=length,
                         barrel_outer_diameter_mm=outer,
                         barrel_drill_diameter_mm=drill if outer is not None else 0.0,
+                        skin_outer_diameter_mm=skin_outer,
+                        skin_drill_diameter_mm=skin_drill if skin_outer is not None else 0.0,
                     ),
                 )
             )
@@ -402,6 +437,7 @@ class _SheetContext:
     name_of_filament: Mapping[int, str]
     filament_counts: Mapping[str, int]
     skin_depth_by_layer_m: Mapping[str, float]
+    via_name_by_key: Mapping[tuple[int, int, int, int], str] = field(default_factory=dict)
 
 
 def _nearest_filament(
@@ -433,6 +469,8 @@ class _SheetGeometry:
 
     filament_of: Mapping[str, tuple[int, ...]]
     layer_by_name: Mapping[str, CurrentFieldLayer]
+    # (row, col, lower filament, upper filament) of each vertical branch -> its connection's name
+    via_name_by_key: Mapping[tuple[int, int, int, int], str] = field(default_factory=dict)
 
 
 def _filament_cuts(
@@ -466,9 +504,8 @@ def _sheet_geometry(
     pitch_m = problem.pitch_mm * 1e-3 if problem.pitch_mm is not None else None
     sheet_layers = []
     filament_of: dict[str, tuple[int, ...]] = {}
-    cuts = _filament_cuts(
-        problem.layers, problem.frequency_hz if frequency_hz is None else frequency_hz, settings
-    )
+    frequency = problem.frequency_hz if frequency_hz is None else frequency_hz
+    cuts = _filament_cuts(problem.layers, frequency, settings)
     for layer in problem.layers:
         cut = cuts[layer.name]
         indices = tuple(
@@ -519,7 +556,8 @@ def _sheet_geometry(
         raise ValueError("via_self_inductance must be 'barrel' or 'column'")
     use_barrels = via_model == "barrel"
     seen: set[tuple[int, int, int, int]] = set()
-    for _, (x, y), segment in problem.vertical_segments:
+    via_name_by_key: dict[tuple[int, int, int, int], str] = {}
+    for connection_name, (x, y), segment in problem.vertical_segments:
         upper_indices = filament_of[segment.upper_layer]
         lower_indices = filament_of[segment.lower_layer]
         upper = _nearest_filament(
@@ -536,6 +574,7 @@ def _sheet_geometry(
         if key in seen:
             continue
         seen.add(key)
+        via_name_by_key[key] = connection_name or f"vertical_{y}_{x}"
         barrel = use_barrels and segment.barrel_outer_diameter_mm is not None
         vias.append(
             ViaBranch(
@@ -543,7 +582,9 @@ def _sheet_geometry(
                 col=x,
                 lower_layer=lower,
                 upper_layer=upper,
-                resistance_ohm=segment.resistance_ohm,
+                resistance_ohm=segment.resistance_at(
+                    frequency, layer_by_name[segment.upper_layer].resistivity_ohm_m
+                ),
                 barrel_radius_m=0.5e-3 * segment.barrel_outer_diameter_mm if barrel else None,
                 barrel_bore_radius_m=0.5e-3 * segment.barrel_drill_diameter_mm if barrel else 0.0,
             )
@@ -606,7 +647,9 @@ def _sheet_geometry(
             inductance=strand_frequency > 0.0,
         )
 
-    return mesh, operator, _SheetGeometry(filament_of=filament_of, layer_by_name=layer_by_name)
+    return mesh, operator, _SheetGeometry(
+        filament_of=filament_of, layer_by_name=layer_by_name, via_name_by_key=via_name_by_key
+    )
 
 
 def _branch_coverage(
@@ -670,6 +713,7 @@ def _sheet_context(problem: CurrentFieldProblem, geometry: _SheetGeometry) -> _S
         filament_of=filament_of,
         name_of_filament=name_of_filament,
         filament_counts={name: len(indices) for name, indices in filament_of.items()},
+        via_name_by_key=geometry.via_name_by_key,
         skin_depth_by_layer_m={
             layer.name: skin_depth_m(
                 problem.frequency_hz, layer.resistivity_ohm_m
@@ -722,47 +766,80 @@ def solve_current_field_problems(
         else:
             groups.append([index])
     results: list[CurrentFieldSolveResult | None] = [None] * len(problems)
-    for members in groups:
-        first = problems[members[0]]
-        mesh, operator, geometry = _sheet_geometry(first, settings)
-        terminal_sets = [_sheet_terminals(problems[index], geometry) for index in members]
-        solve_arguments = {
-            "frequency_hz": first.frequency_hz,
-            "tolerance": float(settings.get("relative_tolerance", 1e-9)),
-            "max_iterations": int(settings.get("maximum_iterations", 200)),
-            "restart": int(settings.get("restart", 120)),
-            "preconditioner": str(settings.get("preconditioner", "auto")),
-        }
-        if execution_backend == "cuda" and getattr(mesh, "strands", None) is not None:
-            raise ValueError("edge strands are solved on the CPU only")
-        if execution_backend == "cuda":
-            from .sheet_cuda import solve_sheet_cases_cuda
+    width = 1
+    if execution_backend == "cpu" and len(groups) > 1:
+        estimates = [conductor_bytes(problems[members[0]], settings) for members in groups]
+        if max(estimates) >= CONDUCTOR_PROCESS_FROM_UNKNOWNS * CONDUCTOR_BYTES_PER_UNKNOWN:
+            width = conductor_width(estimates, thread_budget())
+        # largest first, so that the last to finish is a small one
+        groups = [groups[k] for k in sorted(range(len(groups)), key=lambda k: -estimates[k])]
 
-            # Every case of one conductor in one call: the operator goes to
-            # the device once and cases that drive the same components share
-            # the factored preconditioner, as on the CPU.  (One call a case
-            # moved the operator and refactored for each of a hot loop's
-            # capacitors.)
-            solved = [
-                (solution, telemetry.as_metrics())
-                for solution, telemetry in solve_sheet_cases_cuda(
-                    mesh,
-                    operator,
-                    terminal_sets,
-                    device_id=int(settings.get("device_id", 0)),
-                    near_factorization=str(settings.get("near_factorization", "superlu")),
-                    near_regularization=float(settings.get("near_regularization", 1e-8)),
-                    **solve_arguments,
-                )
+    if width == 1:
+        for members in groups:
+            for index, result in zip(members, _solve_conductor([problems[k] for k in members], settings, 1)):
+                results[index] = result
+    else:
+        # Conductors share nothing, so they are solved side by side, each in
+        # a process of its own on an even share of the budget and of the free
+        # memory; each gets the bits it gets alone.  Threads would share one
+        # interpreter: on five full-board conductors (1.1M unknowns each) the
+        # GMRES steps queued on its lock and five side by side took 0.86 of
+        # the time one by one, against 0.27 in processes.
+        threads = max(1, thread_budget() // width)
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=width, mp_context=context) as pool:
+            futures = [
+                (members, pool.submit(_solve_conductor_in_process, [problems[k] for k in members], settings, width, threads))
+                for members in groups
             ]
-        else:
-            near_factorization = str(settings.get("near_factorization", "superlu"))
-            backend_metrics = {
-                "backend": "sheet_peec",
-                "resolved_backend": "numpy-scipy-sheet-peec",
-                "fallback_used": False,
-                "near_factorization": near_factorization,
-            }
+            for members, future in futures:
+                for index, result in zip(members, future.result()):
+                    results[index] = result
+    return [result for result in results if result is not None]
+
+
+def _solve_conductor(
+    problems: Sequence[CurrentFieldProblem], settings: Mapping[str, Any], width: int
+) -> list[CurrentFieldSolveResult]:
+    """Solve the problems of one conductor (one geometry, several excitations) together."""
+    execution_backend = str(settings.get("execution_backend", "cpu"))
+    first = problems[0]
+    mesh, operator, geometry = _sheet_geometry(first, settings)
+    terminal_sets = [_sheet_terminals(problem, geometry) for problem in problems]
+    solve_arguments = {
+        "frequency_hz": first.frequency_hz,
+        "tolerance": float(settings.get("relative_tolerance", 1e-9)),
+        "max_iterations": int(settings.get("maximum_iterations", 200)),
+        "restart": int(settings.get("restart", 120)),
+        "preconditioner": str(settings.get("preconditioner", "auto")),
+    }
+    if execution_backend == "cuda" and getattr(mesh, "strands", None) is not None:
+        raise ValueError("edge strands are solved on the CPU only")
+    if execution_backend == "cuda":
+        from .sheet_cuda import solve_sheet_cases_cuda
+
+        solved = [
+            (solution, telemetry.as_metrics())
+            for solution, telemetry in solve_sheet_cases_cuda(
+                mesh,
+                operator,
+                terminal_sets,
+                device_id=int(settings.get("device_id", 0)),
+                near_factorization=str(settings.get("near_factorization", "superlu")),
+                near_regularization=float(settings.get("near_regularization", 1e-8)),
+                **solve_arguments,
+            )
+        ]
+    else:
+        near_factorization = str(settings.get("near_factorization", "superlu"))
+        backend_metrics = {
+            "backend": "sheet_peec",
+            "resolved_backend": "numpy-scipy-sheet-peec",
+            "fallback_used": False,
+            "conductor_width": width,
+            "near_factorization": near_factorization,
+        }
+        with memory_share(1.0 / width):
             solved = [
                 (solution, dict(backend_metrics, lockstep_columns=solution.lockstep_columns))
                 for solution in solve_sheet_cases(
@@ -774,11 +851,72 @@ def solve_current_field_problems(
                     **solve_arguments,
                 )
             ]
-        for index, terminals, (solution, backend_metrics) in zip(members, terminal_sets, solved):
-            results[index] = _field_result(
-                mesh, operator, solution, terminals, _sheet_context(problems[index], geometry), backend_metrics
-            )
-    return [result for result in results if result is not None]
+    return [
+        _field_result(mesh, operator, solution, terminals, _sheet_context(problem, geometry), metrics)
+        for problem, terminals, (solution, metrics) in zip(problems, terminal_sets, solved)
+    ]
+
+
+def _solve_conductor_in_process(
+    problems: Sequence[CurrentFieldProblem], settings: Mapping[str, Any], width: int, threads: int
+) -> list[CurrentFieldSolveResult]:
+    """:func:`_solve_conductor` in a worker process, on its share of the budget."""
+    set_thread_budget(threads)
+    return _solve_conductor(problems, settings, width)
+
+
+# Peak memory of one conductor's solve, per saddle-point unknown (branches and
+# nodes, every filament counted).  The near LU peaks at 8 to 10 KB per unknown
+# on its own (sheet_peec.AUTO_BLOCK_FROM_UNKNOWNS); the operator's transforms
+# and one lockstep column come on top.
+CONDUCTOR_BYTES_PER_UNKNOWN = 12_000
+# Conductors solved side by side may together take this fraction of the memory
+# available when the call starts.
+CONDUCTOR_MEMORY_FRACTION = 0.5
+# A worker process costs its start (an interpreter, NumPy, SciPy, this
+# package) and the copy of its problems and results, a few seconds; below this
+# many unknowns in the largest conductor a call's conductors are solved one
+# after another in the caller's process.
+CONDUCTOR_PROCESS_FROM_UNKNOWNS = 100_000
+
+
+def conductor_bytes(problem: CurrentFieldProblem, settings: Mapping[str, Any]) -> int:
+    """Memory the solve of one conductor is reckoned to take, from its cells alone.
+
+    Its saddle-point unknowns are counted without building the mesh: a node
+    per occupied cell and filament, a branch per pair of neighbours on a
+    filament, the vertical segments; at :data:`CONDUCTOR_BYTES_PER_UNKNOWN`.
+    """
+    cuts = _filament_cuts(problem.layers, problem.frequency_hz, settings)
+    unknowns = len(problem.vertical_segments)
+    for layer in problem.layers:
+        cells = problem.copper_by_layer[layer.name]
+        pairs = sum((x + 1, y) in cells for x, y in cells) + sum((x, y + 1) in cells for x, y in cells)
+        unknowns += len(cuts[layer.name]) * (len(cells) + pairs)
+    return CONDUCTOR_BYTES_PER_UNKNOWN * unknowns
+
+
+def conductor_width(estimates: Sequence[int], budget: int) -> int:
+    """How many conductors of a call to solve side by side, at least one.
+
+    No more than there are conductors or budget threads, and only as many of
+    the largest as fit together in :data:`CONDUCTOR_MEMORY_FRACTION` of the
+    memory available (all of them when that is unknown).
+    """
+    width = min(len(estimates), max(1, int(budget)))
+    if width < 2:
+        return 1
+    available = _available_memory_bytes()
+    if available is None:
+        return width
+    allowance = CONDUCTOR_MEMORY_FRACTION * available
+    taken = fitted = 0
+    for estimate in sorted(estimates, reverse=True)[:width]:
+        if taken + estimate > allowance:
+            break
+        taken += estimate
+        fitted += 1
+    return max(1, fitted)
 
 
 def _same_geometry(first: CurrentFieldProblem, second: CurrentFieldProblem) -> bool:
@@ -807,6 +945,30 @@ def _faces(problem: CurrentFieldProblem) -> dict[str, tuple[dict, dict]]:
 
 def _regions(problem: CurrentFieldProblem) -> dict[str, dict[tuple[int, int], int]]:
     return {name: dict(cells) for name, cells in (problem.cell_regions or {}).items()}
+
+
+def _via_currents(
+    mesh: SheetMesh, solution: Any, name_by_key: Mapping[tuple[int, int, int, int], str]
+) -> dict[str, float]:
+    """The current each named vertical connection carries, in amperes.
+
+    A connection can stand on several cells -- a plated barrel on the cells its
+    wall runs through, each a vertical branch under the connection's name.  Its
+    current is the phasor sum of those branches, level by level; a connection
+    through several layers carries the largest of its levels.  A branch with no
+    name is its own connection.
+    """
+    offset = len(mesh.branch_x) + len(mesh.branch_y)
+    sums: dict[tuple[str, int, int], complex] = {}
+    for index, via in enumerate(mesh.via_branches):
+        key = (via.row, via.col, via.lower_layer, via.upper_layer)
+        name = name_by_key.get(key, f"vertical_{via.row}_{via.col}")
+        level = (name, via.lower_layer, via.upper_layer)
+        sums[level] = sums.get(level, 0.0) + complex(solution.branch_current[offset + index])
+    out: dict[str, float] = {}
+    for (name, _, _), value in sums.items():
+        out[name] = max(out.get(name, 0.0), float(abs(value)))
+    return out
 
 
 def _field_result(
@@ -856,6 +1018,7 @@ def _field_result(
     )
     metrics = dict(fields.metrics)
     metrics.update(backend_metrics)
+    via_current = _via_currents(mesh, solution, context.via_name_by_key)
     metrics.update(
         {
             "bulk_p99_current_density_a_per_mm2": (
@@ -896,6 +1059,8 @@ def _field_result(
                 "two_axis_branch_mean_magnitude"
             ),
             "physical_conductor_cell_count": len(density),
+            "max_via_current_a": max(via_current.values(), default=0.0),
+            "via_current_a_by_connection": via_current,
         }
     )
     return CurrentFieldSolveResult(
