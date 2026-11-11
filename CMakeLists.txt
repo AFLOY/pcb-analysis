@@ -25,6 +25,7 @@ endif()
 option(PCB_NATIVE_OPENMP "Compile the native kernels with OpenMP" ON)
 set(PCB_NATIVE_MARCH "native" CACHE STRING "Value for -march (empty disables; ignored by MSVC)")
 option(PCB_NATIVE_CUDA "Also build the CUDA module electrical._pcbcore_cuda" OFF)
+option(PCB_NATIVE_MUMPS "Link MUMPS (sequential, complex double) for the CPU near preconditioner" OFF)
 
 include(CheckCXXCompilerFlag)
 
@@ -189,7 +190,29 @@ if(PCB_NATIVE_OPENMP)
   target_link_libraries(pcbcore PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
-pybind11_add_module(_pcbcore MODULE cpp/bindings/module.cpp cpp/bindings/fem.cpp cpp/bindings/thermal.cpp cpp/bindings/emc.cpp cpp/bindings/coupling.cpp)
+# MUMPS (CeCILL-C), optional: the LDL^T of the sheet PEEC near saddle-point
+# matrix in its quasi-definite form, on the CPU.  It is found, not fetched: a
+# Fortran library with METIS and a BLAS, built once per machine with the same
+# compilers as this module (see cpp/third_party/build_mumps.sh), and found
+# through its CMake package (-DMUMPS_ROOT=<prefix>).  The BLAS it links must be
+# single-threaded; MUMPS's OpenMP team is the only parallelism.
+if(PCB_NATIVE_MUMPS)
+  enable_language(Fortran)
+  # AOCC's flang names its OpenMP stub among the Fortran runtime libraries a
+  # link needs; beside the real libomp it answers omp_* calls made through it
+  # with one thread (threadpoolctl saw a pool stuck at 1).  MUMPS is built with
+  # OpenMP, so the stub has nothing to stand in for.
+  list(REMOVE_ITEM CMAKE_Fortran_IMPLICIT_LINK_LIBRARIES ompstub)
+  find_package(MUMPS CONFIG REQUIRED COMPONENTS z)  # z: complex double
+  target_sources(pcbcore PRIVATE cpp/src/linalg/symmetric_ldlt_mumps.cpp)
+  # METIS 5.1's scivision build installs GKlib as a library of its own, which
+  # MUMPS's package does not name; link it after METIS when it is there.
+  find_library(PCB_GKLIB_LIBRARY NAMES GKlib HINTS ${MUMPS_ROOT} PATH_SUFFIXES lib lib64)
+  target_link_libraries(pcbcore PRIVATE MUMPS::MUMPS $<$<BOOL:${PCB_GKLIB_LIBRARY}>:${PCB_GKLIB_LIBRARY}>)
+  target_compile_definitions(pcbcore PUBLIC PCB_HAVE_MUMPS)
+endif()
+
+pybind11_add_module(_pcbcore MODULE cpp/bindings/module.cpp cpp/bindings/fem.cpp cpp/bindings/thermal.cpp cpp/bindings/emc.cpp cpp/bindings/coupling.cpp cpp/bindings/linalg.cpp)
 target_compile_options(_pcbcore PRIVATE ${PCB_OPT_FLAGS})
 target_link_libraries(_pcbcore PRIVATE pcbcore pcbcore_kernels)
 # The generator expression keeps multi-config generators (Visual Studio)
