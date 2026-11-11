@@ -177,3 +177,30 @@ def test_a_second_frequency_reuses_the_near_plan_and_solves_as_a_fresh_plan_does
     scale = max(abs(value) for value in fresh.voltage_phasor.values())
     assert max(abs(reused.voltage_phasor[n] - fresh.voltage_phasor[n]) for n in fresh.voltage_phasor) < 1e-8 * scale
     sheet_cuda.clear_cuda_sheet_caches()
+
+
+def test_excitations_solved_in_lockstep_match_each_solved_alone() -> None:
+    _require_cuda_device()
+    pytest.importorskip("nvmath.sparse.advanced")
+    from electrical.sheet_peec.current_field_contract import solve_current_field_problems
+
+    common = {"relative_tolerance": 1e-9, "maximum_iterations": 240, "restart": 60, "execution_backend": "cuda",
+              "device_id": 0, "preconditioner": "near", "near_factorization": "cudss_quasi_definite"}
+    problems = []
+    for k, (source, sink, scale) in enumerate(((0, 2, 1.0), (1, 0, 2.0j), (2, 1, -0.5))):
+        value = _problem(frequency_hz=3e7)
+        value["name"] = f"case_{k}"
+        value["terminals"][0]["cells"] = [{"layer": "F.Cu", "x": source, "y": 0}]
+        value["terminals"][1]["cells"] = [{"layer": "B.Cu", "x": sink, "y": 0}]
+        value["terminals"][0]["current_a"] = {"real": scale.real if isinstance(scale, complex) else scale,
+                                              "imag": scale.imag if isinstance(scale, complex) else 0.0}
+        value["terminals"][1]["current_a"] = {"real": -(scale.real if isinstance(scale, complex) else scale),
+                                              "imag": -(scale.imag if isinstance(scale, complex) else 0.0)}
+        problems.append(value)
+    together = solve_current_field_problems(problems, common)
+    assert all("lockstep3" in result.metrics["preconditioner_factorization_backend"] for result in together)
+    for value, result in zip(problems, together):
+        alone = solve_current_field_problems([value], common)[0]
+        assert result.metrics["converged"] and alone.metrics["converged"]
+        scale = max(abs(v) for v in alone.voltage_phasor.values())
+        assert max(abs(result.voltage_phasor[n] - alone.voltage_phasor[n]) for n in alone.voltage_phasor) < 1e-7 * scale
