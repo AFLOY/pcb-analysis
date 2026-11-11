@@ -18,6 +18,7 @@ import weakref
 from typing import Any, Sequence
 
 import numpy as np
+import scipy.sparse as sp
 
 from .sheet_operator import SheetInductanceOperator
 from .sheet_peec import (
@@ -99,6 +100,15 @@ class _CudssEntry:
 NEAR_FACTORIZATIONS = ("superlu", "cudss_quasi_definite")
 
 
+class NearMatrixTooLarge(RuntimeError):
+    """The near matrix would not fit beside the solve on the device; it is formed on the host."""
+
+
+# Entries of the near matrix formed at once on the device, a block of source
+# branches at a time: the block's keys, order and values are the only scratch.
+NEAR_BLOCK_ENTRIES = 1 << 24
+
+
 def device_quasi_definite_near(
     mesh: SheetMesh,
     operator: Any,
@@ -110,6 +120,9 @@ def device_quasi_definite_near(
     xp: Any,
     xsparse: Any,
     radius_cells: int = 1,
+    *,
+    block_entries: int = NEAR_BLOCK_ENTRIES,
+    memory_budget: int | None = None,
 ) -> tuple[Any, Any, float]:
     """:func:`quasi_definite_near_matrix` of :func:`_near_impedance`, built where ``xp`` lives.
 
@@ -119,10 +132,20 @@ def device_quasi_definite_near(
     ``R + j omega L`` and stacked with the incidence.  On a 0.2 mm hot loop
     with its planes cut into filaments that took 9.4 s on a Colab A100 host.
     Here only the few table values the near radius reaches are read on the
-    host; the entries, their filtering and the quasi-definite matrix are
-    formed by ``xp`` (CuPy, or NumPy standing in) and ``xsparse``
-    (``cupyx.scipy.sparse`` or ``scipy.sparse``).  The result is the host
-    path's matrix: the same pattern and the same values, entry for entry.
+    host; the matrix is formed by ``xp`` (CuPy, or NumPy standing in) and
+    ``xsparse`` (``cupyx.scipy.sparse`` or ``scipy.sparse``).  The result is
+    the host path's matrix: the same pattern and the same values, entry for
+    entry.
+
+    It is written straight into its CSR arrays (32-bit indices) in two
+    passes over the near-radius slots: the first counts each row's entries,
+    the second forms a block of source branches' entries at a time, orders
+    them by column within the block and writes them in place.  The scratch is
+    one block (``block_entries``), not the whole matrix: assembling it as COO
+    and converting took 6.7 GB beside the 9.2 GB solve of that hot loop.
+    When the counted matrix and a block exceed ``memory_budget`` bytes,
+    :class:`NearMatrixTooLarge` is raised before anything is allocated, and
+    the caller forms it on the host instead.
 
     Only for the uniform convolution operator (``_tables``); returns the
     CSR matrix, the row signs and ``delta``.
@@ -138,104 +161,163 @@ def device_quasi_definite_near(
     conductor_ids = {name: k for k, name in enumerate(dict.fromkeys(conductors))}
     sheet = np.asarray([conductor_ids[name] for name in conductors], dtype=np.int64)
     count = mesh.branch_count
-    parts_i: list[Any] = []
-    parts_j: list[Any] = []
-    parts_v: list[Any] = []
-
-    def couple(sources: np.ndarray, first: int, levels_count: int, table_of: Any, group_of: np.ndarray | None) -> None:
-        # the host path's lookup: a branch repeated at one place couples once, as its last copy
-        lookup = np.full((levels_count, rows, cols), -1, dtype=np.int64)
-        lookup[sources[:, 0], sources[:, 1], sources[:, 2]] = np.arange(first, first + len(sources))
-        keep = np.flatnonzero(lookup[sources[:, 0], sources[:, 1], sources[:, 2]] == np.arange(first, first + len(sources)))
-        sources = sources[keep]
-        lookup_device = xp.asarray(lookup)
-        level = xp.asarray(sources[:, 0])
-        row0 = xp.asarray(sources[:, 1])
-        col0 = xp.asarray(sources[:, 2])
-        index = xp.asarray(first + keep)
-        for other in range(levels_count):
-            if group_of is not None:
-                # planar branches couple near only within their own copper layer
-                same = xp.asarray(group_of[sources[:, 0]] == group_of[other])
-            else:
-                same = None
-            for dr in span:
-                for dc in span:
-                    values = xp.asarray(np.array(
-                        [table_of(lvl, other)[dr % padded_rows, dc % padded_cols] for lvl in range(levels_count)]
-                    ))
-                    row, col = row0 + dr, col0 + dc
-                    inside = (row >= 0) & (row < rows) & (col >= 0) & (col < cols)
-                    if same is not None:
-                        inside &= same
-                    target = xp.where(
-                        inside, lookup_device[other, xp.clip(row, 0, rows - 1), xp.clip(col, 0, cols - 1)], -1
-                    )
-                    hit = target >= 0
-                    parts_i.append(index[hit])
-                    parts_j.append(target[hit])
-                    parts_v.append(values[level[hit]])
-
-    offset = 0
-    for axis, group in (("x", mesh.branch_x), ("y", mesh.branch_y)):
-        if group:
-            couple(
-                np.asarray(group, dtype=np.int64).reshape(-1, 3), offset, len(mesh.stackup),
-                lambda layer, other, axis=axis: base._tables[(axis, min(layer, other), max(layer, other))],
-                sheet,
-            )
-        offset += len(group)
-    levels = list(base.vertical_levels)
-    if mesh.via_branches and levels:
-        index_of = {key: position for position, key in enumerate(levels)}
-        sources = np.array(
-            [(index_of[(via.lower_layer, via.upper_layer)], via.row, via.col) for via in mesh.via_branches],
-            dtype=np.int64,
-        )
-        couple(sources, offset, len(levels), lambda a, b: base._tables_z[(min(a, b), max(a, b))], None)
-    entries_i = xp.concatenate(parts_i)
-    entries_j = xp.concatenate(parts_j)
-    inductance = xp.concatenate(parts_v).astype(xp.float64)
-    if barrel_delta is not None:
-        # the barrels' own inductance on their diagonal, as _BarrelSelf adds it
-        via_offset = len(mesh.branch_x) + len(mesh.branch_y)
-        add = xp.zeros(count, dtype=xp.float64)
-        add[via_offset:] = xp.asarray(barrel_delta)
-        inductance = inductance + xp.where(entries_i == entries_j, add[entries_i], 0.0)
-    # cut to the active branches
     position = np.full(count, -1, dtype=np.int64)
     active_index = np.flatnonzero(active_branches)
     position[active_index] = np.arange(len(active_index))
-    position_device = xp.asarray(position)
-    a, b = position_device[entries_i], position_device[entries_j]
-    kept = (a >= 0) & (b >= 0)
-    a, b, inductance = a[kept], b[kept], inductance[kept]
     branches = len(active_index)
+    incidence = sp.csr_matrix(reduced)
+    incidence.sort_indices()
+    nodes = incidence.shape[1]
+    size = branches + nodes
+
+    # The branch groups as the host path walks them: (sources kept, their
+    # branch numbers, lookup, per-slot values, the levels each may reach).
+    groups = []
+
+    def group(sources: np.ndarray, first: int, levels_count: int, table_of: Any, group_of: np.ndarray | None) -> None:
+        lookup = np.full((levels_count, rows, cols), -1, dtype=np.int64)
+        lookup[sources[:, 0], sources[:, 1], sources[:, 2]] = np.arange(first, first + len(sources))
+        # a branch repeated at one place couples once, as its last copy
+        keep = np.flatnonzero(lookup[sources[:, 0], sources[:, 1], sources[:, 2]] == np.arange(first, first + len(sources)))
+        sources, number = sources[keep], first + keep
+        live = position[number] >= 0
+        sources, number = sources[live], number[live]
+        active_lookup = np.where(lookup >= 0, position[np.maximum(lookup, 0)], -1)
+        slots = []
+        for other in range(levels_count):
+            reaches = (
+                np.ones(levels_count, dtype=bool) if group_of is None else group_of[:levels_count] == group_of[other]
+            )
+            if not reaches.any():
+                continue
+            for dr in span:
+                for dc in span:
+                    values = np.array(
+                        [table_of(lvl, other)[dr % padded_rows, dc % padded_cols] for lvl in range(levels_count)]
+                    )
+                    slots.append((other, dr, dc, reaches, values))
+        groups.append((sources, number, active_lookup, slots))
+
+    offset = 0
+    for axis, branches_of_axis in (("x", mesh.branch_x), ("y", mesh.branch_y)):
+        if branches_of_axis:
+            group(
+                np.asarray(branches_of_axis, dtype=np.int64).reshape(-1, 3), offset, len(mesh.stackup),
+                lambda layer, other, axis=axis: base._tables[(axis, min(layer, other), max(layer, other))], sheet,
+            )
+        offset += len(branches_of_axis)
+    levels = list(base.vertical_levels)
+    if mesh.via_branches and levels:
+        index_of = {key: k for k, key in enumerate(levels)}
+        vias = np.array(
+            [(index_of[(via.lower_layer, via.upper_layer)], via.row, via.col) for via in mesh.via_branches],
+            dtype=np.int64,
+        )
+        group(vias, offset, len(levels), lambda a, b: base._tables_z[(min(a, b), max(a, b))], None)
+
+    def blocks(sources: np.ndarray, slot_count: int):
+        step = max(1, block_entries // max(1, slot_count))
+        for start in range(0, len(sources), step):
+            yield start, min(len(sources), start + step)
+
+    def slot_hits(device_lookup: Any, level: Any, row0: Any, col0: Any, slot: tuple) -> tuple[Any, Any]:
+        other, dr, dc, reaches, _values = slot
+        row, col = row0 + dr, col0 + dc
+        inside = (row >= 0) & (row < rows) & (col >= 0) & (col < cols) & xp.asarray(reaches)[level]
+        target = xp.where(inside, device_lookup[other, xp.clip(row, 0, rows - 1), xp.clip(col, 0, cols - 1)], -1)
+        return target >= 0, target
+
+    # pass 1: each row's near entries
+    near_count = xp.zeros(branches, dtype=xp.int64)
+    device_groups = []
+    for sources, number, active_lookup, slots in groups:
+        device_lookup = xp.asarray(active_lookup)
+        level_all = xp.asarray(sources[:, 0])
+        row_all, col_all = xp.asarray(sources[:, 1]), xp.asarray(sources[:, 2])
+        source_row = xp.asarray(position[number])
+        device_groups.append((device_lookup, level_all, row_all, col_all, source_row, slots, sources))
+        for start, stop in blocks(sources, len(slots)):
+            hits = xp.zeros(stop - start, dtype=xp.int64)
+            for slot in slots:
+                hit, _ = slot_hits(device_lookup, level_all[start:stop], row_all[start:stop], col_all[start:stop], slot)
+                hits += hit
+            near_count[source_row[start:stop]] += hits
+    # an active branch with no near entries (a repeated copy) still has R on its diagonal
+    lone = near_count == 0
+    incidence_count = xp.asarray(np.diff(incidence.indptr).astype(np.int64))
+    transpose = sp.csr_matrix(incidence.T)
+    transpose.sort_indices()
+    branch_count = near_count + lone + incidence_count
+    node_count = xp.asarray(np.diff(transpose.indptr).astype(np.int64)) + 1
+    indptr = xp.concatenate([xp.zeros(1, dtype=xp.int64), xp.cumsum(xp.concatenate([branch_count, node_count]))])
+    nnz = int(indptr[-1])
+    if nnz >= 2**31 or size >= 2**31:
+        raise NearMatrixTooLarge("the near matrix needs 64-bit indices")
+    if memory_budget is not None:
+        needed = nnz * (4 + 16) + (size + 1) * 4 + block_entries * (8 + 8 + 8 + 16 + 4)
+        if needed > memory_budget:
+            raise NearMatrixTooLarge(f"the near matrix needs {needed / 1e9:.1f} GB, {memory_budget / 1e9:.1f} GB free")
+    indices = xp.empty(nnz, dtype=xp.int32)
+    data = xp.empty(nnz, dtype=xp.complex128)
+    z_diagonal = xp.zeros(branches, dtype=xp.complex128)
     resistance_active = xp.asarray(np.asarray(resistance, dtype=np.float64)[active_branches])
-    on_diagonal = a == b
-    values = (1j * float(omega)) * inductance + xp.where(on_diagonal, resistance_active[a], 0.0)
-    diagonal = xp.abs(values[on_diagonal])
-    positive = diagonal[diagonal > 0.0]
+    barrel = None
+    if barrel_delta is not None:
+        barrel = xp.zeros(count, dtype=xp.float64)
+        barrel[len(mesh.branch_x) + len(mesh.branch_y):] = xp.asarray(barrel_delta)
+        barrel = barrel[xp.asarray(active_index)]
+
+    # pass 2: a block of sources' entries at a time, ordered by column within each row
+    for device_lookup, level_all, row_all, col_all, source_row, slots, sources in device_groups:
+        for start, stop in blocks(sources, len(slots)):
+            level, row0, col0 = level_all[start:stop], row_all[start:stop], col_all[start:stop]
+            parts_row, parts_col, parts_value = [], [], []
+            for slot in slots:
+                hit, target = slot_hits(device_lookup, level, row0, col0, slot)
+                parts_row.append(source_row[start:stop][hit])
+                parts_col.append(target[hit])
+                parts_value.append(xp.asarray(slot[4])[level[hit]])
+            entry_row = xp.concatenate(parts_row)
+            entry_col = xp.concatenate(parts_col)
+            inductance = xp.concatenate(parts_value).astype(xp.float64)
+            del parts_row, parts_col, parts_value
+            diagonal = entry_row == entry_col
+            if barrel is not None:
+                inductance = inductance + xp.where(diagonal, barrel[entry_row], 0.0)
+            value = (1j * float(omega)) * inductance + xp.where(diagonal, resistance_active[entry_row], 0.0)
+            order = xp.argsort(entry_row * size + entry_col)
+            entry_row, entry_col, value, diagonal = entry_row[order], entry_col[order], value[order], diagonal[order]
+            first = xp.searchsorted(entry_row, entry_row, side="left")
+            destination = indptr[entry_row] + (xp.arange(entry_row.size) - first)
+            indices[destination] = entry_col.astype(xp.int32)
+            data[destination] = value
+            z_diagonal[entry_row[diagonal]] = value[diagonal]
+            del entry_row, entry_col, value, order, first, destination, inductance, diagonal
+    lone_rows = xp.flatnonzero(lone)
+    indices[indptr[lone_rows]] = lone_rows.astype(xp.int32)
+    data[indptr[lone_rows]] = resistance_active[lone_rows].astype(xp.complex128)
+    z_diagonal[lone_rows] = resistance_active[lone_rows]
+    # the incidence after each branch row's near entries; its transpose in the node rows
+    inc_rows = np.repeat(np.arange(branches), np.diff(incidence.indptr))
+    inc_rank = np.arange(incidence.nnz) - incidence.indptr[inc_rows]
+    inc_rows_device = xp.asarray(inc_rows)
+    destination = indptr[inc_rows_device] + near_count[inc_rows_device] + lone[inc_rows_device] + xp.asarray(inc_rank)
+    indices[destination] = xp.asarray((branches + incidence.indices).astype(np.int32))
+    data[destination] = xp.asarray(-incidence.data.astype(np.complex128))
+    t_rows = np.repeat(np.arange(nodes), np.diff(transpose.indptr))
+    t_rank = np.arange(transpose.nnz) - transpose.indptr[t_rows]
+    destination = indptr[branches + xp.asarray(t_rows)] + xp.asarray(t_rank)
+    indices[destination] = xp.asarray(transpose.indices.astype(np.int32))
+    data[destination] = xp.asarray(-transpose.data.astype(np.complex128))
+    magnitude = xp.abs(z_diagonal)
+    positive = magnitude[magnitude > 0.0]
     scale = float(xp.median(positive)) if positive.size else 1.0
     delta = float(regularization) / scale
-    incidence = reduced.tocoo()
-    nodes = incidence.shape[1]
-    inc_r = xp.asarray(incidence.row.astype(np.int64))
-    inc_c = xp.asarray(incidence.col.astype(np.int64))
-    inc_v = xp.asarray(incidence.data.astype(np.float64))
-    node_diagonal = xp.arange(branches, branches + nodes, dtype=xp.int64)
-    all_rows = xp.concatenate([a, inc_r, branches + inc_c, node_diagonal])
-    all_cols = xp.concatenate([b, branches + inc_c, inc_r, node_diagonal])
-    all_values = xp.concatenate([
-        values.astype(xp.complex128),
-        (-inc_v).astype(xp.complex128),
-        (-inc_v).astype(xp.complex128),
-        xp.full(nodes, -delta, dtype=xp.complex128),
-    ])
-    size = branches + nodes
-    matrix = xsparse.coo_matrix((all_values, (all_rows, all_cols)), shape=(size, size)).tocsr()
-    matrix.sum_duplicates()
-    matrix.sort_indices()
+    node_diagonal = indptr[branches + 1:] - 1
+    indices[node_diagonal] = xp.arange(branches, size, dtype=xp.int32)
+    data[node_diagonal] = -delta
+    matrix = xsparse.csr_matrix((data, indices, indptr.astype(xp.int32)), shape=(size, size))
+    matrix.has_canonical_format = True
     sign = xp.concatenate([xp.ones(branches), -xp.ones(nodes)]).astype(xp.complex128)
     return matrix, sign, delta
 
@@ -1237,16 +1319,23 @@ def _solve_group_cuda(
         import scipy.sparse as sp
 
         if near_factorization == "cudss_quasi_definite":
+            prepared = None
             if hasattr(getattr(operator, "_base", operator), "_tables"):
-                # the near matrix formed on the device, not on the host
-                prepared = device_quasi_definite_near(
-                    mesh, operator, omega, resistance, active_branches, reduced_cpu, near_regularization, cp, csp
-                )
+                # the near matrix formed on the device, unless it would not fit there
+                try:
+                    prepared = device_quasi_definite_near(
+                        mesh, operator, omega, resistance, active_branches, reduced_cpu, near_regularization, cp, csp,
+                        memory_budget=_device_memory_budget(cp),
+                    )
+                except NearMatrixTooLarge:
+                    prepared = None
+            if prepared is not None:
                 factored = CudssQuasiDefiniteNear(None, None, near_regularization, cp, prepared)
+                factor_backend = "cudss_quasi_definite_ldlt"
             else:
                 near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
                 factored = CudssQuasiDefiniteNear(near_cpu, reduced_cpu, near_regularization, cp)
-            factor_backend = "cudss_quasi_definite_ldlt"
+                factor_backend = "cudss_quasi_definite_ldlt_host_near"
         else:
             near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
             saddle_cpu = sp.bmat([[near_cpu, -reduced_cpu], [reduced_cpu.T, None]], format="csc")
