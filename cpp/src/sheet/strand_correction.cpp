@@ -77,6 +77,19 @@ void StrandCorrection::add_family(const std::int64_t planes, const std::int64_t 
     family.width = width;
     family.correction = std::move(correction);
     family.exact = std::move(exact);
+    const auto source_count = static_cast<std::int64_t>(family.sources.size());
+    family.mirror_start.assign(static_cast<size_t>(source_count) + 1U, 0);
+    for (std::int64_t i = 0; i < source_count; ++i) {
+        std::int64_t count = 0;
+        walk(family, i, [&](size_t, std::int64_t, std::int64_t, const std::int64_t t_first, std::int64_t,
+                            const bool uncut) {
+            if (uncut) {
+                family.mirror_target.push_back(family.strand_id[static_cast<size_t>(t_first)]);
+                ++count;
+            }
+        });
+        family.mirror_start[static_cast<size_t>(i) + 1U] = family.mirror_start[static_cast<size_t>(i)] + count;
+    }
     families_.push_back(std::move(family));
 }
 
@@ -126,11 +139,14 @@ void StrandCorrection::apply(const double* const x, double* const y, const int t
         const auto sources = static_cast<std::int64_t>(f.sources.size());
         const std::int64_t w = f.width;
         const double* const blocks = f.correction.data();
-        // A source writes its own strands (no other source owns them) and, for
-        // an uncut neighbour, that neighbour's entry, which other sources may
-        // write too: those adds are atomic.
+        std::vector<double> mirrored(f.mirror_target.size(), 0.0);
+        // A source writes only its own strands and its own run of mirrored
+        // entries; the mirrored entries are added to their uncut neighbours
+        // afterwards, in source order.  Every sum runs in a fixed order, so the
+        // result is the same at any thread count.
 #pragma omp parallel for schedule(dynamic, 64) num_threads(std::max(threads, 1)) if (threads > 1)
         for (std::int64_t i = 0; i < sources; ++i) {
+            std::int64_t next = f.mirror_start[static_cast<size_t>(i)];
             walk(f, i, [&](const size_t offset, const std::int64_t s_first, const std::int64_t s_count,
                            const std::int64_t t_first, const std::int64_t t_count, const bool uncut) {
                 const double* const block = blocks + offset;
@@ -146,11 +162,12 @@ void StrandCorrection::apply(const double* const x, double* const y, const int t
                     for (std::int64_t a = 0; a < s_count; ++a) {
                         sum += block[a * w] * x[f.strand_id[static_cast<size_t>(s_first + a)]];
                     }
-                    double* const target = y + f.strand_id[static_cast<size_t>(t_first)];
-#pragma omp atomic
-                    *target += sum;
+                    mirrored[static_cast<size_t>(next++)] = sum;
                 }
             });
+        }
+        for (size_t k = 0; k < mirrored.size(); ++k) {
+            y[f.mirror_target[k]] += mirrored[k];
         }
     }
 }
@@ -194,7 +211,8 @@ std::int64_t StrandCorrection::stored_bytes() const noexcept {
             sizeof(std::int32_t) * (f.lookup.size() + f.cells.size() + f.type.size() + f.sources.size() +
                                     f.slot_row.size() + f.slot_col.size() + f.partner_start.size() +
                                     f.partner.size() + f.block.size()) +
-            sizeof(std::int64_t) * (f.strand_start.size() + f.strand_id.size()) +
+            sizeof(std::int64_t) * (f.strand_start.size() + f.strand_id.size() + f.mirror_start.size() +
+                                    f.mirror_target.size()) +
             sizeof(double) * (f.correction.size() + f.exact.size()));
     }
     return total;

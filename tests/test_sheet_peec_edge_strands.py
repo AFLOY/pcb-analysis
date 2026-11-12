@@ -173,3 +173,18 @@ def test_the_compact_correction_is_the_explicit_one() -> None:
         assert abs(built - reference).max() <= 1e-10 * abs(reference).max()
     stored = sum(m.data.nbytes + m.indices.nbytes + m.indptr.nbytes for m in (explicit, exact))
     assert compact.stored_bytes < stored / 5  # 8x on this short strip, 16x at 1.2 x 20 mm, 0.4 mm
+
+
+@pytest.mark.skipif(not __import__("electrical.backend", fromlist=["core"]).core(), reason="needs the C++ core")
+def test_the_compact_correction_gives_the_same_bits_at_any_thread_count() -> None:
+    """docs/DESIGN.md: the same bits whatever the thread budget (the mirrored adds run in a fixed order)."""
+    from electrical.sheet_peec import edge_strands as es
+
+    problem = cfc.CurrentFieldProblem.from_mapping(_strip_pair(1.2, 4.0, 0.2, 3e7))
+    base, operator, _ = cfc._sheet_geometry(problem, {"maximum_filaments": 64})
+    mesh = es.StrandedSheetMesh.from_mesh(base, es.plan_edge_strands(base, 6e-6))
+    compact = es.compact_strand_correction(mesh, operator)
+    x = np.random.default_rng(5).standard_normal(mesh.branch_count)
+    results = [compact._native.apply(x, threads) for threads in (1, 2, 3, 8)]
+    for other in results[1:]:
+        assert other.tobytes() == results[0].tobytes()
