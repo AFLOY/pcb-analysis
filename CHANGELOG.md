@@ -6,6 +6,14 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
+- `solve_current_field_problems` solves the conductors of one call side by
+  side in worker processes (`spawn`), each on an even share of the thread
+  budget and of the free memory, as many as fit in half of `MemAvailable` by
+  `conductor_bytes` (4.6 + 3.4 n KB per saddle-point unknown with n filaments
+  a layer, from near + MUMPS's measured peaks; 1.5 times that with SuperLU).
+  Each result is the bits its conductor gets alone and carries
+  `conductor_width`.  Below 100k unknowns in the largest conductor the call
+  stays in the caller's process.
 - The AC `voltage_span_v` of a sheet solve is the largest phasor difference
   between two nodes, max |V_i - V_j| (the diameter of the phasors,
   `voltage_span_definition` `maximum_phasor_difference`), not the departure

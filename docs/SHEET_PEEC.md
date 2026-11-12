@@ -919,7 +919,10 @@ share of the thread budget and of the free memory (`memory_share`, which the
 lockstep cut reads).  How many run at once is the smallest of the conductor
 count, the budget, and the largest conductors whose estimate
 (`conductor_bytes`: saddle-point unknowns counted from the cells, every
-filament, at `CONDUCTOR_BYTES_PER_UNKNOWN` = 12 KB) fits together in
+filament, at `CONDUCTOR_BYTES_PER_UNKNOWN` + `CONDUCTOR_BYTES_PER_UNKNOWN_PER_FILAMENT`
+times the layer's filaments = 4.6 + 3.4 n KB, the near + MUMPS peaks of
+6.4 KB at one filament and 22.7 KB at seven with a quarter added; 1.5 times
+that where the near factor is SuperLU) fits together in
 `CONDUCTOR_MEMORY_FRACTION` (0.5) of `MemAvailable`.  Below
 `CONDUCTOR_PROCESS_FROM_UNKNOWNS` (100k) in the largest conductor a worker's
 start would cost more than it saves, and the call stays in the caller's
