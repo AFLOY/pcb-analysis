@@ -4,8 +4,30 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
-## Unreleased
+## 0.13.0
 
+The sheet solve's defaults change: `preconditioner="auto"` is `near` at every
+size where the core links MUMPS, and results are promised the same bits only
+at the same thread counts.  Vias gain their skin effect and report the
+current of each connection.
+
+Migration: a caller that compared results to the bit across thread budgets
+keeps the thread budget and `near_factor_threads` the same (they still agree
+at the default of one MUMPS thread, but that is no longer promised).
+`preconditioner="block"` gives the previous large-system solve.  A pure-Python
+install (the PyPI wheel) factors `near` by SuperLU and keeps `block` from
+400,000 unknowns, as before.
+
+- A vertical connection's `barrel` or new `resistance_barrel` section scales
+  its stated resistance by the plated tube's Rac/Rdc at the solve frequency
+  (`skin_filaments.tube_internal_impedance`, `tube_resistance_ratio`): for a
+  0.254 mm drill plated 25 um, 1.0016 at 1 MHz, 1.88 at 30 MHz, 4.27 at
+  150 MHz.  `resistance_barrel` leaves the inductance to the cells' columns,
+  for a barrel laid on the cells its wall runs through.  DC is unchanged.
+- The current-field metrics gain `max_via_current_a` and
+  `via_current_a_by_connection`: the branches of one named vertical
+  connection are summed, so a barrel laid on several cells reports what the
+  whole via carries.  A branch without a name is its own connection.
 - The near factor of the sheet solve (`near_factorization`, default
   `"auto"`) is MUMPS where the core is built with `-DPCB_NATIVE_MUMPS=ON`
   (`cpp/third_party/build_mumps.sh`), SciPy's SuperLU otherwise, and with
