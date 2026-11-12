@@ -426,13 +426,24 @@ def test_only_the_conductors_that_fit_in_memory_run_side_by_side(monkeypatch) ->
 
 def test_a_conductor_is_reckoned_by_its_unknowns() -> None:
     from electrical.sheet_peec import current_field_contract as contract
+    from electrical.sheet_peec import near_factor
 
     problem = CurrentFieldProblem.from_mapping(_problem())
     # three layers of three cells in a row, one filament each at DC: 3 nodes
     # and 2 branches a layer, and the four vertical segments
-    assert contract.conductor_bytes(problem, {"maximum_filaments": 1}) == contract.CONDUCTOR_BYTES_PER_UNKNOWN * (
-        3 * (3 + 2) + len(problem.vertical_segments)
-    )
+    unknowns = 3 * (3 + 2) + len(problem.vertical_segments)
+    assert contract.conductor_unknowns(problem, {"maximum_filaments": 1}) == (unknowns, 1)
+    per = contract.CONDUCTOR_BYTES_PER_UNKNOWN + contract.CONDUCTOR_BYTES_PER_UNKNOWN_PER_FILAMENT
+    mumps = {"maximum_filaments": 1, "near_factorization": "mumps_quasi_definite"} if near_factor.mumps_available() else None
+    if mumps is not None:
+        assert contract.conductor_bytes(problem, mumps) == per * unknowns
+    superlu = {"maximum_filaments": 1, "near_factorization": "superlu"}
+    assert contract.conductor_bytes(problem, superlu) == int(per * contract.SUPERLU_MEMORY_RATIO * unknowns)
+    # more filaments: more unknowns and more bytes each
+    cut = CurrentFieldProblem.from_mapping(_problem(frequency_hz=3e7))
+    many, filaments = contract.conductor_unknowns(cut, {"maximum_filaments": 64})
+    assert filaments > 1 and many > unknowns
+    assert contract.conductor_bytes(cut, superlu | {"maximum_filaments": 64}) > contract.conductor_bytes(problem, superlu) * many / unknowns
 
 
 def test_a_memory_share_scales_the_lockstep_cut(monkeypatch) -> None:

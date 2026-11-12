@@ -6,6 +6,14 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
+- `solve_current_field_problems` solves the conductors of one call side by
+  side in worker processes (`spawn`), each on an even share of the thread
+  budget and of the free memory, as many as fit in half of `MemAvailable` by
+  `conductor_bytes` (4.6 + 3.4 n KB per saddle-point unknown with n filaments
+  a layer, from near + MUMPS's measured peaks; 1.5 times that with SuperLU).
+  Each result is the bits its conductor gets alone and carries
+  `conductor_width`.  Below 100k unknowns in the largest conductor the call
+  stays in the caller's process.
 - The uniform grid's two edge corrections are on by default: `edge_strands`
   defaults to `"auto"` (cut on the CPU with the uniform operator and the near
   preconditioner, above zero frequency; `True` refuses a setup without them,
