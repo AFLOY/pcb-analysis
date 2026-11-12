@@ -9,7 +9,8 @@
 # Use the compilers the C++ core is built with, so one OpenMP runtime serves
 # the whole process (AOCC: LLVM libomp; GCC: libgomp).  OpenBLAS is built
 # with USE_THREAD=0: it never starts a thread, and MUMPS's OpenMP team
-# (ICNTL(16), set per call from the thread budget) is the only parallelism.
+# (ICNTL(16), set per call from near_factor_threads, 1 by default) is the
+# only parallelism.
 #
 # Environment:
 #   CC, CXX, FC        compilers (default gcc, g++, gfortran)

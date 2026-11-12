@@ -175,6 +175,7 @@ def solve_port_impedance(
     initial: SheetPortImpedance | None = None,
     backend: str = "cpu",
     device_id: int = 0,
+    near_factor_threads: int | str | None = None,
 ) -> SheetPortImpedance:
     """The impedance matrix between the ports ``references`` names (port -> its reference pad).
 
@@ -189,6 +190,7 @@ def solve_port_impedance(
     (:func:`~electrical.sheet_peec.sheet_cuda.solve_sheet_cases_cuda`, one
     after another, sharing the operator and the factored preconditioner);
     ``near_tiles`` is the CPU's block preconditioner's and does not apply.
+    ``near_factor_threads``: the CPU near factor's threads (``solve_sheet_case``).
     """
     by_name = {pad.name: pad for pad in pads}
     if len(by_name) != len(pads):
@@ -222,7 +224,7 @@ def solve_port_impedance(
         solutions = solve_sheet_cases(
             mesh, operator, [excitation(port) for port in ports], frequency_hz=frequency_hz, tolerance=tolerance,
             max_iterations=max_iterations, restart=restart, preconditioner=preconditioner, near_tiles=near_tiles,
-            keep_terminal_components=True, initial=starts,
+            keep_terminal_components=True, initial=starts, near_factor_threads=near_factor_threads,
         )
     elif backend == "cuda":
         from .sheet_cuda import solve_sheet_cases_cuda

@@ -130,6 +130,17 @@ Each package README continues from the same export, one step at a time:
 | [multiphysics](https://github.com/AFLOY/pcb-analysis/blob/main/src/multiphysics/README.md) | electro-thermal coupling and emission of the heated board |
 | [geometry](https://github.com/AFLOY/pcb-analysis/blob/main/src/geometry/README.md) | body maps, rasterising, plated barrels, the current-field problem |
 
+## Reproducibility
+
+Results are bit-for-bit identical only when the input, the machine, the build
+and the thread counts are the same: the thread budget and, for the CPU sheet
+solve with MUMPS, `near_factor_threads`. Results computed with other thread
+counts agree within the solver's tolerance, not to the bit. The MUMPS near
+factor runs on one thread unless `near_factor_threads` (an integer, or
+`"budget"` for the thread budget) asks for more; more threads are faster, and
+the bits then follow the count. Details are in
+[DESIGN.md](https://github.com/AFLOY/pcb-analysis/blob/main/docs/DESIGN.md#reproducibility).
+
 ## Documentation
 
 The methods, their limits and the measurements behind each design decision:
@@ -161,7 +172,11 @@ Tests that need the C++ kernels are skipped until they are built. The first
 configure downloads SuperLU 7.0.1 (pinned by hash) for the solver core
 `electrical._pcbcore`. `CMakeLists.txt` lists the native targets; `-DPCB_NATIVE_OPENMP=OFF` drops
 OpenMP and `-DPCB_NATIVE_MARCH=x86-64-v3` (for example) replaces
-`-march=native`. The scripts in `experiments/` regenerate the numbers quoted
+`-march=native`. `-DPCB_NATIVE_MUMPS=ON -DMUMPS_ROOT=<prefix>` links MUMPS
+for the CPU near preconditioner, the default wherever it is linked; build it
+once per machine with `cpp/third_party/build_mumps.sh` and the same compilers
+as the core. Without it the near preconditioner is factored by SciPy's
+SuperLU. The scripts in `experiments/` regenerate the numbers quoted
 in `docs/`; run them from the repository root.
 
 ## License

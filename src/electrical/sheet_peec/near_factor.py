@@ -30,7 +30,7 @@ import scipy.sparse as sp
 from electrical import backend as _backend
 from electrical.threads import thread_budget
 
-NEAR_FACTORIZATIONS_CPU = ("superlu", "mumps_quasi_definite")
+NEAR_FACTORIZATIONS_CPU = ("auto", "superlu", "mumps_quasi_definite")
 
 # MUMPS's CNTL(1).  Without threshold pivoting (0) the quasi-definite factors
 # solved the strip pair's near matrix only to 1e-2; 0.01 gave 4e-10 with 13 %
@@ -38,14 +38,47 @@ NEAR_FACTORIZATIONS_CPU = ("superlu", "mumps_quasi_definite")
 MUMPS_PIVOT_THRESHOLD = 0.01
 
 # The largest relative residual of the check solve a new factor must pass.
-MUMPS_CHECK_RESIDUAL = 1e-6
+# It catches factors that are garbage (1e25 to NaN from a BLAS that was not
+# thread-safe), not ill-conditioned ones: a thick inlay cut into many
+# filaments, whose mutual terms nearly equal their self terms, solved its own
+# near matrix to 3e-5, which GMRES corrects as with any preconditioner.
+MUMPS_CHECK_RESIDUAL = 1e-3
 
 # MUMPS ICNTL settings.  ICNTL(12) = 1, the usual symmetric ordering: MUMPS
 # 5.9.1's automatic choice took the compressed ordering meant for augmented
 # systems, and on the strip pair at 0.2 mm (47k branches) that gave 23.5k
 # delayed pivots, 72M factor entries and a 30.6 s factorisation; the usual
 # ordering gave 14.8k, 39M and 3.5 s (one thread, METIS, AOCC build).
-MUMPS_CONTROLS = {12: 1}
+#
+# ICNTL(48) = 0: no L0 tree parallelism.  With it MUMPS assigned subtrees to
+# threads dynamically and the factors' last bits changed from run to run at a
+# fixed thread count (three runs at 8 threads, three digests); without it the
+# solves gave the same bits in repeated runs and at 8 and 48 threads, at
+# 0.90 to 1.32 of the time (8 threads; LM5145EVM-2L real-fill SW conductor
+# and the hot loop at 0.2 and 0.1 mm, EPYC 9965).
+MUMPS_CONTROLS = {12: 1, 48: 0}
+
+# MUMPS's own threads, by default.  Without its tree parallelism the factors
+# are the same bits run after run at one thread count, but not across counts
+# (one and two, three, and four and more gave three digests on a small mesh),
+# so the factor runs on one thread unless the caller asks for more
+# (``near_factor_threads``): every thread budget then gives the same bits.
+# More threads are faster (8 against 1: 2.1x on the real-fill SW conductor,
+# 1.4x on the hot loop at 0.2 mm, EPYC 9965) and give the same bits only at
+# the same count.
+MUMPS_DEFAULT_THREADS = 1
+
+
+def resolve_near_factor_threads(value: Any) -> int:
+    """``near_factor_threads``: an integer, or ``"budget"`` for the process's thread budget."""
+    if value is None:
+        return MUMPS_DEFAULT_THREADS
+    if value == "budget":
+        return thread_budget()
+    count = int(value)
+    if count < 1:
+        raise ValueError("near_factor_threads must be at least 1 or 'budget'")
+    return count
 
 # The regularization ``delta`` (over the median |Z_ii|) by factorization.
 # MUMPS pivots, so it needs none to be stable; a large one only weakens the
@@ -53,6 +86,15 @@ MUMPS_CONTROLS = {12: 1}
 # 0.2 mm and 30 MHz took 384 GMRES iterations, at 1e-12 306 and at 1e-16 299
 # (SuperLU's count).
 NEAR_REGULARIZATION = {"superlu": 0.0, "mumps_quasi_definite": 1e-12}
+
+
+def resolve_near_factorization(name: str) -> str:
+    """``auto``: MUMPS where the C++ core links it, SuperLU otherwise."""
+    if name not in NEAR_FACTORIZATIONS_CPU:
+        raise ValueError(f"near_factorization must be one of {NEAR_FACTORIZATIONS_CPU}")
+    if name == "auto":
+        return "mumps_quasi_definite" if mumps_available() else "superlu"
+    return name
 
 
 def quasi_definite_near_matrix(near: Any, reduced: Any, regularization: float) -> tuple[Any, np.ndarray, float]:
@@ -121,14 +163,14 @@ class MumpsQuasiDefiniteNear:
                 "near_factorization='mumps_quasi_definite' needs the C++ core built with -DPCB_NATIVE_MUMPS=ON"
             )
         core = _backend.core()
-        self.threads = int(threads) if threads is not None else thread_budget()
+        self.threads = MUMPS_DEFAULT_THREADS if threads is None else int(threads)
         matrix, sign, delta = quasi_definite_near_matrix(near, reduced, regularization)
         upper = sp.triu(matrix, format="csr")
         upper.sort_indices()
         self.size = int(upper.shape[0])
         self.delta = delta
         self._sign = sign.real.copy()
-        self._key = _pattern_key(upper)
+        self._key = _pattern_key(upper) + self.threads.to_bytes(4, "little")
         ldlt = _ANALYSES.pop(self._key, None)
         self.reused_analysis = ldlt is not None
         if ldlt is None:
