@@ -130,3 +130,48 @@ def test_every_basis_function_carries_one_ampere_across_its_edge() -> None:
             k = block @ np.r_[1.0, mid - space.centroid[e]]
             assert k @ n * np.linalg.norm(q - p) == pytest.approx(1.0, rel=1e-12)
     del poly
+
+
+def _sector(r1, r2, span, n=128):
+    from shapely.geometry import Polygon
+
+    th = np.linspace(0, span, n + 1)
+    outer = np.column_stack([r2 * np.cos(th), r2 * np.sin(th)])
+    inner = np.column_stack([r1 * np.cos(th[::-1]), r1 * np.sin(th[::-1])])
+    return Polygon(np.vstack([outer, inner]))
+
+
+def test_the_hybrid_mesh_covers_a_turned_strip_with_squares_inside() -> None:
+    from shapely import affinity
+    from shapely.geometry import Polygon
+
+    from electrical.sheet_peec.hybrid_mesh import build_hybrid_mesh, graded_offsets
+
+    strip = affinity.rotate(Polygon([(0, -2.4e-3), (6e-3, -2.4e-3), (6e-3, 2.4e-3), (0, 2.4e-3)]), 45, origin=(0, 0))
+    mesh = build_hybrid_mesh(strip, pitch=0.4e-3, offsets=graded_offsets(3e-6, 2.0, 0.3e-3), along=0.25e-3)
+    space = mesh.space
+    assert len(mesh.square_elements) > 50 and len(mesh.gap_elements) > 0
+    assert space.area.sum() == pytest.approx(strip.area, rel=1e-12)
+    # the boundary is the outline: its edges add up to the perimeter
+    b = space.boundary_edges
+    length = np.linalg.norm(space.vertices[b[:, 0]] - space.vertices[b[:, 1]], axis=1).sum()
+    assert length == pytest.approx(strip.length, rel=1e-12)
+    # the first band row is as thin as asked
+    first = mesh.band_elements[mesh.row_of_element[mesh.band_elements] == 0]
+    assert np.max(space.area[first]) < 3e-6 * 0.25e-3 * 1.01
+
+
+def test_an_annular_sector_between_equipotential_ports_has_its_closed_form_resistance() -> None:
+    from electrical.sheet_peec.hybrid_mesh import build_hybrid_mesh, graded_offsets
+    from electrical.sheet_peec.hybrid_rt0 import solve_ports
+
+    r1, r2, span = 2e-3, 4e-3, math.pi / 2
+    mesh = build_hybrid_mesh(_sector(r1, r2, span), pitch=0.4e-3, offsets=graded_offsets(3e-6, 2.0, 0.3e-3), along=0.25e-3)
+
+    def angle(c):
+        return np.arctan2(c[:, 1], c[:, 0])
+
+    space = mesh.space.with_ports(lambda c: np.abs(angle(c)) < 1e-9, lambda c: np.abs(angle(c) - span) < 1e-9)
+    _, _, out = solve_ports(space.resistance(1.0), space.divergence(), space.port_of_dof, [1.0, 0.0])
+    resistance = -1.0 / out[0]  # out[0] < 0: the current enters at port 0
+    assert resistance == pytest.approx(span / math.log(r2 / r1), rel=2e-3)
