@@ -327,9 +327,11 @@ class AlternatingCurrentTests(unittest.TestCase):
         self.assertEqual(auto.iterations, near.iterations)
         np.testing.assert_allclose(auto.node_voltage, near.node_voltage, rtol=0.0, atol=1e-12 * scale)
         from electrical.sheet_peec.sheet_peec import choose_preconditioner
-        # near at every size; block only by name (docs/SHEET_PEEC.md).
+        # near at every size with MUMPS; with SuperLU block from 400k (docs/SHEET_PEEC.md).
         for unknowns in (1, 400_000, 10_000_000):
-            self.assertEqual(choose_preconditioner(unknowns), "near")
+            self.assertEqual(choose_preconditioner(unknowns, "mumps_quasi_definite"), "near")
+        self.assertEqual(choose_preconditioner(399_999, "superlu"), "near")
+        self.assertEqual(choose_preconditioner(400_000, "superlu"), "block")
 
     def test_the_near_block_in_strips_reaches_the_same_solution(self):
         # Dropping the couplings between strips weakens the preconditioner,

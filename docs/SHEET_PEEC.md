@@ -624,7 +624,7 @@ alternative at all: the 30-port fixture of the next section (83,440
 unknowns) did not finish its first frequency in 15 minutes with block, where
 near took 100 s.
 
-**Decision** (superseded by the next section): `auto` takes `near` below `AUTO_BLOCK_FROM_UNKNOWNS` = 400,000
+**Decision** (kept for the SuperLU factor only, see the next section): `auto` takes `near` below `AUTO_BLOCK_FROM_UNKNOWNS` = 400,000
 saddle-point unknowns and `block` from there, for memory alone: the size at
 which near's peak RSS, at the largest per-unknown figure measured, reaches
 4 GB (411,810, from the JSON's `decision.auto_threshold`).  The switch is a
@@ -675,10 +675,14 @@ MUMPS's peak is about 23 KB per saddle unknown with seven filaments and
 6.4 KB with one, against the 8 to 10 KB the SuperLU factor took on the small
 plane above; block's memory advantage no longer buys a solve that finishes.
 
-**Decision:** `auto` is `near` at every size, and the near factor is `"auto"`:
-MUMPS where the core is built with `-DPCB_NATIVE_MUMPS=ON`, SuperLU otherwise.
-`block` and `diagonal` stay, run only when named.  `AUTO_BLOCK_FROM_UNKNOWNS`
-is kept as the record of the old switch and no longer read.
+**Decision:** the near factor is `"auto"`: MUMPS where the core is built
+with `-DPCB_NATIVE_MUMPS=ON`, SuperLU otherwise.  With MUMPS, `auto` is
+`near` at every size.  With SuperLU (a core without MUMPS, or
+`near_factorization="superlu"` named) `auto` keeps the switch above and takes
+`block` from `AUTO_BLOCK_FROM_UNKNOWNS` = 400,000 unknowns: slower, but the
+SuperLU saddle LU of that size would pass 4 GB and of a filled board's
+conductor would not fit at all.  `block` and `diagonal` otherwise run only
+when named.
 
 **Threads and bits.** MUMPS's OpenMP factorization sums in an order its team
 sets.  With its L0 tree parallelism (`ICNTL(48)`, on by default) the bits
