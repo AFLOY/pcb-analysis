@@ -347,6 +347,47 @@ statement about resolution, not about the formulation. Whether 23% is
 acceptable is a question for whoever reads the gate; it is not a question this
 module can settle.
 
+## Edges: strands and face coverage
+
+Two errors of the uniform grid sit at a conductor's edge, and both are
+optional corrections here (measured 2026-11-11/12 against a 2D eddy-current
+FEM of a go/return strip pair, 71 um copper 1.48 mm apart, and on the
+LM5145EVM-HD-20A-2L real fill):
+
+**Lateral crowding (`edge_strands`).**  Thickness filaments fix the current
+crowding toward the faces, but toward the edges a cell of 0.1 mm cannot hold
+a skin depth (12 um at 30 MHz): with filaments alone R per length was 12 to
+22 % low at 30 MHz and 15 to 27 % at 150 MHz (widths 4.8 and 1.2 mm), and it
+converged with the pitch only logarithmically.  With the setting
+`edge_strands` the in-plane branches along an edge are cut across their width
+into strands graded from half a skin depth (`edge_strand_first_um`, growth
+`edge_strand_growth` 2), each strand's current projected onto three grid
+points across by quadratic weights, and the pairs within
+`edge_strand_radius_cells` (2) precorrected to the exact partial inductance.
+The corrections repeat along a straight edge, so they are kept as blocks per
+(offset, layer pair, strand layout) and applied by the C++ core
+(`StrandCorrection`): 12 MB where the explicit entries took 187 MB.  R is
+then within -2.7..+0.4 % of the FEM at every width, pitch and frequency
+measured (most within 1.5 %) and L within 0.4 %; the 4.8 mm pair at 0.1 mm
+and 150 MHz took 3,084 s against 2,557 s without (8 threads).
+
+**Staircase (`copper_faces_by_layer`).**  A 45 degree edge on the grid is a
+staircase whose corner-touching cells carry nothing: the diagonal pair's DC
+resistance was +8.2 % (0.2 mm) and +6.1 % (0.1 mm) high, and L about +7 %.
+`rasterize_board(faces=True)` records how much of every grid face the copper
+covers (exact, from the section); the problem carries it as
+`copper_faces_by_layer`, every touched cell becomes a node (a cell cut in two
+by the edge excepted) and each branch is narrowed to its covered face, its
+partial width a strand of the edge correction.  The diagonal pair's DC error
+went to -0.3 %; at 30 MHz and 0.1 mm with strands too, R -2.3 % and L -0.7 %
+of the FEM.  On the EVM-2L real fill (214 kHz, ten cases) the loss moved by
+less than 1 % and the current density peaks by -3 to -19 %, for 30 % more
+time and twice the memory (17 to 34 GB for the whole evaluation).
+
+**Decision:** both kept as options, off by default.  The hybrid
+triangle/square mesh (`exp/sheet-hybrid-triangles`) meets the same two errors
+by geometry instead.
+
 ## Graded grids: precorrected FFT
 
 The convolution operator above needs one pitch: the coupling of two branches
