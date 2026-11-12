@@ -6,6 +6,15 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
+- Sheet solves can correct the two edge errors of the uniform grid, both
+  off by default (docs/SHEET_PEEC.md, "Edges: strands and face coverage"):
+  `edge_strands` cuts the branches along an edge across their width into
+  strands graded from half a skin depth, kept as repeating blocks in the C++
+  core (R of a strip pair within -2.7..+0.4 % of a 2D FEM at 30-150 MHz,
+  against 12-27 % low without); `rasterize_board(faces=True)` records each
+  grid face's copper coverage, which the problem carries as
+  `copper_faces_by_layer` and the mesh uses to narrow branches (a 45 degree
+  strip's DC resistance +6.1 % -> -0.3 %).
 - The AC `voltage_span_v` of a sheet solve is the largest phasor difference
   between two nodes, max |V_i - V_j| (the diameter of the phasors,
   `voltage_span_definition` `maximum_phasor_difference`), not the departure
