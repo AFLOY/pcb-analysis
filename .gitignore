@@ -21,6 +21,7 @@ experiments/*
 !experiments/maxwell_cuda_benchmark.py
 !experiments/peec_fem_comparison.py
 !experiments/peec_fem_comparison_report.sql
+!experiments/hybrid_strip_pair.py
 
 # In-place build of the optional C++ extension
 *.so
