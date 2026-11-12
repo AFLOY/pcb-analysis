@@ -159,7 +159,16 @@ class HybridOperator:
 
         # Resistance (block diagonal) and links.
         blocks = [s_.space.resistance(s_.resistivity / s_.thickness) for s_ in sheets]
-        link_r = np.concatenate([np.broadcast_to(np.asarray(l[4], dtype=float), np.shape(l[2])) for l in links]) if links else np.zeros(0)
+        # A link's fifth entry is its resistance, or (resistance, inductance):
+        # a via barrel's own inductance, uncoupled.
+        def link_impedance(entry):
+            value = entry[4]
+            if isinstance(value, tuple):
+                r, l_ = value
+                return np.broadcast_to(np.asarray(r, dtype=float) + 1j * self.omega * np.asarray(l_, dtype=float), np.shape(entry[2]))
+            return np.broadcast_to(np.asarray(value, dtype=float), np.shape(entry[2]))
+
+        link_r = np.concatenate([link_impedance(l) for l in links]) if links else np.zeros(0)
         self.resistance = sp.block_diag([sp.csr_matrix(bk) for bk in blocks] + ([sp.diags(link_r)] if links else []), format="csr")
         # Divergence (m x n).
         rows, cols, vals = [], [], []
@@ -394,3 +403,52 @@ def solve_ports_fast(op: HybridOperator, voltages: dict[int, complex], tolerance
     current = x[:m]
     driven = {p: -current[op.ports == p].sum() for p in voltages}
     return current, x[m:], driven, count[0]
+
+
+def connected_components(op: HybridOperator) -> np.ndarray:
+    """The component of every element, joined through dofs (edges and links)."""
+    import scipy.sparse.csgraph as cg
+
+    d = op.divergence.tocsc()
+    adjacency = (d.T @ d)
+    adjacency.data = np.ones_like(adjacency.data)
+    _, labels = cg.connected_components(adjacency, directed=False)
+    return labels
+
+
+def solve_injection_fast(op: HybridOperator, injected: np.ndarray, tolerance: float = 1e-9, restart: int = 120,
+                         maxiter: int = 50, log=print):
+    """GMRES with currents fed into elements; one element of every component grounded.
+
+    Returns dof currents, element potentials (0 at the grounds) and the
+    iteration count.
+    """
+    labels = connected_components(op)
+    ground = np.array([np.flatnonzero(labels == c)[0] for c in np.unique(labels)])
+    keep = np.setdiff1d(np.arange(op.n), ground)
+    d = op.divergence[:, keep].tocsr()
+    m, n = op.m, len(keep)
+    for c in np.unique(labels):
+        total = injected[labels == c].sum()
+        if abs(total) > 1e-9 * max(np.abs(injected).max(), 1e-30):
+            raise ValueError(f"component {c} is fed a net {total} A")
+    rhs = np.concatenate([np.zeros(m, dtype=np.complex128), np.asarray(injected, dtype=np.complex128)[keep]])
+    t0 = time.time()
+    saddle = sp.bmat([[op.near_impedance(), -d], [d.T, None]], format="csc")
+    lu = spl.splu(saddle, permc_spec="COLAMD")
+    t1 = time.time()
+
+    def apply(v):
+        i, phi = v[:m], v[m:]
+        return np.concatenate([op.impedance_apply(i) - d @ phi, d.T @ i])
+
+    count = [0]
+    a = spl.LinearOperator((m + n, m + n), matvec=apply, dtype=np.complex128)
+    pre = spl.LinearOperator((m + n, m + n), matvec=lu.solve, dtype=np.complex128)
+    x, info = spl.gmres(a, rhs, M=pre, rtol=tolerance, restart=restart, maxiter=maxiter,
+                        callback=lambda _: count.__setitem__(0, count[0] + 1), callback_type="pr_norm")
+    t2 = time.time()
+    log(f"components {len(ground)}, near factor {t1 - t0:.1f} s, GMRES {count[0]} iterations {t2 - t1:.1f} s, info {info}")
+    phi = np.zeros(op.n, dtype=np.complex128)
+    phi[keep] = x[m:]
+    return x[:m], phi, count[0]

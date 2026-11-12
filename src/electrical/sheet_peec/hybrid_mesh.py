@@ -393,3 +393,28 @@ def graded_offsets(first: float, growth: float, width: float) -> np.ndarray:
     else:
         out.append(width)
     return np.array(out)
+
+
+def mesh_region(region, **kwargs) -> HybridMesh:
+    """Mesh every polygon of a (Multi)Polygon and join them into one space (disjoint pieces)."""
+    parts = list(region.geoms) if hasattr(region, "geoms") else [region]
+    meshes = [build_hybrid_mesh(p, **kwargs) for p in parts if p.area > 0.0]
+    vertices, corners, kinds, groups, rows = [], [], [], [], []
+    offset = 0
+    for m in meshes:
+        s_ = m.space
+        c = s_.corners.copy()
+        c[c >= 0] += offset
+        vertices.append(s_.vertices)
+        corners.append(c)
+        kinds.append(s_.kind)
+        g = np.zeros(len(s_.kind), dtype=np.int64)
+        g[m.gap_elements] = 1
+        g[m.square_elements] = 2
+        groups.append(g)
+        rows.append(m.row_of_element)
+        offset += len(s_.vertices)
+    space = RT0Space(np.vstack(vertices), np.vstack(corners), np.concatenate(kinds))
+    group = np.concatenate(groups)
+    return HybridMesh(space=space, band_elements=np.flatnonzero(group == 0), gap_elements=np.flatnonzero(group == 1),
+                      square_elements=np.flatnonzero(group == 2), row_of_element=np.concatenate(rows))

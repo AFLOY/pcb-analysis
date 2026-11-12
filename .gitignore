@@ -22,6 +22,7 @@ experiments/*
 !experiments/peec_fem_comparison.py
 !experiments/peec_fem_comparison_report.sql
 !experiments/hybrid_strip_pair.py
+!experiments/hybrid_board_case.py
 
 # In-place build of the optional C++ extension
 *.so
