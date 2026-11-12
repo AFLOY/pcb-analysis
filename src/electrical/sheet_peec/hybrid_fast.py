@@ -99,7 +99,7 @@ class HybridOperator:
     """``Z`` of a set of sheets and links as an operator, and its near part as a sparse matrix."""
 
     def __init__(self, sheets: list[Sheet], links, frequency: float, grid_pitch: float, near_factor: float = 2.5,
-                 close_factor: float = 1.2, near_floor: float = 0.0, taper_radius: float = 0.0,
+                 close_factor: float = 1.2, near_floor: float = 0.0, taper_radius: float = 2.0e-3,
                  log=print) -> None:
         t0 = time.time()
         self.taper_radius = float(taper_radius)

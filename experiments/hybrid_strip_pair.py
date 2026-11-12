@@ -90,7 +90,7 @@ def main():
     ap.add_argument("--max-filaments", type=int, default=64)
     ap.add_argument("--fast", type=float, default=0.0, help="grid pitch (mm) of the FFT far field; 0 solves densely")
     ap.add_argument("--near-factor", type=float, default=2.5, help="near zone, in element diameters")
-    ap.add_argument("--taper-mm", type=float, default=0.0, help="Wendland taper radius of the preconditioner (0: cut)")
+    ap.add_argument("--taper-mm", type=float, default=2.0, help="Wendland taper radius of the preconditioner (0: cut)")
     ap.add_argument("--factor-threads", default=None, help="MUMPS threads (an integer or 'budget')")
     args = ap.parse_args()
     for freq in args.freq:
