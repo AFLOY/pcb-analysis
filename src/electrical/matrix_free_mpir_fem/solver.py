@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import math
 
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
@@ -169,7 +170,19 @@ def _inner_pcg(
             )
 
     runtime = system.runtime
-    rhs = runtime.from_host(rhs_high)
+    # The correction is solved for a right-hand side scaled to a peak in
+    # [0.5, 1).  Once the outer residual is down to ~1e-20 its FP32 dot
+    # products underflow (their squares fall below FP32's smallest normal),
+    # the curvature comes out zero and a well-posed system was refused; a
+    # board held at its ambient by a stiff contact did that on the pure-Python
+    # path.  The scale is a power of two, so every product and quotient of the
+    # iteration is the unscaled one exactly, and the bits do not move otherwise.
+    peak = float(np.max(np.abs(rhs_high))) if np.size(rhs_high) else 0.0
+    if peak == 0.0 or not np.isfinite(peak):
+        scale = 1.0
+    else:
+        scale = math.ldexp(1.0, -math.frexp(peak)[1])
+    rhs = runtime.from_host(rhs_high * scale if scale != 1.0 else rhs_high)
     correction = runtime.zeros_like(rhs)
     residual = runtime.copy(rhs)
     rhs_norm = runtime.norm(rhs)
@@ -197,7 +210,7 @@ def _inner_pcg(
         relative_residual = runtime.norm(residual) / rhs_norm
         if relative_residual <= config.inner_relative_tolerance:
             return (
-                runtime.to_host(correction),
+                runtime.to_host(correction) / scale,
                 iteration,
                 relative_residual,
                 applications,
@@ -212,7 +225,7 @@ def _inner_pcg(
         rz = next_rz
 
     return (
-        runtime.to_host(correction),
+        runtime.to_host(correction) / scale,
         iteration,
         relative_residual,
         applications,

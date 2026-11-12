@@ -14,6 +14,11 @@ Versions before 0.7.0 were not tagged; see the Git history.
   spans by +56 % and -35 % with the loss within 0.7 %; the diameter moved by
   under 0.4 %.  An AC span is now at least the old one, so gates reading it
   see larger values.  DC keeps max - min.
+- Fixed: the FP32 inner PCG of the pure-Python matrix-free solves (no C++
+  core) refused a well-posed system as not positive definite once the outer
+  residual fell to ~1e-20, its dot products underflowing; a board held at
+  its ambient by a stiff contact did that.  The correction's right-hand side
+  is scaled by a power of two first, so other results keep their bits.
 
 ## 0.13.0
 

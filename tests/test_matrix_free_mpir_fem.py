@@ -240,3 +240,45 @@ def test_inconsistent_terminal_drives_are_rejected() -> None:
         )
     with pytest.raises(ValueError, match="current or voltage terminals"):
         PCBConductionProblem(mesh=mesh, reference_node=(0, 0, 0))
+
+
+class _DenseFloat32System:
+    """An SPD matrix on the NumPy FP32 runtime, with no native inner solve."""
+
+    inner_solver = "pcg"
+    high_dtype = np.float64
+
+    def __init__(self, matrix: np.ndarray) -> None:
+        from electrical.matrix_free_mpir_fem.runtime import NumpyFloat32Runtime
+
+        self.matrix = matrix
+        self.size = matrix.shape[0]
+        self.runtime = NumpyFloat32Runtime()
+
+    def apply_high(self, vector: np.ndarray) -> np.ndarray:
+        return self.matrix @ vector
+
+    def apply_low(self, vector: np.ndarray) -> np.ndarray:
+        return (self.matrix.astype(np.float32) @ vector).astype(np.float32)
+
+    def diagonal_low(self) -> np.ndarray:
+        return np.diag(self.matrix).astype(np.float32)
+
+
+def test_the_fp32_inner_pcg_solves_a_correction_far_below_one() -> None:
+    """A correction of ~1e-21 squared underflows FP32; the PCG scales it first,
+    by a power of two, so the answer is the unit one scaled to the bit."""
+    from electrical.matrix_free_mpir_fem.solver import _inner_pcg
+
+    rng = np.random.default_rng(0)
+    coupling = rng.standard_normal((12, 12))
+    matrix = coupling @ coupling.T + 12.0 * np.eye(12)
+    system = _DenseFloat32System(matrix)
+    config = MPIRConfig(inner_relative_tolerance=1e-4)
+    unit = rng.standard_normal(12)
+    tiny = unit * 2.0**-70  # about 8.5e-22
+    big, *_ = _inner_pcg(system, unit, config)
+    small, iterations, residual, _ = _inner_pcg(system, tiny, config)
+    assert residual <= 1e-4 and iterations > 0
+    np.testing.assert_array_equal(small * 2.0**70, big)
+    np.testing.assert_allclose(big, np.linalg.solve(matrix, unit), rtol=1e-3)
