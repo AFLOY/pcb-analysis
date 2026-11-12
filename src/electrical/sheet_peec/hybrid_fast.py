@@ -99,8 +99,9 @@ class HybridOperator:
     """``Z`` of a set of sheets and links as an operator, and its near part as a sparse matrix."""
 
     def __init__(self, sheets: list[Sheet], links, frequency: float, grid_pitch: float, near_factor: float = 2.5,
-                 log=print) -> None:
+                 close_factor: float = 1.2, log=print) -> None:
         t0 = time.time()
+        self.close_factor = float(close_factor)
         self.sheets = sheets
         self.frequency = float(frequency)
         self.omega = 2.0 * math.pi * self.frequency
@@ -202,7 +203,15 @@ class HybridOperator:
         if len(e) == 0:
             z = sp.csr_matrix((3 * len(sa.kind), 3 * len(sb.kind)))
             return z, z
-        exact = sum(wk * near_moments(sa, e, f, hk, other=sb) for hk, wk in zip(*nodes))
+        # Closest pairs by the closed form; the rest of the near zone by point
+        # quadrature on both elements (averaged over the thicknesses too).
+        dist = np.linalg.norm(sa.centroid[e] - sb.centroid[f], axis=1)
+        close = dist * dist + gap * gap < (self.close_factor * np.maximum(sa.diameter[e], sb.diameter[f])) ** 2
+        exact = np.zeros((len(e), 3, 3))
+        if np.any(close):
+            exact[close] = sum(wk * near_moments(sa, e[close], f[close], hk, other=sb) for hk, wk in zip(*nodes))
+        if np.any(~close):
+            exact[~close] = self._point_moments(ia, ib, e[~close], f[~close], nodes)
         approx = self._grid_moments(ia, ib, e, f, gap)
         shape = (3 * len(sa.kind), 3 * len(sb.kind))
 
@@ -212,6 +221,27 @@ class HybridOperator:
             return sp.csr_matrix((vals.ravel(), (r.ravel(), c.ravel())), shape=shape)
 
         return to_sparse(exact), to_sparse(approx)
+
+    def _point_moments(self, ia: int, ib: int, e: np.ndarray, f: np.ndarray, nodes, chunk: int = 20000) -> np.ndarray:
+        """(P, 3, 3) moments of element pairs by point quadrature on both, the kernel averaged over ``nodes``."""
+        sa, sb = self.spaces[ia], self.spaces[ib]
+        pa, wa = element_points(sa.vertices, sa.corners, sa.kind, order="far")
+        pb, wb = element_points(sb.vertices, sb.corners, sb.kind, order="far")
+        h, hw = nodes
+        out = np.zeros((len(e), 3, 3))
+        for start in range(0, len(e), chunk):
+            ee, ff = e[start:start + chunk], f[start:start + chunk]
+            xa, xb = pa[ee], pb[ff]  # (P, q, 2)
+            fa = np.concatenate([np.ones(xa.shape[:2] + (1,)), xa - sa.centroid[ee][:, None, :]], axis=2) * wa[ee][..., None]
+            fb = np.concatenate([np.ones(xb.shape[:2] + (1,)), xb - sb.centroid[ff][:, None, :]], axis=2) * wb[ff][..., None]
+            dx = xa[:, :, None, 0] - xb[:, None, :, 0]
+            dy = xa[:, :, None, 1] - xb[:, None, :, 1]
+            r2 = dx * dx + dy * dy
+            g = np.zeros_like(r2)
+            for hk, wk in zip(h, hw):
+                g += wk / np.sqrt(r2 + hk * hk + 1e-300)
+            out[start:start + chunk] = np.matmul(np.matmul(fa.transpose(0, 2, 1), g), fb)
+        return out
 
     def _grid_moments(self, ia: int, ib: int, e: np.ndarray, f: np.ndarray, gap: float, chunk: int = 4000) -> np.ndarray:
         """(P, 3, 3): N_E^T G N_F, what the grid gives each pair."""
@@ -247,11 +277,12 @@ class HybridOperator:
             ee, ff = e[start:start + chunk], f[start:start + chunk]
             xa = self.grid.node_xy(idx_a[ee].ravel()).reshape(len(ee), -1, 2)
             xb = self.grid.node_xy(idx_b[ff].ravel()).reshape(len(ff), -1, 2)
-            diff = xa[:, :, None, :] - xb[:, None, :, :]
-            r2 = np.einsum("pijd,pijd->pij", diff, diff) + gap * gap
+            dx = xa[:, :, None, 0] - xb[:, None, :, 0]
+            dy = xa[:, :, None, 1] - xb[:, None, :, 1]
+            r2 = dx * dx + dy * dy + gap * gap
             with np.errstate(divide="ignore"):
                 g = np.where(r2 > 0.0, 1.0 / np.sqrt(r2), 0.0)
-            out[start:start + chunk] = np.einsum("pik,pij,pjl->pkl", mom_a[ee], g, mom_b[ff])
+            out[start:start + chunk] = np.matmul(np.matmul(mom_a[ee].transpose(0, 2, 1), g), mom_b[ff])
         return out
 
     # -- products --------------------------------------------------------------
