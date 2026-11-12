@@ -72,14 +72,15 @@ def _clean_loop(coords: np.ndarray, tolerance: float) -> np.ndarray:
     return pts
 
 
-def _fit_band(pts: np.ndarray, band: float, minimum: float) -> np.ndarray:
-    """Drop vertices until every edge keeps ``minimum`` length when offset ``band`` inward.
+def _fit_band(pts: np.ndarray, band: float, minimum: float, gentle: float = math.radians(30.0)) -> np.ndarray:
+    """Merge chords of curves that the band would collapse (best effort).
 
     An edge offset by ``d`` into the copper changes length by
     ``-d (tan(a0/2) + tan(a1/2))``, ``a`` the turn at each end (positive at a
-    convex corner).  A short edge beside a sharp convex corner -- the first
-    chord of an arc meeting a straight side -- collapses; its vertex away from
-    the corner is removed, which replaces two chords of the arc by one.
+    convex corner).  A short chord of an arc beside a corner collapses; its
+    vertex with the gentler turn (below ``gentle``) is removed, replacing two
+    chords by one.  Sharp corners are never removed: the ring caps their
+    offset instead (:meth:`_Loop.ring`).
     """
     pts = np.asarray(pts, dtype=np.float64)
     while len(pts) > 3:
@@ -90,13 +91,21 @@ def _fit_band(pts: np.ndarray, band: float, minimum: float) -> np.ndarray:
         turn = np.arctan2(prev[:, 0] * t[:, 1] - prev[:, 1] * t[:, 0], np.sum(prev * t, axis=1))  # at vertex i
         shrink = band * (np.tan(turn / 2) + np.tan(np.roll(turn, -1) / 2))
         left = length - shrink
-        worst = int(np.argmin(left))
-        if left[worst] >= minimum:
+        order = np.argsort(left)
+        dropped = False
+        for worst in order:
+            if left[worst] >= minimum:
+                break
+            a, b = int(worst), int((worst + 1) % len(pts))
+            candidates = [v for v in (a, b) if abs(turn[v]) < gentle]
+            if candidates:
+                drop = min(candidates, key=lambda v: abs(turn[v]))
+                pts = np.delete(pts, drop, axis=0)
+                dropped = True
+                break
+        if not dropped:
             return pts
-        a, b = worst, (worst + 1) % len(pts)
-        drop = a if abs(turn[a]) < abs(turn[b]) else b
-        pts = np.delete(pts, drop, axis=0)
-    raise ValueError("the outline is too small for the band")
+    return pts
 
 
 class _Loop:
@@ -111,6 +120,16 @@ class _Loop:
         self.normal = np.column_stack([-self.tangent[:, 1], self.tangent[:, 0]])  # left = copper
         # samples per edge: fractions in [0, 1), the vertex first
         self.fractions = [list(np.arange(max(1, math.ceil(self.length[i] / along))) / max(1, math.ceil(self.length[i] / along))) for i in range(n)]
+        # The mitre moves a corner along each edge by d tan(turn/2); capping
+        # the offset there keeps every edge at least 10 % of its length, so a
+        # sharp corner (a thermal spoke, a zone sliver) tapers the band's rows
+        # instead of collapsing them.
+        prev = np.roll(self.tangent, 1, axis=0)
+        turn = np.arctan2(prev[:, 0] * self.tangent[:, 1] - prev[:, 1] * self.tangent[:, 0], np.sum(prev * self.tangent, axis=1))
+        slide = np.abs(np.tan(turn / 2))
+        room = 0.45 * np.minimum(self.length, np.roll(self.length, 1))
+        with np.errstate(divide="ignore"):
+            self.cap = np.where(slide > 1e-12, room / slide, np.inf)
 
     def split(self, edge: int, index: int) -> None:
         """Halve sample segment ``index`` of edge ``edge``."""
@@ -125,15 +144,14 @@ class _Loop:
         for i in range(n):
             n1, n2 = self.normal[i - 1], self.normal[i]
             denom = 1.0 + float(np.dot(n1, n2))
-            if denom < 0.2:
-                raise ValueError("a corner sharper than ~ 100 degrees cannot be mitred")
-            corners[i] = self.vertices[i] + distance * (n1 + n2) / denom
+            if denom < 1e-6:
+                raise ValueError("a corner folds back on itself")
+            corners[i] = self.vertices[i] + min(distance, self.cap[i]) * (n1 + n2) / denom
         out = []
         for i in range(n):
             a, b = corners[i], corners[(i + 1) % n]
-            if distance > 0:
-                if np.dot(b - a, self.tangent[i]) <= 0.0:
-                    raise ValueError(f"offset {distance:g} m collapses an edge of {self.length[i]:g} m")
+            if distance > 0 and np.dot(b - a, self.tangent[i]) <= 0.0:
+                raise ValueError(f"offset {distance:g} m collapses an edge of {self.length[i]:g} m")
             for t in self.fractions[i]:
                 out.append(a + t * (b - a))
         return np.array(out)
@@ -152,7 +170,25 @@ def build_hybrid_mesh(
     origin: tuple[float, float] = (0.0, 0.0),
     max_rounds: int = 30,
 ) -> HybridMesh:
-    """Mesh ``polygon`` (metres) as band triangles, gap triangles and grid squares."""
+    """Mesh ``polygon`` (metres) as band triangles, gap triangles and grid squares.
+
+    Where the band does not fit (a neck narrower than twice its width, an
+    edge it would collapse) it is halved, while it keeps two rows.
+    """
+    offsets = np.asarray(offsets, dtype=np.float64)
+    while True:
+        try:
+            return _build(polygon, pitch=pitch, offsets=offsets, along=along, clearance=clearance, origin=origin,
+                          max_rounds=max_rounds)
+        except ValueError:
+            band = offsets[-1] / 2
+            kept = offsets[offsets < band * (1 - 1e-9)]
+            if len(kept) < 2:
+                raise
+            offsets = np.r_[kept, band]
+
+
+def _build(polygon, *, pitch, offsets, along, clearance, origin, max_rounds) -> HybridMesh:
     offsets = np.asarray(offsets, dtype=np.float64)
     if offsets[0] != 0.0 or np.any(np.diff(offsets) <= 0):
         raise ValueError("offsets must start at 0 and increase")
@@ -214,10 +250,18 @@ def _assemble(loops, rings, squares, pitch, origin, inner):
     ring_ids = []
     for li, loop_rings in enumerate(rings):
         ids = []
+        # one vertex per position across the loop's rows: a capped corner
+        # stays put from the row where its cap binds
+        seen: dict[tuple[float, float], int] = {}
         for row in loop_rings:
-            start = len(vertices)
-            vertices.extend(row)
-            ids.append(np.arange(start, start + len(row)))
+            row_ids = []
+            for pt in row:
+                key = (float(pt[0]), float(pt[1]))
+                if key not in seen:
+                    seen[key] = len(vertices)
+                    vertices.append(np.asarray(pt))
+                row_ids.append(seen[key])
+            ids.append(np.array(row_ids))
         ring_ids.append(ids)
     for li, ids in enumerate(ring_ids):
         for row in range(len(ids) - 1):
@@ -233,6 +277,8 @@ def _assemble(loops, rings, squares, pitch, origin, inner):
                 else:
                     tris = ([a0, a1, b0], [a1, b1, b0])
                 for t in tris:
+                    if len(set(t)) < 3:
+                        continue  # a capped corner: the quad is a triangle
                     corners.append(t + [-1])
                     kinds.append(0)
                     group.append(0)
@@ -262,7 +308,8 @@ def _assemble(loops, rings, squares, pitch, origin, inner):
         samples = loops[li].sample_index()
         n = len(inner_ids)
         for k in range(n):
-            required.append((inner_ids[k], inner_ids[(k + 1) % n], ("ring", li, samples[k])))
+            if inner_ids[k] != inner_ids[(k + 1) % n]:
+                required.append((inner_ids[k], inner_ids[(k + 1) % n], ("ring", li, samples[k])))
     for i, j in squares:
         for (di, dj), (a, b) in {
             (0, -1): ((i, j), (i + 1, j)),
