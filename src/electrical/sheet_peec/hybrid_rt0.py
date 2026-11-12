@@ -356,13 +356,17 @@ class RT0Space:
         return sheet_resistance * total
 
 
-def kernel_moments(space: RT0Space, gap: float, near_factor: float = 2.5, other: RT0Space | None = None) -> np.ndarray:
-    """(3E_a, 3E_b) moments W of ``1/sqrt(R^2 + gap^2)`` between the elements of two meshes.
+def kernel_moments(space: RT0Space, gap: float, near_factor: float = 2.5, other: RT0Space | None = None,
+                   heights: tuple[np.ndarray, np.ndarray] | None = None) -> np.ndarray:
+    """(3E_a, 3E_b) moments W of the sheets' kernel between the elements of two meshes.
 
-    Far pairs by point quadrature on both elements; pairs closer (in 3D,
-    centroids and ``gap``) than ``near_factor`` times the larger diameter by
-    the outer element's finer rule and the inner polygon's closed form.
-    ``other`` defaults to ``space`` itself.
+    Far pairs by point quadrature on both elements with ``1/sqrt(R^2 + gap^2)``
+    (``gap`` the GMD of the two thicknesses: exact once the in-plane distance
+    exceeds them); pairs closer (in 3D) than ``near_factor`` times the larger
+    diameter by the outer element's finer rule and the inner polygon's closed
+    form, averaged over the vertical offsets ``heights = (h, w)`` (from
+    :func:`thickness_nodes`) when given, else at ``gap``.  ``other`` defaults
+    to ``space`` itself.
     """
     other = space if other is None else other
 
@@ -402,7 +406,10 @@ def kernel_moments(space: RT0Space, gap: float, near_factor: float = 2.5, other:
         near_f.append(f)
     near_e = np.concatenate(near_e)
     near_f = np.concatenate(near_f)
-    exact = near_moments(space, near_e, near_f, gap, other=other)
+    if heights is None:
+        exact = near_moments(space, near_e, near_f, gap, other=other)
+    else:
+        exact = sum(wk * near_moments(space, near_e, near_f, hk, other=other) for hk, wk in zip(*heights))
     for k in range(3):
         for l in range(3):
             moments[3 * near_e + k, 3 * near_f + l] = exact[:, k, l]
@@ -433,16 +440,59 @@ def near_moments(space: RT0Space, outer: np.ndarray, inner: np.ndarray, gap: flo
     return result
 
 
-def inductance(space: RT0Space, gap: float, other: RT0Space | None = None) -> np.ndarray:
+def inductance(space: RT0Space, gap: float, other: RT0Space | None = None,
+               heights: tuple[np.ndarray, np.ndarray] | None = None) -> np.ndarray:
     """Dense (M_a, M_b) partial inductance between the RT0 currents of two sheets ``gap`` apart."""
     other = space if other is None else other
-    moments = kernel_moments(space, gap, other=other)
+    moments = kernel_moments(space, gap, other=other, heights=heights)
     total = np.zeros((space.size, other.size))
     for d in range(2):
         ca = space.component(d)
         cb = other.component(d)
         total += (cb @ (ca @ moments).T).T  # C_a W C_b^T
     return MU0 / (4.0 * math.pi) * total
+
+
+def thickness_nodes(t_a: float, z_a: float, t_b: float, z_b: float, points: int = 4) -> tuple[np.ndarray, np.ndarray]:
+    """Vertical offsets ``|z - z'|`` and weights for averaging a kernel over two thicknesses.
+
+    ``z - z'`` for z, z' uniform in the two intervals has a piecewise-linear
+    (trapezoidal) density; each linear piece, split at zero and graded toward
+    it (where the in-plane potential has its kink), gets a Gauss-Legendre rule
+    weighted by the density.  The weights sum to one.
+    """
+    a0, a1 = z_a - t_a / 2, z_a + t_a / 2
+    b0, b1 = z_b - t_b / 2, z_b + t_b / 2
+
+    def density(zeta):
+        return np.clip(np.minimum(a1, zeta + b1) - np.maximum(a0, zeta + b0), 0.0, None) / (t_a * t_b)
+
+    breaks = sorted({a0 - b1, a0 - b0, a1 - b1, a1 - b0})
+    lo, hi = breaks[0], breaks[-1]
+    if lo < 0.0 < hi:
+        breaks.append(0.0)
+    breaks = sorted(set(breaks))
+    pieces = []
+    for left, right in zip(breaks[:-1], breaks[1:]):
+        if right - left <= 0.0:
+            continue
+        if left >= 0.0 and left == min(abs(left), abs(right)) and left < 0.05 * (right - left):
+            cut = left + (right - left) / 8
+            pieces += [(left, cut), (cut, right)]
+        elif right <= 0.0 and abs(right) < 0.05 * (right - left):
+            cut = right - (right - left) / 8
+            pieces += [(left, cut), (cut, right)]
+        else:
+            pieces.append((left, right))
+    x, w = np.polynomial.legendre.leggauss(points)
+    hs, ws = [], []
+    for left, right in pieces:
+        zeta = left + (x + 1.0) * 0.5 * (right - left)
+        hs.append(np.abs(zeta))
+        ws.append(w * 0.5 * (right - left) * density(zeta))
+    h = np.concatenate(hs)
+    weight = np.concatenate(ws)
+    return h, weight / weight.sum()
 
 
 def thickness_gap(t_a: float, z_a: float, t_b: float, z_b: float) -> float:
@@ -554,9 +604,10 @@ def assemble(sheets: list[Sheet], links: list[tuple[int, int, np.ndarray, np.nda
             for b in range(a, len(sheets)):
                 sb = sheets[b]
                 gap = thickness_gap(sa.thickness, sa.z, sb.thickness, sb.z)
-                key = (id(sa.space), id(sb.space), round(gap, 15))
+                key = (id(sa.space), id(sb.space), round(sa.thickness, 12), round(sb.thickness, 12), round(abs(sa.z - sb.z), 12))
                 if key not in cache:
-                    cache[key] = inductance(sa.space, gap, other=sb.space)
+                    nodes = thickness_nodes(sa.thickness, sa.z, sb.thickness, sb.z)
+                    cache[key] = inductance(sa.space, gap, other=sb.space, heights=nodes)
                 block = 1j * omega * cache[key]
                 z[sl, dof0[b]:dof0[b + 1]] += block
                 if b != a:
