@@ -26,7 +26,7 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spl
 
-from .hybrid_rt0 import MU0, RT0Space, Sheet, element_points, near_moments, thickness_gap, thickness_nodes
+from .hybrid_rt0 import MU0, RT0Space, Sheet, element_points, near_moments_over, thickness_gap, thickness_nodes
 
 KAPPA = MU0 / (4.0 * math.pi)
 
@@ -218,7 +218,7 @@ class HybridOperator:
         close = dist * dist + gap * gap < (self.close_factor * np.maximum(sa.diameter[e], sb.diameter[f])) ** 2
         exact = np.zeros((len(e), 3, 3))
         if np.any(close):
-            exact[close] = sum(wk * near_moments(sa, e[close], f[close], hk, other=sb) for hk, wk in zip(*nodes))
+            exact[close] = near_moments_over(sa, e[close], f[close], nodes[0], nodes[1], other=sb)
         if np.any(~close):
             exact[~close] = self._point_moments(ia, ib, e[~close], f[~close], nodes)
         approx = self._grid_moments(ia, ib, e, f, gap)
@@ -252,40 +252,59 @@ class HybridOperator:
             out[start:start + chunk] = np.matmul(np.matmul(fa.transpose(0, 2, 1), g), fb)
         return out
 
+    def _padded(self, i: int):
+        """Each element's grid nodes (E, K), -1 padded, and their [1, a] moments (E, K, 3)."""
+        key = ("padded", i)
+        if key in self.__dict__:
+            return self.__dict__[key]
+        nm = self._sp[i]["node_moments"].tocoo()  # (nodes, 3E)
+        element = nm.col // 3
+        component = nm.col % 3
+        order = np.lexsort((nm.row, element))
+        element, node, component, value = element[order], nm.row[order], component[order], nm.data[order]
+        # one slot per (element, node)
+        new = np.r_[True, (element[1:] != element[:-1]) | (node[1:] != node[:-1])]
+        slot_id = np.cumsum(new) - 1
+        first_slot = np.r_[0, np.flatnonzero(element[1:] != element[:-1]) + 1]
+        count = len(self.spaces[i].kind)
+        start_of = np.zeros(count, dtype=np.int64)
+        start_of[element[first_slot]] = slot_id[first_slot]
+        local = slot_id - start_of[element]
+        k = int(local.max()) + 1
+        index = np.full((count, k), -1, dtype=np.int64)
+        moments = np.zeros((count, k, 3))
+        index[element, local] = node
+        np.add.at(moments, (element, local, component), value)
+        self.__dict__[key] = (index, moments)
+        return index, moments
+
     def _grid_moments(self, ia: int, ib: int, e: np.ndarray, f: np.ndarray, gap: float, chunk: int = 4000) -> np.ndarray:
         """(P, 3, 3): N_E^T G N_F, what the grid gives each pair."""
+        from electrical import backend as _backend
+        from electrical.threads import thread_budget
 
-        def padded(info, count):
-            nm = info["node_moments"]  # (nodes, 3E) csc
-            lists = []
-            for el in range(count):
-                block = nm[:, 3 * el:3 * el + 3].tocoo()
-                idx = np.unique(block.row)
-                vals = np.zeros((len(idx), 3))
-                pos = np.searchsorted(idx, block.row)
-                np.add.at(vals, (pos, block.col), block.data)
-                lists.append((idx, vals))
-            k = max(len(i) for i, _ in lists)
-            index = np.zeros((count, k), dtype=np.int64)
-            moments = np.zeros((count, k, 3))
-            for el, (idx, vals) in enumerate(lists):
-                index[el, :len(idx)] = idx
-                moments[el, :len(idx)] = vals
-            return index, moments
-
-        key_a = ("padded", ia)
-        if key_a not in self.__dict__:
-            self.__dict__[key_a] = padded(self._sp[ia], len(self.spaces[ia].kind))
-        key_b = ("padded", ib)
-        if key_b not in self.__dict__:
-            self.__dict__[key_b] = padded(self._sp[ib], len(self.spaces[ib].kind))
-        idx_a, mom_a = self.__dict__[key_a]
-        idx_b, mom_b = self.__dict__[key_b]
+        idx_a, mom_a = self._padded(ia)
+        idx_b, mom_b = self._padded(ib)
+        k = max(idx_a.shape[1], idx_b.shape[1])
+        if idx_a.shape[1] < k:
+            idx_a = np.pad(idx_a, ((0, 0), (0, k - idx_a.shape[1])), constant_values=-1)
+            mom_a = np.pad(mom_a, ((0, 0), (0, k - mom_a.shape[1]), (0, 0)))
+        if idx_b.shape[1] < k:
+            idx_b = np.pad(idx_b, ((0, 0), (0, k - idx_b.shape[1])), constant_values=-1)
+            mom_b = np.pad(mom_b, ((0, 0), (0, k - mom_b.shape[1]), (0, 0)))
+        core = _backend.core()
+        sheet = getattr(core, "sheet", None) if core is not None else None
+        if sheet is not None and hasattr(sheet, "rt0_grid_moments"):
+            return np.asarray(sheet.rt0_grid_moments(
+                np.ascontiguousarray(idx_a), np.ascontiguousarray(mom_a), np.ascontiguousarray(idx_b),
+                np.ascontiguousarray(mom_b), float(self.grid.origin[0]), float(self.grid.origin[1]),
+                float(self.grid.pitch), int(self.grid.shape[1]), float(gap),
+                np.ascontiguousarray(e, dtype=np.int64), np.ascontiguousarray(f, dtype=np.int64), thread_budget()))
         out = np.zeros((len(e), 3, 3))
         for start in range(0, len(e), chunk):
             ee, ff = e[start:start + chunk], f[start:start + chunk]
-            xa = self.grid.node_xy(idx_a[ee].ravel()).reshape(len(ee), -1, 2)
-            xb = self.grid.node_xy(idx_b[ff].ravel()).reshape(len(ff), -1, 2)
+            xa = self.grid.node_xy(np.maximum(idx_a[ee], 0).ravel()).reshape(len(ee), -1, 2)
+            xb = self.grid.node_xy(np.maximum(idx_b[ff], 0).ravel()).reshape(len(ff), -1, 2)
             dx = xa[:, :, None, 0] - xb[:, None, :, 0]
             dy = xa[:, :, None, 1] - xb[:, None, :, 1]
             r2 = dx * dx + dy * dy + gap * gap
@@ -360,10 +379,11 @@ class HybridOperator:
         return y
 
     def near_impedance(self) -> sp.csr_matrix:
-        z = self.resistance.astype(np.complex128).tolil()
+        z = self.resistance.astype(np.complex128)
         if self.omega > 0:
             near = self.near_inductance()
-            z[:self.m_plane, :self.m_plane] = z[:self.m_plane, :self.m_plane] + 1j * self.omega * near
+            pad = sp.csr_matrix((self.m - self.m_plane, self.m - self.m_plane))
+            z = z + sp.block_diag([1j * self.omega * near, pad], format="csr")
         return z.tocsr()
 
 
@@ -380,9 +400,7 @@ def solve_ports_fast(op: HybridOperator, voltages: dict[int, complex], tolerance
     for p, v in voltages.items():
         rhs[:m][op.ports == p] = -v
     t0 = time.time()
-    near = op.near_impedance()
-    saddle = sp.bmat([[near, -d], [d.T, None]], format="csc")
-    lu = spl.splu(saddle, permc_spec="COLAMD")
+    solve_near, close = _near_factor(op.near_impedance(), d)
     t1 = time.time()
 
     def apply(v):
@@ -395,14 +413,26 @@ def solve_ports_fast(op: HybridOperator, voltages: dict[int, complex], tolerance
         count[0] += 1
 
     a = spl.LinearOperator((m + n, m + n), matvec=apply, dtype=np.complex128)
-    pre = spl.LinearOperator((m + n, m + n), matvec=lu.solve, dtype=np.complex128)
+    pre = spl.LinearOperator((m + n, m + n), matvec=solve_near, dtype=np.complex128)
     x, info = spl.gmres(a, rhs, M=pre, rtol=tolerance, restart=restart, maxiter=maxiter, callback=counter,
                         callback_type="pr_norm")
+    close()
     t2 = time.time()
     log(f"near factor {t1 - t0:.1f} s, GMRES {count[0]} iterations {t2 - t1:.1f} s, info {info}")
     current = x[:m]
     driven = {p: -current[op.ports == p].sum() for p in voltages}
     return current, x[m:], driven, count[0]
+
+
+def _near_factor(near: sp.csr_matrix, d: sp.csr_matrix):
+    """The near saddle point's solve: MUMPS's quasi-definite LDL^T when the core links it, else SuperLU."""
+    from .near_factor import NEAR_REGULARIZATION, MumpsQuasiDefiniteNear, mumps_available
+
+    if mumps_available():
+        factor = MumpsQuasiDefiniteNear(near, d, NEAR_REGULARIZATION["mumps_quasi_definite"])
+        return factor.solve, factor.close
+    lu = spl.splu(sp.bmat([[near, -d], [d.T, None]], format="csc"), permc_spec="COLAMD")
+    return lu.solve, (lambda: None)
 
 
 def connected_components(op: HybridOperator) -> np.ndarray:
@@ -434,8 +464,7 @@ def solve_injection_fast(op: HybridOperator, injected: np.ndarray, tolerance: fl
             raise ValueError(f"component {c} is fed a net {total} A")
     rhs = np.concatenate([np.zeros(m, dtype=np.complex128), np.asarray(injected, dtype=np.complex128)[keep]])
     t0 = time.time()
-    saddle = sp.bmat([[op.near_impedance(), -d], [d.T, None]], format="csc")
-    lu = spl.splu(saddle, permc_spec="COLAMD")
+    solve_near, close = _near_factor(op.near_impedance(), d)
     t1 = time.time()
 
     def apply(v):
@@ -444,9 +473,10 @@ def solve_injection_fast(op: HybridOperator, injected: np.ndarray, tolerance: fl
 
     count = [0]
     a = spl.LinearOperator((m + n, m + n), matvec=apply, dtype=np.complex128)
-    pre = spl.LinearOperator((m + n, m + n), matvec=lu.solve, dtype=np.complex128)
+    pre = spl.LinearOperator((m + n, m + n), matvec=solve_near, dtype=np.complex128)
     x, info = spl.gmres(a, rhs, M=pre, rtol=tolerance, restart=restart, maxiter=maxiter,
                         callback=lambda _: count.__setitem__(0, count[0] + 1), callback_type="pr_norm")
+    close()
     t2 = time.time()
     log(f"components {len(ground)}, near factor {t1 - t0:.1f} s, GMRES {count[0]} iterations {t2 - t1:.1f} s, info {info}")
     phi = np.zeros(op.n, dtype=np.complex128)

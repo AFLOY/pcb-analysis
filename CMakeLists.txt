@@ -166,6 +166,7 @@ add_library(pcbcore STATIC
   cpp/src/sheet/sheet_solve.cpp
   cpp/src/sheet/mesh.cpp
   cpp/src/sheet/pfft_build.cpp
+  cpp/src/sheet/rt0_moments.cpp
   cpp/src/fem/layered_dc_system.cpp
   cpp/src/fem/dc_ports.cpp
   cpp/src/fem/two_level.cpp

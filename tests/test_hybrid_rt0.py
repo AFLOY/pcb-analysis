@@ -175,3 +175,38 @@ def test_an_annular_sector_between_equipotential_ports_has_its_closed_form_resis
     _, _, out = solve_ports(space.resistance(1.0), space.divergence(), space.port_of_dof, [1.0, 0.0])
     resistance = -1.0 / out[0]  # out[0] < 0: the current enters at port 0
     assert resistance == pytest.approx(span / math.log(r2 / r1), rel=2e-3)
+
+
+def test_the_native_near_and_grid_moments_are_numpy_s() -> None:
+    from shapely import affinity
+    from shapely.geometry import Polygon
+
+    from electrical import backend
+    from electrical.sheet_peec.hybrid_fast import HybridOperator
+    from electrical.sheet_peec.hybrid_mesh import build_hybrid_mesh, graded_offsets
+    from electrical.sheet_peec.hybrid_rt0 import Sheet, near_moments, near_moments_over, thickness_nodes
+
+    core = backend.core()
+    if core is None or not hasattr(core.sheet, "rt0_near_moments"):
+        pytest.skip("the C++ core is not built")
+    strip = affinity.rotate(Polygon([(0, -0.6e-3), (3e-3, -0.6e-3), (3e-3, 0.6e-3), (0, 0.6e-3)]), 45, origin=(0, 0))
+    space = build_hybrid_mesh(strip, pitch=0.4e-3, offsets=graded_offsets(3e-6, 2.0, 0.3e-3), along=0.5e-3).space
+    d = np.linalg.norm(space.centroid[:, None] - space.centroid[None], axis=2)
+    e, f = np.nonzero(d < 2.0 * np.maximum(space.diameter[:, None], space.diameter[None]))
+    h, w = thickness_nodes(28.9e-6, 0.0, 12.1e-6, 20.5e-6)
+    reference = sum(wk * near_moments(space, e, f, hk) for hk, wk in zip(h, w))
+    native = near_moments_over(space, e, f, h, w, threads=3)
+    np.testing.assert_allclose(native, reference, rtol=0, atol=1e-13 * np.abs(reference).max())
+    assert np.array_equal(native, near_moments_over(space, e, f, h, w, threads=1))
+    # the grid moments, native against the NumPy path of the same operator
+    op = HybridOperator([Sheet(space, 0.0, 7e-5, 1.7e-8, "F")], [], 1e6, grid_pitch=0.2e-3, log=lambda *_: None)
+    native_grid = op._grid_moments(0, 0, e, f, 1e-5)
+    idx, mom = op._padded(0)
+    xy = op.grid.node_xy(np.maximum(idx, 0).ravel()).reshape(idx.shape + (2,))
+    valid = idx >= 0
+    expect = np.zeros((len(e), 3, 3))
+    for p_, (a, b) in enumerate(zip(e, f)):
+        xa, xb = xy[a][valid[a]], xy[b][valid[b]]
+        g = 1.0 / np.sqrt(((xa[:, None] - xb[None]) ** 2).sum(-1) + 1e-10)
+        expect[p_] = mom[a][valid[a]].T @ g @ mom[b][valid[b]]
+    np.testing.assert_allclose(native_grid, expect, rtol=1e-12, atol=1e-14 * np.abs(expect).max())

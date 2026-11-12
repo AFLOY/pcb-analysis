@@ -25,6 +25,7 @@
 #include "pcbcore/sheet/near_field.hpp"
 #include "pcbcore/sheet/pfft_build.hpp"
 #include "pcbcore/sheet/pfft_operator.hpp"
+#include "pcbcore/sheet/rt0_moments.hpp"
 #include "pcbcore/sheet/sheet_solve.hpp"
 
 namespace py = pybind11;
@@ -49,6 +50,7 @@ void register_linalg(py::module_& m);
 namespace {
 
 using pcbcore_bindings::copy_array;
+using pcbcore_bindings::sized;
 using pcbcore_bindings::Input;
 using pcbcore_bindings::to_array;
 
@@ -236,6 +238,65 @@ py::array_t<double> build_kernel(const std::int64_t rows, const std::int64_t col
                                              separation, along_x, near_radius_cells, threads);
     }
     return to_array(std::move(table), {static_cast<py::ssize_t>(rows), static_cast<py::ssize_t>(cols)});
+}
+
+// Near moments of RT0 element pairs: see pcbcore/sheet/rt0_moments.hpp.
+py::array_t<double> rt0_near_moments(const Input<double>& outer_points, const Input<double>& outer_weights,
+                                     const Input<double>& outer_centroid, const Input<double>& inner_polygons,
+                                     const Input<std::int32_t>& inner_sides, const Input<double>& inner_centroid,
+                                     const Input<std::int64_t>& pair_outer, const Input<std::int64_t>& pair_inner,
+                                     const Input<double>& heights, const Input<double>& height_weights,
+                                     const int threads) {
+    if (outer_points.ndim() != 3 || outer_points.shape(2) != 2 || outer_weights.ndim() != 2) {
+        throw pcbcore::InvalidInput("outer_points must be (E, q, 2) and outer_weights (E, q)");
+    }
+    const py::ssize_t ea = outer_points.shape(0);
+    const int q = static_cast<int>(outer_points.shape(1));
+    const py::ssize_t eb = inner_sides.size();
+    const py::ssize_t pairs = pair_outer.size();
+    std::vector<double> out;
+    {
+        const double* op = sized(outer_points, ea * q * 2, "outer_points");
+        const double* ow = sized(outer_weights, ea * q, "outer_weights");
+        const double* oc = sized(outer_centroid, ea * 2, "outer_centroid");
+        const double* ip = sized(inner_polygons, eb * 8, "inner_polygons");
+        const double* ic = sized(inner_centroid, eb * 2, "inner_centroid");
+        const std::int64_t* po = pair_outer.data();
+        const std::int64_t* pi = sized(pair_inner, pairs, "pair_inner");
+        const double* h = heights.data();
+        const double* hw = sized(height_weights, heights.size(), "height_weights");
+        const std::int32_t* is = inner_sides.data();
+        py::gil_scoped_release release;
+        out = pcbcore::sheet::rt0_near_moments(op, ow, oc, ea, q, ip, is, ic, eb, po, pi, pairs, h, hw,
+                                               static_cast<int>(heights.size()), threads);
+    }
+    return to_array(std::move(out), {pairs, 3, 3});
+}
+
+// Grid moments of RT0 element pairs: see pcbcore/sheet/rt0_moments.hpp.
+py::array_t<double> rt0_grid_moments(const Input<std::int64_t>& node_index_a, const Input<double>& node_moments_a,
+                                     const Input<std::int64_t>& node_index_b, const Input<double>& node_moments_b,
+                                     const double origin_x, const double origin_y, const double pitch,
+                                     const std::int64_t columns, const double gap, const Input<std::int64_t>& pair_a,
+                                     const Input<std::int64_t>& pair_b, const int threads) {
+    if (node_index_a.ndim() != 2 || node_index_b.ndim() != 2 || node_index_a.shape(1) != node_index_b.shape(1)) {
+        throw pcbcore::InvalidInput("node_index_a and node_index_b must be (E, K) with the same K");
+    }
+    const py::ssize_t ea = node_index_a.shape(0), eb = node_index_b.shape(0), k = node_index_a.shape(1);
+    const py::ssize_t pairs = pair_a.size();
+    std::vector<double> out;
+    {
+        const double* ma = sized(node_moments_a, ea * k * 3, "node_moments_a");
+        const double* mb = sized(node_moments_b, eb * k * 3, "node_moments_b");
+        const std::int64_t* pb = sized(pair_b, pairs, "pair_b");
+        const std::int64_t* ia = node_index_a.data();
+        const std::int64_t* ib = node_index_b.data();
+        const std::int64_t* pa = pair_a.data();
+        py::gil_scoped_release release;
+        out = pcbcore::sheet::rt0_grid_moments(ia, ma, ea, ib, mb, eb, static_cast<int>(k), origin_x, origin_y, pitch,
+                                               columns, gap, pa, pb, pairs, threads);
+    }
+    return to_array(std::move(out), {pairs, 3, 3});
 }
 
 py::array_t<double> build_vertical_kernel(const std::int64_t rows, const std::int64_t cols, const double pitch,
@@ -601,6 +662,14 @@ PYBIND11_MODULE(_pcbcore, m) {
         .def("apply_many", &apply_convolution_many, py::arg("currents_x"), py::arg("currents_y"),
              py::arg("currents_z") = py::none(), py::arg("threads"))
         .def_property_readonly("spectrum_bytes", &pcbcore::sheet::ConvolutionOperator::spectrum_bytes);
+    sheet.def("rt0_grid_moments", &rt0_grid_moments, py::arg("node_index_a"), py::arg("node_moments_a"),
+              py::arg("node_index_b"), py::arg("node_moments_b"), py::arg("origin_x"), py::arg("origin_y"),
+              py::arg("pitch"), py::arg("columns"), py::arg("gap"), py::arg("pair_a"), py::arg("pair_b"),
+              py::arg("threads") = 1);
+    sheet.def("rt0_near_moments", &rt0_near_moments, py::arg("outer_points"), py::arg("outer_weights"),
+              py::arg("outer_centroid"), py::arg("inner_polygons"), py::arg("inner_sides"), py::arg("inner_centroid"),
+              py::arg("pair_outer"), py::arg("pair_inner"), py::arg("heights"), py::arg("height_weights"),
+              py::arg("threads") = 1);
     sheet.def("build_kernel", &build_kernel, py::arg("rows"), py::arg("cols"), py::arg("length"), py::arg("width"),
               py::arg("thickness_a"), py::arg("thickness_b"), py::arg("separation"), py::arg("along_x"),
               py::arg("near_radius_cells"), py::arg("threads"));

@@ -407,9 +407,9 @@ def kernel_moments(space: RT0Space, gap: float, near_factor: float = 2.5, other:
     near_e = np.concatenate(near_e)
     near_f = np.concatenate(near_f)
     if heights is None:
-        exact = near_moments(space, near_e, near_f, gap, other=other)
+        exact = near_moments_over(space, near_e, near_f, [gap], [1.0], other=other)
     else:
-        exact = sum(wk * near_moments(space, near_e, near_f, hk, other=other) for hk, wk in zip(*heights))
+        exact = near_moments_over(space, near_e, near_f, heights[0], heights[1], other=other)
     for k in range(3):
         for l in range(3):
             moments[3 * near_e + k, 3 * near_f + l] = exact[:, k, l]
@@ -438,6 +438,29 @@ def near_moments(space: RT0Space, outer: np.ndarray, inner: np.ndarray, gap: flo
         block = np.einsum("pk,pl->pkl", outer_vec, inner_vec).reshape(len(e), q, 3, 3).sum(axis=1)
         result[start:start + chunk] = block
     return result
+
+
+def near_moments_over(space: RT0Space, outer: np.ndarray, inner: np.ndarray, heights: np.ndarray,
+                      weights: np.ndarray, other: RT0Space | None = None, threads: int | None = None) -> np.ndarray:
+    """``sum_k weights[k] near_moments(..., heights[k])``, in the C++ core when it is built."""
+    other = space if other is None else other
+    heights = np.atleast_1d(np.asarray(heights, dtype=np.float64))
+    weights = np.atleast_1d(np.asarray(weights, dtype=np.float64))
+    from electrical import backend as _backend
+    from electrical.threads import thread_budget
+
+    core = _backend.core()
+    sheet = getattr(core, "sheet", None) if core is not None else None
+    if sheet is not None and hasattr(sheet, "rt0_near_moments") and len(outer):
+        pts, w = element_points(space.vertices, space.corners, space.kind, order="near")
+        poly = np.ascontiguousarray(other.polygons())
+        sides = np.where(other.kind == 0, 3, 4).astype(np.int32)
+        return np.asarray(sheet.rt0_near_moments(
+            np.ascontiguousarray(pts), np.ascontiguousarray(w), np.ascontiguousarray(space.centroid), poly, sides,
+            np.ascontiguousarray(other.centroid), np.ascontiguousarray(outer, dtype=np.int64),
+            np.ascontiguousarray(inner, dtype=np.int64), heights, weights,
+            thread_budget() if threads is None else int(threads)))
+    return sum(wk * near_moments(space, outer, inner, hk, other=other) for hk, wk in zip(heights, weights))
 
 
 def inductance(space: RT0Space, gap: float, other: RT0Space | None = None,
