@@ -45,6 +45,7 @@ class HybridMesh:
     square_elements: np.ndarray
     row_of_element: np.ndarray  # band row (0 at the outline), -1 elsewhere
     outline_area_change: float = 0.0  # meshed area / given area - 1 (vertices dropped by _fit_band)
+    band: float = 0.0  # the band width the mesh ended with (halved where it did not fit)
 
 
 def _clean_loop(coords: np.ndarray, tolerance: float) -> np.ndarray:
@@ -72,8 +73,10 @@ def _clean_loop(coords: np.ndarray, tolerance: float) -> np.ndarray:
     return pts
 
 
-def _fit_band(pts: np.ndarray, band: float, minimum: float, gentle: float = math.radians(30.0)) -> np.ndarray:
+def _fit_band(pts: np.ndarray, band: float, minimum: float = 0.1, gentle: float = math.radians(30.0)) -> np.ndarray:
     """Merge chords of curves that the band would collapse (best effort).
+
+    ``minimum``: the fraction of an edge's length it must keep once offset.
 
     An edge offset by ``d`` into the copper changes length by
     ``-d (tan(a0/2) + tan(a1/2))``, ``a`` the turn at each end (positive at a
@@ -91,10 +94,10 @@ def _fit_band(pts: np.ndarray, band: float, minimum: float, gentle: float = math
         turn = np.arctan2(prev[:, 0] * t[:, 1] - prev[:, 1] * t[:, 0], np.sum(prev * t, axis=1))  # at vertex i
         shrink = band * (np.tan(turn / 2) + np.tan(np.roll(turn, -1) / 2))
         left = length - shrink
-        order = np.argsort(left)
+        order = np.argsort(left / length)
         dropped = False
         for worst in order:
-            if left[worst] >= minimum:
+            if left[worst] >= minimum * length[worst]:
                 break
             a, b = int(worst), int((worst + 1) % len(pts))
             candidates = [v for v in (a, b) if abs(turn[v]) < gentle]
@@ -169,49 +172,92 @@ def build_hybrid_mesh(
     clearance: float | None = None,
     origin: tuple[float, float] = (0.0, 0.0),
     max_rounds: int = 30,
+    outline_tolerance: float = 2e-6,
+    gap_size: float | None = None,
 ) -> HybridMesh:
     """Mesh ``polygon`` (metres) as band triangles, gap triangles and grid squares.
 
-    Where the band does not fit (a neck narrower than twice its width, an
-    edge it would collapse) it is halved, while it keeps two rows.
+    Each boundary loop keeps its own band: at most 0.4 of its distance to the
+    nearest other loop (a drill hole among others gets a narrower one, the
+    outline keeps its own), halved where its innermost ring still crosses.
+    The outline is first simplified to ``outline_tolerance`` (2 um: a 0.2 mm
+    drill becomes a polygon of about twenty sides), and the gap between the
+    band and the squares gets points every ``gap_size`` (a quarter of the
+    pitch) so that the copper between close vias is not a few long triangles.
     """
-    offsets = np.asarray(offsets, dtype=np.float64)
-    while True:
-        try:
-            return _build(polygon, pitch=pitch, offsets=offsets, along=along, clearance=clearance, origin=origin,
-                          max_rounds=max_rounds)
-        except ValueError:
-            band = offsets[-1] / 2
-            kept = offsets[offsets < band * (1 - 1e-9)]
-            if len(kept) < 2:
-                raise
-            offsets = np.r_[kept, band]
+    return _build(polygon, pitch=pitch, offsets=offsets, along=along, clearance=clearance, origin=origin,
+                  max_rounds=max_rounds, outline_tolerance=outline_tolerance, gap_size=gap_size)
 
 
-def _build(polygon, *, pitch, offsets, along, clearance, origin, max_rounds) -> HybridMesh:
+def _loop_bands(fitted: list[np.ndarray], band: float, share: float = 0.4) -> list[float]:
+    """Each loop's band: at most ``share`` of its distance to the nearest other loop."""
+    from shapely.geometry import LinearRing
+
+    rings = [LinearRing(v) for v in fitted]
+    tree = shapely.STRtree(rings)
+    out = []
+    for k, ring in enumerate(rings):
+        nearest = band / share
+        for j in tree.query(ring.buffer(band / share)):
+            if j != k:
+                nearest = min(nearest, ring.distance(rings[j]))
+        out.append(min(band, share * nearest))
+    return out
+
+
+def _build(polygon, *, pitch, offsets, along, clearance, origin, max_rounds, outline_tolerance=2e-6,
+           gap_size=None) -> HybridMesh:
     offsets = np.asarray(offsets, dtype=np.float64)
     if offsets[0] != 0.0 or np.any(np.diff(offsets) <= 0):
         raise ValueError("offsets must start at 0 and increase")
     polygon = orient(polygon, sign=1.0)  # exterior counter-clockwise, holes clockwise: copper on the left
+    if outline_tolerance > 0.0:
+        # chords of arcs (drill holes, rounded pads) within the tolerance of the arc
+        polygon = orient(polygon.simplify(outline_tolerance, preserve_topology=True), sign=1.0)
     tol = 1e-9 * max(polygon.bounds[2] - polygon.bounds[0], polygon.bounds[3] - polygon.bounds[1])
     band = float(offsets[-1])
-    fitted = [_fit_band(_clean_loop(np.asarray(polygon.exterior.coords), tol), band, 0.25 * along)]
-    fitted += [_fit_band(_clean_loop(np.asarray(r.coords), tol), band, 0.25 * along) for r in polygon.interiors]
+    cleaned = [_clean_loop(np.asarray(polygon.exterior.coords), tol)]
+    cleaned += [_clean_loop(np.asarray(r.coords), tol) for r in polygon.interiors]
+    bands = _loop_bands(cleaned, band)
+    fitted = [_fit_band(v, b) for v, b in zip(cleaned, bands)]
     meshed = Polygon(fitted[0], holes=fitted[1:])
     loops = [_Loop(v, along) for v in fitted]
     clearance = 0.15 * pitch if clearance is None else clearance
+    gap_size = 0.25 * pitch if gap_size is None else gap_size
     removed: set[tuple[int, int]] = set()
 
+    def loop_offsets(b):
+        kept = offsets[offsets < b * (1 - 1e-9)]
+        return np.r_[kept, b] if len(kept) else np.array([0.0, b])
+
     for _round in range(max_rounds):
-        rings = [[loop.ring(d) for d in offsets] for loop in loops]  # [loop][row] -> (n, 2)
-        inner_loops = [r[-1] for r in rings]
-        inner = Polygon(inner_loops[0], holes=inner_loops[1:])
-        if not inner.is_valid:
-            raise ValueError("the innermost ring is not a simple polygon: reduce the band width")
+        for _attempt in range(8):
+            try:
+                rings = [[loop.ring(d) for d in loop_offsets(b)] for loop, b in zip(loops, bands)]
+            except ValueError:
+                bands = [b * 0.5 for b in bands]  # an edge collapses somewhere: narrow every loop once more
+                continue
+            inner_loops = [r[-1] for r in rings]
+            bad = [k for k, ring in enumerate(inner_loops) if not Polygon(ring).is_valid]
+            inner = Polygon(inner_loops[0], holes=inner_loops[1:])
+            if not bad and not inner.is_valid:
+                # rings that cross another ring
+                from shapely.geometry import LinearRing
+
+                lr = [LinearRing(r) for r in inner_loops]
+                tree = shapely.STRtree(lr)
+                bad = sorted({int(k) for k in range(len(lr)) for j in tree.query(lr[k]) if j != k and lr[k].intersects(lr[j])})
+            if not bad and inner.is_valid:
+                break
+            for k in bad:
+                bands[k] *= 0.5
+        else:
+            raise ValueError("the innermost rings do not form a simple polygon")
         squares = _squares(inner.buffer(-clearance, join_style="mitre"), pitch, origin, removed)
-        result = _assemble(loops, rings, squares, pitch, origin, inner)
+        result = _assemble(loops, rings, squares, pitch, origin, inner, gap_size)
         if isinstance(result, HybridMesh):
-            return dataclasses.replace(result, outline_area_change=meshed.area / polygon.area - 1.0)
+            return dataclasses.replace(result, outline_area_change=meshed.area / polygon.area - 1.0,
+                                       band=float(min(bands)))
         missing_rings, missing_squares = result
         for li, ei, si in missing_rings:
             loops[li].split(ei, si)
@@ -238,7 +284,7 @@ def _squares(region, pitch, origin, removed) -> list[tuple[int, int]]:
     return cells
 
 
-def _assemble(loops, rings, squares, pitch, origin, inner):
+def _assemble(loops, rings, squares, pitch, origin, inner, gap_size=None):
     x0, y0 = origin
     vertices: list[np.ndarray] = []
     corners: list[list[int]] = []
@@ -322,6 +368,55 @@ def _assemble(loops, rings, squares, pitch, origin, inner):
 
     point_ids = sorted({v for a, b, _ in required for v in (a, b)})
     pts = np.array([vertices[v] for v in point_ids])
+    if gap_size:
+        # Steiner points inside the gap on a lattice, kept half a step clear of its boundary
+        gap_region = inner
+        if squares:
+            gap_region = inner.difference(shapely.union_all([box(x0 + i * pitch, y0 + j * pitch, x0 + (i + 1) * pitch,
+                                                                   y0 + (j + 1) * pitch) for i, j in squares]))
+        minx, miny, maxx, maxy = gap_region.bounds
+        gx = np.arange(minx + gap_size / 2, maxx, gap_size)
+        gy = np.arange(miny + gap_size / 2, maxy, gap_size)
+        if len(gx) and len(gy):
+            X, Y = np.meshgrid(gx, gy, indexing="ij")
+            cand = np.column_stack([X.ravel(), Y.ravel()])
+            shrunk = gap_region.buffer(-0.5 * gap_size)
+            keep = shapely.contains_xy(shrunk, cand[:, 0], cand[:, 1]) if not shrunk.is_empty else np.zeros(len(cand), bool)
+            # A square's edge stays an edge of the triangulation only while the
+            # disc on it as diameter holds no other point: keep those discs clear.
+            mids = [0.5 * (np.asarray(vertices[a]) + np.asarray(vertices[b])) for a, b, tag in required if tag[0] == "square"]
+            apex = []
+            if mids and np.any(keep):
+                from scipy.spatial import cKDTree
+
+                near = cKDTree(np.array(mids)).query(cand[keep], k=1)[0] < 0.55 * pitch
+                idx = np.flatnonzero(keep)
+                keep[idx[near]] = False
+                # one point facing each free square edge, just outside its disc,
+                # so the triangle on it is near isosceles instead of a fan
+                for (a, b, tag) in required:
+                    if tag[0] != "square":
+                        continue
+                    pa, pb = np.asarray(vertices[a]), np.asarray(vertices[b])
+                    t = (pb - pa) / np.linalg.norm(pb - pa)
+                    outward = np.array([t[1], -t[0]])  # square corners run counter-clockwise
+                    apex.append(0.5 * (pa + pb) + 0.6 * pitch * outward)
+                apex = np.array(apex)
+                ok = shapely.contains_xy(shrunk, apex[:, 0], apex[:, 1]) if not shrunk.is_empty else np.zeros(len(apex), bool)
+                apex = apex[ok]
+                if len(apex):
+                    # no lattice point closer than half a step to an apex
+                    far = cKDTree(apex).query(cand, k=1)[0] > 0.5 * gap_size
+                    keep &= far
+                    apex = np.unique(np.round(apex / 1e-9) * 1e-9, axis=0)
+            extra = cand[keep]
+            if len(apex):
+                extra = np.vstack([extra, apex]) if len(extra) else apex
+            if len(extra):
+                start = len(vertices)
+                vertices.extend(extra)
+                point_ids = point_ids + list(range(start, start + len(extra)))
+                pts = np.vstack([pts, extra])
     gap = inner
     if squares:
         gap = inner.difference(shapely.union_all([box(x0 + i * pitch, y0 + j * pitch, x0 + (i + 1) * pitch, y0 + (j + 1) * pitch) for i, j in squares]))
