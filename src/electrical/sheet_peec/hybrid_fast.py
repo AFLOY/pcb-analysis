@@ -327,35 +327,59 @@ class HybridOperator:
         return out
 
     # -- products --------------------------------------------------------------
+    def _stacked(self):
+        """Distinct real kernel spectra (U, K) and each sheet pair's index into them (S, S)."""
+        if "_stack" not in self.__dict__:
+            gaps = sorted({round(gap, 15) for (_key, gap) in self._pair_key.values()})
+            where = {g: i for i, g in enumerate(gaps)}
+            # The kernel is even on the wrapped offsets, so its spectrum is real.
+            spectra = np.stack([self._full_spectrum(g).real.ravel() for g in gaps])
+            count = len(self.sheets)
+            index = np.zeros((count, count), dtype=np.int64)
+            for (a, b), (_key, gap) in self._pair_key.items():
+                index[a, b] = where[round(gap, 15)]
+            groups = {}
+            for a, sp_index in enumerate(self.space_of):
+                groups.setdefault(sp_index, []).append(a)
+            self.__dict__["_stack"] = (spectra, index, groups)
+        return self.__dict__["_stack"]
+
     def inductance_apply(self, x: np.ndarray) -> np.ndarray:
-        """L x over the in-plane dofs (links carry none)."""
+        """L x over the in-plane dofs (links carry none).
+
+        Sheets on one mesh are spread and gathered together (one sparse
+        product with a column per sheet, one batched FFT); in Fourier space
+        every bin couples the sheets by a small dense matrix.
+        """
         nx, ny = self.grid.shape
-        charges = []
-        for b, s_ in enumerate(self.sheets):
-            info = self._sp[self.space_of[b]]
-            xb = x[self.dof0[b]:self.dof0[b + 1]]
-            per = []
+        spectra, index, groups = self._stacked()
+        count = len(self.sheets)
+        bins = 4 * nx * ny
+        charges = np.zeros((2, count, bins), dtype=np.complex128)
+        for sp_index, members in groups.items():
+            info = self._sp[sp_index]
+            columns = np.stack([x[self.dof0[a]:self.dof0[a + 1]] for a in members], axis=1)
             for d in range(2):
-                q = info["stencil"].T @ (info["b"][d] @ xb)
-                grid = np.zeros((2 * nx, 2 * ny), dtype=np.complex128)
-                grid[:nx, :ny] = q.reshape(nx, ny)
-                per.append(np.fft.fft2(grid))
-            charges.append(per)
+                q = info["stencil"].T @ (info["b"][d] @ columns)  # (nodes, len(members))
+                grid = np.zeros((len(members), 2 * nx, 2 * ny), dtype=np.complex128)
+                grid[:, :nx, :ny] = q.T.reshape(len(members), nx, ny)
+                charges[d, members] = np.fft.fft2(grid, axes=(1, 2)).reshape(len(members), bins)
         y = np.zeros(self.m_plane, dtype=np.complex128)
-        for a, s_ in enumerate(self.sheets):
-            info = self._sp[self.space_of[a]]
-            acc = [np.zeros((2 * nx, 2 * ny), dtype=np.complex128) for _ in range(2)]
-            for b in range(len(self.sheets)):
-                key, gap = self._pair_key[a, b]
-                spec = self._full_spectrum(gap)
+        for sp_index, members in groups.items():
+            info = self._sp[sp_index]
+            potentials = np.empty((2, len(members), bins), dtype=np.complex128)
+            for k, a in enumerate(members):
+                kernel = spectra[index[a]]  # (S, K)
                 for d in range(2):
-                    acc[d] += spec * charges[b][d]
-            ya = np.zeros(self.dof0[a + 1] - self.dof0[a], dtype=np.complex128)
+                    potentials[d, k] = np.einsum("bk,bk->k", kernel, charges[d])
+            out = np.zeros((self.dof0[members[0] + 1] - self.dof0[members[0]], len(members)), dtype=np.complex128)
             for d in range(2):
-                pot = np.fft.ifft2(acc[d])[:nx, :ny].ravel()
-                ya += info["b"][d].T @ (info["stencil"] @ pot)
-            y[self.dof0[a]:self.dof0[a + 1]] = KAPPA * ya
-            for b in range(len(self.sheets)):
+                pot = np.fft.ifft2(potentials[d].reshape(len(members), 2 * nx, 2 * ny), axes=(1, 2))[:, :nx, :ny]
+                out += info["b"][d].T @ (info["stencil"] @ pot.reshape(len(members), nx * ny).T)
+            for k, a in enumerate(members):
+                y[self.dof0[a]:self.dof0[a + 1]] = KAPPA * out[:, k]
+        for a in range(count):
+            for b in range(count):
                 key, _gap = self._pair_key[a, b]
                 y[self.dof0[a]:self.dof0[a + 1]] += self._corr[key] @ x[self.dof0[b]:self.dof0[b + 1]]
         return y
@@ -401,7 +425,7 @@ class HybridOperator:
 
 
 def solve_ports_fast(op: HybridOperator, voltages: dict[int, complex], tolerance: float = 1e-8, restart: int = 120,
-                     maxiter: int = 50, log=print):
+                     maxiter: int = 50, log=print, factor_threads: int | str | None = None):
     """GMRES on [[Z, -D], [D^T, 0]] with fixed port voltages, preconditioned by the near system.
 
     Returns dof currents, element potentials, the current each port drives
@@ -413,7 +437,7 @@ def solve_ports_fast(op: HybridOperator, voltages: dict[int, complex], tolerance
     for p, v in voltages.items():
         rhs[:m][op.ports == p] = -v
     t0 = time.time()
-    solve_near, close = _near_factor(op.near_impedance(), d)
+    solve_near, close = _near_factor(op.near_impedance(), d, factor_threads)
     t1 = time.time()
 
     def apply(v):
@@ -431,18 +455,23 @@ def solve_ports_fast(op: HybridOperator, voltages: dict[int, complex], tolerance
                         callback_type="pr_norm")
     close()
     t2 = time.time()
+    op.timings.update(factor_s=round(t1 - t0, 2), gmres_s=round(t2 - t1, 2))
     log(f"near factor {t1 - t0:.1f} s, GMRES {count[0]} iterations {t2 - t1:.1f} s, info {info}")
     current = x[:m]
     driven = {p: -current[op.ports == p].sum() for p in voltages}
     return current, x[m:], driven, count[0]
 
 
-def _near_factor(near: sp.csr_matrix, d: sp.csr_matrix):
-    """The near saddle point's solve: MUMPS's quasi-definite LDL^T when the core links it, else SuperLU."""
-    from .near_factor import NEAR_REGULARIZATION, MumpsQuasiDefiniteNear, mumps_available
+def _near_factor(near: sp.csr_matrix, d: sp.csr_matrix, threads: int | str | None = None):
+    """The near saddle point's solve: MUMPS's quasi-definite LDL^T when the core links it, else SuperLU.
+
+    ``threads``: MUMPS's (``near_factor_threads``: one by default, ``"budget"``).
+    """
+    from .near_factor import NEAR_REGULARIZATION, MumpsQuasiDefiniteNear, mumps_available, resolve_near_factor_threads
 
     if mumps_available():
-        factor = MumpsQuasiDefiniteNear(near, d, NEAR_REGULARIZATION["mumps_quasi_definite"])
+        factor = MumpsQuasiDefiniteNear(near, d, NEAR_REGULARIZATION["mumps_quasi_definite"],
+                                        threads=resolve_near_factor_threads(threads))
         return factor.solve, factor.close
     lu = spl.splu(sp.bmat([[near, -d], [d.T, None]], format="csc"), permc_spec="COLAMD")
     return lu.solve, (lambda: None)
@@ -460,7 +489,7 @@ def connected_components(op: HybridOperator) -> np.ndarray:
 
 
 def solve_injection_fast(op: HybridOperator, injected: np.ndarray, tolerance: float = 1e-9, restart: int = 120,
-                         maxiter: int = 50, log=print):
+                         maxiter: int = 50, log=print, factor_threads: int | str | None = None):
     """GMRES with currents fed into elements; one element of every component grounded.
 
     Returns dof currents, element potentials (0 at the grounds) and the
@@ -477,7 +506,7 @@ def solve_injection_fast(op: HybridOperator, injected: np.ndarray, tolerance: fl
             raise ValueError(f"component {c} is fed a net {total} A")
     rhs = np.concatenate([np.zeros(m, dtype=np.complex128), np.asarray(injected, dtype=np.complex128)[keep]])
     t0 = time.time()
-    solve_near, close = _near_factor(op.near_impedance(), d)
+    solve_near, close = _near_factor(op.near_impedance(), d, factor_threads)
     t1 = time.time()
 
     def apply(v):
