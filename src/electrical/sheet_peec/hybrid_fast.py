@@ -99,9 +99,10 @@ class HybridOperator:
     """``Z`` of a set of sheets and links as an operator, and its near part as a sparse matrix."""
 
     def __init__(self, sheets: list[Sheet], links, frequency: float, grid_pitch: float, near_factor: float = 2.5,
-                 close_factor: float = 1.2, log=print) -> None:
+                 close_factor: float = 1.2, near_floor: float = 0.0, log=print) -> None:
         t0 = time.time()
         self.close_factor = float(close_factor)
+        self.near_floor = float(near_floor)
         self.sheets = sheets
         self.frequency = float(frequency)
         self.omega = 2.0 * math.pi * self.frequency
@@ -213,7 +214,8 @@ class HybridOperator:
     def _near_pair(self, ia: int, ib: int, gap: float, nodes, near_factor: float):
         """Exact near moments and the grid's approximation of the same pairs, (3E_a, 3E_b) sparse."""
         sa, sb = self.spaces[ia], self.spaces[ib]
-        reach = near_factor * np.maximum(np.maximum(sa.diameter[:, None], sb.diameter[None, :]), 2.0 * self.grid.pitch)
+        reach = np.maximum(near_factor * np.maximum(np.maximum(sa.diameter[:, None], sb.diameter[None, :]),
+                                                    2.0 * self.grid.pitch), self.near_floor)
         near_e, near_f = [], []
         for start in range(0, len(sa.kind), 2000):
             d = np.linalg.norm(sa.centroid[start:start + 2000, None, :] - sb.centroid[None, :, :], axis=2)
