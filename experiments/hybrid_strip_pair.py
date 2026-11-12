@@ -57,7 +57,8 @@ def loop_impedance(length, width, angle, freq, args):
         f_sheets = [i for i, s_ in enumerate(sheets) if s_.layer == "F"]
         b_sheets = [i for i, s_ in enumerate(sheets) if s_.layer == "B"]
         links.append((f_sheets[-1], b_sheets[0], end, end, np.full(len(end), 1e-7)))
-        op = HybridOperator(sheets, links, freq, grid_pitch=args.fast * 1e-3, near_factor=args.near_factor, log=lambda *_: None)
+        op = HybridOperator(sheets, links, freq, grid_pitch=args.fast * 1e-3, near_factor=args.near_factor,
+                            taper_radius=args.taper_mm * 1e-3, log=lambda *_: None)
         t1 = time.time()
         _, _, driven, iterations = solve_ports_fast(op, {0: 1.0, 1: 0.0}, tolerance=1e-9, log=lambda *_: None,
                                                     factor_threads=args.factor_threads)
@@ -89,6 +90,7 @@ def main():
     ap.add_argument("--max-filaments", type=int, default=64)
     ap.add_argument("--fast", type=float, default=0.0, help="grid pitch (mm) of the FFT far field; 0 solves densely")
     ap.add_argument("--near-factor", type=float, default=2.5, help="near zone, in element diameters")
+    ap.add_argument("--taper-mm", type=float, default=0.0, help="Wendland taper radius of the preconditioner (0: cut)")
     ap.add_argument("--factor-threads", default=None, help="MUMPS threads (an integer or 'budget')")
     args = ap.parse_args()
     for freq in args.freq:

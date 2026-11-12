@@ -99,8 +99,10 @@ class HybridOperator:
     """``Z`` of a set of sheets and links as an operator, and its near part as a sparse matrix."""
 
     def __init__(self, sheets: list[Sheet], links, frequency: float, grid_pitch: float, near_factor: float = 2.5,
-                 close_factor: float = 1.2, near_floor: float = 0.0, log=print) -> None:
+                 close_factor: float = 1.2, near_floor: float = 0.0, taper_radius: float = 0.0,
+                 log=print) -> None:
         t0 = time.time()
+        self.taper_radius = float(taper_radius)
         self.close_factor = float(close_factor)
         self.near_floor = float(near_floor)
         self.sheets = sheets
@@ -157,15 +159,16 @@ class HybridOperator:
                 continue
             sa_, sb_ = sheets[a], sheets[b]
             ia, ib = self.space_of[a], self.space_of[b]
-            exact, approx = self._near_pair(ia, ib, gap, thickness_nodes(sa_.thickness, sa_.z, sb_.thickness, sb_.z),
-                                            near_factor)
+            exact, approx, kept = self._near_pair(ia, ib, gap, thickness_nodes(sa_.thickness, sa_.z, sb_.thickness, sb_.z),
+                                                  near_factor)
             reverse_key = self._pair_key[b, a][0]
             if reverse_key == key and ia == ib:
                 exact = ((exact + exact.T) * 0.5).tocsr()
+                kept = ((kept + kept.T) * 0.5).tocsr()
             ca = [spaces[ia].component(d) for d in range(2)]
             cb = [spaces[ib].component(d) for d in range(2)]
             self._corr[key] = KAPPA * sum((ca[d] @ (exact - approx) @ cb[d].T) for d in range(2)).tocsr()
-            self._near[key] = KAPPA * sum((ca[d] @ exact @ cb[d].T) for d in range(2)).tocsr()
+            self._near[key] = KAPPA * sum((ca[d] @ kept @ cb[d].T) for d in range(2)).tocsr()
             if reverse_key != key:
                 self._corr[reverse_key] = self._corr[key].T.tocsr()
                 self._near[reverse_key] = self._near[key].T.tocsr()
@@ -215,7 +218,7 @@ class HybridOperator:
         """Exact near moments and the grid's approximation of the same pairs, (3E_a, 3E_b) sparse."""
         sa, sb = self.spaces[ia], self.spaces[ib]
         reach = np.maximum(near_factor * np.maximum(np.maximum(sa.diameter[:, None], sb.diameter[None, :]),
-                                                    2.0 * self.grid.pitch), self.near_floor)
+                                                    2.0 * self.grid.pitch), max(self.near_floor, self.taper_radius))
         near_e, near_f = [], []
         for start in range(0, len(sa.kind), 2000):
             d = np.linalg.norm(sa.centroid[start:start + 2000, None, :] - sb.centroid[None, :, :], axis=2)
@@ -226,7 +229,7 @@ class HybridOperator:
         f = np.concatenate(near_f)
         if len(e) == 0:
             z = sp.csr_matrix((3 * len(sa.kind), 3 * len(sb.kind)))
-            return z, z
+            return z, z, z
         # Closest pairs by the closed form; the rest of the near zone by point
         # quadrature on both elements (averaged over the thicknesses too).
         dist = np.linalg.norm(sa.centroid[e] - sb.centroid[f], axis=1)
@@ -244,7 +247,19 @@ class HybridOperator:
             c = (3 * f[:, None, None] + np.arange(3)[None, None, :]).repeat(3, axis=1)
             return sp.csr_matrix((vals.ravel(), (r.ravel(), c.ravel())), shape=shape)
 
-        return to_sparse(exact), to_sparse(approx)
+        # The preconditioner's copy: cutting the inductance at a distance makes
+        # it indefinite (negative eigenvalues down to -0.5 of the diagonal on a
+        # 0.4 mm mesh), and GMRES then stalls erratically.  With taper_radius
+        # the pairs are weighted by Wendland's compactly supported C2 function
+        # of the 3-D centroid distance: a positive definite function, so the
+        # weighted (Schur) product of the moments stays positive definite.
+        if self.taper_radius > 0.0:
+            x = np.sqrt(dist * dist + gap * gap) / self.taper_radius
+            weight = np.where(x < 1.0, (1.0 - x) ** 4 * (4.0 * x + 1.0), 0.0)
+            kept = exact * weight[:, None, None]
+        else:
+            kept = exact
+        return to_sparse(exact), to_sparse(approx), to_sparse(kept)
 
     def _point_moments(self, ia: int, ib: int, e: np.ndarray, f: np.ndarray, nodes, chunk: int = 20000) -> np.ndarray:
         """(P, 3, 3) moments of element pairs by point quadrature on both, the kernel averaged over ``nodes``."""
