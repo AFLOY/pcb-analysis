@@ -37,7 +37,6 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
-import scipy.linalg as la
 import scipy.sparse as sp
 
 MU0 = 4.0e-7 * math.pi
@@ -477,7 +476,7 @@ def solve_saddle(impedance: np.ndarray, divergence: sp.spmatrix, injected: np.nd
     system[m:, :m] = d[:, keep].T
     rhs = np.zeros(m + e - 1, dtype=dtype)
     rhs[m:] = np.asarray(injected)[keep]
-    x = la.solve(system, rhs)
+    x = np.linalg.solve(system, rhs)
     phi = np.zeros(e, dtype=dtype)
     phi[keep] = x[m:]
     return x[:m], phi
@@ -502,7 +501,7 @@ def solve_ports(impedance: np.ndarray, divergence: sp.spmatrix, port_of_dof: np.
     voltages = np.asarray(voltages, dtype=dtype)
     on_port = port_of_dof >= 0
     rhs[:m][on_port] = -voltages[port_of_dof[on_port]]
-    x = la.solve(system, rhs)
+    x = np.linalg.solve(system, rhs)
     current = x[:m]
     totals = np.array([current[port_of_dof == p].sum() for p in range(len(voltages))])
     return current, x[m:], totals
@@ -595,7 +594,9 @@ def solve_driven(z: np.ndarray, d: np.ndarray, ports: np.ndarray, fixed: dict[in
         on = np.isin(ports, floating)
         system[:m, m + n][on] = 1.0  # Z I - D phi + V_short = 0 on its dofs
         system[m + n, :m][on] = 1.0  # no net current into the short
-    x = la.solve(system, rhs, overwrite_a=True, overwrite_b=True, check_finite=False)
+    # NumPy's LAPACK is the 64-bit-integer OpenBLAS: SciPy's 32-bit one
+    # refuses matrices past 2^31 entries ("Memory error in scipy.linalg.solve").
+    x = np.linalg.solve(system, rhs)
     current = x[:m]
     driven = {p: -current[ports == p].sum() for p in fixed}
     return current, x[m:m + n], driven
