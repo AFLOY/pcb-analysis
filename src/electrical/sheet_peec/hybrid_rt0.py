@@ -524,17 +524,19 @@ def assemble(sheets: list[Sheet], links: list[tuple[int, int, np.ndarray, np.nda
     """Impedance, divergence and dof bookkeeping of sheets joined by vertical links.
 
     ``links``: (sheet a, sheet b, elements in a, elements in b, resistance) --
-    one dof per pair carrying current from a's element to b's, resistive only
-    (between the filaments of one layer, and vias).  Returns ``Z`` (dense),
-    ``D`` (dense), the port of each dof (``(sheet, port)`` flattened as an
-    integer, -1 inside) and the dof offset of each sheet.
+    resistive joints between element pairs (between the filaments of one
+    layer, and vias).  Having no inductance, a link's current is the
+    potential difference over its resistance, so the links are eliminated
+    into a conductance ``Y`` on the element potentials (Kirchhoff's law
+    becomes ``D^T I + Y phi = s``).  Returns ``Z`` (dense, in-plane dofs),
+    ``D`` (dense), the global port of each dof (-1 inside), the dof and
+    element offset of each sheet, and ``Y`` (sparse).
     """
     sizes = [s_.space.size for s_ in sheets]
     elems = [len(s_.space.kind) for s_ in sheets]
     dof0 = np.r_[0, np.cumsum(sizes)]
     el0 = np.r_[0, np.cumsum(elems)]
-    nlink = sum(len(l[2]) for l in links)
-    m = dof0[-1] + nlink
+    m = dof0[-1]
     n = el0[-1]
     omega = 2.0 * math.pi * frequency
     dtype = np.complex128 if frequency > 0 else np.float64
@@ -560,17 +562,19 @@ def assemble(sheets: list[Sheet], links: list[tuple[int, int, np.ndarray, np.nda
                 z[sl, dof0[b]:dof0[b + 1]] += block
                 if b != a:
                     z[dof0[b]:dof0[b + 1], sl] += block.T
-    row = dof0[-1]
+    rows, cols, vals = [], [], []
     for a, b, ea, eb, resistance in links:
-        k = np.arange(row, row + len(ea))
-        z[k, k] += resistance
-        d[k, el0[a] + ea] = 1.0
-        d[k, el0[b] + eb] = -1.0
-        row += len(ea)
-    return z, d, ports, dof0, el0
+        g = 1.0 / np.broadcast_to(np.asarray(resistance, dtype=np.float64), np.shape(ea))
+        ia, ib = el0[a] + np.asarray(ea), el0[b] + np.asarray(eb)
+        rows += [ia, ib, ia, ib]
+        cols += [ia, ib, ib, ia]
+        vals += [g, g, -g, -g]
+    y = sp.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(n, n)) if rows else sp.csr_matrix((n, n))
+    return z, d, ports, dof0, el0, y
 
 
-def solve_driven(z: np.ndarray, d: np.ndarray, ports: np.ndarray, fixed: dict[int, complex], floating: list[int]):
+def solve_driven(z: np.ndarray, d: np.ndarray, ports: np.ndarray, fixed: dict[int, complex], floating: list[int],
+                 y: sp.spmatrix | None = None):
     """Ports in ``fixed`` held at their voltage; the ports in ``floating`` share one free potential
     (a short closing the loop).  Returns dof currents, element potentials and the current each
     fixed port drives into the conductor."""
@@ -582,6 +586,8 @@ def solve_driven(z: np.ndarray, d: np.ndarray, ports: np.ndarray, fixed: dict[in
     system[:m, :m] = z
     system[:m, m:m + n] = -d
     system[m:m + n, :m] = d.T
+    if y is not None:
+        system[m:m + n, m:m + n] += y.toarray()
     rhs = np.zeros(size, dtype=dtype)
     for p, v in fixed.items():
         rhs[:m][ports == p] = -v
@@ -589,7 +595,7 @@ def solve_driven(z: np.ndarray, d: np.ndarray, ports: np.ndarray, fixed: dict[in
         on = np.isin(ports, floating)
         system[:m, m + n][on] = 1.0  # Z I - D phi + V_short = 0 on its dofs
         system[m + n, :m][on] = 1.0  # no net current into the short
-    x = la.solve(system, rhs)
+    x = la.solve(system, rhs, overwrite_a=True, overwrite_b=True, check_finite=False)
     current = x[:m]
     driven = {p: -current[ports == p].sum() for p in fixed}
     return current, x[m:m + n], driven

@@ -45,9 +45,9 @@ def loop_impedance(length, width, angle, freq, args):
             dz = abs(sheets[k].z - sheets[k + 1].z)
             links.append((k, k + 1, allel, allel, RHO * dz / space.area))
     t0 = time.time()
-    z, dmat, ports, _, _ = assemble(sheets, links, freq)
+    z, dmat, ports, _, _, y = assemble(sheets, links, freq)
     t1 = time.time()
-    _, _, driven = solve_driven(z, dmat, ports, {0: 1.0, 1: 0.0}, floating=[2])
+    _, _, driven = solve_driven(z, dmat, ports, {0: 1.0, 1: 0.0}, floating=[2], y=y)
     t2 = time.time()
     info = dict(elements=len(space.kind), dofs=z.shape[0], sheets=len(sheets), squares=len(mesh.square_elements),
                 band=len(mesh.band_elements), gap=len(mesh.gap_elements), assemble_s=round(t1 - t0, 1),
