@@ -624,7 +624,7 @@ alternative at all: the 30-port fixture of the next section (83,440
 unknowns) did not finish its first frequency in 15 minutes with block, where
 near took 100 s.
 
-**Decision:** `auto` takes `near` below `AUTO_BLOCK_FROM_UNKNOWNS` = 400,000
+**Decision** (superseded by the next section): `auto` takes `near` below `AUTO_BLOCK_FROM_UNKNOWNS` = 400,000
 saddle-point unknowns and `block` from there, for memory alone: the size at
 which near's peak RSS, at the largest per-unknown figure measured, reaches
 4 GB (411,810, from the JSON's `decision.auto_threshold`).  The switch is a
@@ -632,6 +632,81 @@ fixed size, not the memory free at solve time, so the choice and the bits of
 a solve do not depend on the machine.  Solves between 60k and 400k unknowns
 with `auto` now run near: faster, with about twice block's memory, and their
 bits move within the tolerance.
+
+### Near at every size, factored by MUMPS (2026-11-12)
+
+The 400k switch sent every conductor of a filled board to block, and block
+is where a filled board's time went: Kicad_PowerOpt's real-fill evaluation
+of the LM5145EVM-HD-20A-2L spent 2,196 s of 2,917 s in the full-domain
+baseline, ten conductor solves at 214 kHz of 1,200 to 1,714 GMRES
+iterations each.  The near preconditioner takes a few dozen iterations there,
+but SciPy's SuperLU of the saddle matrix does not fit.  MUMPS does: the
+saddle matrix `[[Z_near, -A], [A^T, 0]]` with its node rows negated and
+`-delta I` in the zero block is quasi-definite, so its symmetric LDL^T exists
+for any order, and MUMPS factors it with METIS in a fraction of SuperLU's
+fill (`near_factorization="mumps_quasi_definite"`, `src/electrical/sheet_peec/near_factor.py`;
+`delta` = 1e-12 of the median `|Z_ii|`, threshold pivoting `CNTL(1)` = 0.01;
+a check solve refuses a factor whose own residual exceeds 1e-3).
+
+Flow2 t1-share, AMD EPYC 9965, AOCC build of the core and of MUMPS 5.9.1
+with a single-threaded OpenBLAS, tolerance 1e-9, restart 120, each line one
+process.  The real-fill PGND baseline (two excitations, 214,358 Hz, one
+filament, 1,050,851 branches and 425,678 nodes; 48 cores, 86 GB job limit,
+thread budget 48):
+
+| Preconditioner | GMRES iterations | Wall (s) | Note |
+|---|---:|---:|---|
+| block (what `auto` took) | 1,523 / 1,714 | 2,233.6 | |
+| near, MUMPS | 43 / 43 | 84.5 | loss and span agree with block to 1e-11 |
+| near, SuperLU | — | — | killed at the 86 GB limit |
+
+At 30 MHz, with the conductors cut into filaments (192 cores, thread budget
+48, MUMPS with its L0 tree parallelism as it then ran):
+
+| Problem | Branches / nodes | Preconditioner | GMRES iterations | Wall (s) | Peak RSS (GB) |
+|---|---:|---|---:|---:|---:|
+| EVM hot loop, 0.1 mm | 294,468 / 147,810 | near, MUMPS | 395 | 96.7 | 2.84 |
+| EVM hot loop, 0.1 mm | 294,468 / 147,810 | near, SuperLU | 395 | 159.5 | 4.65 |
+| EVM hot loop, 0.1 mm | 294,468 / 147,810 | block | — | > 5,400 | stopped unfinished |
+| real-fill PGND, 7 filaments a layer | 1,814,730 / 640,094 | near, MUMPS | 470 / 518 | 1,849.0 | 55.7 |
+| real-fill PGND, 7 filaments a layer | 1,814,730 / 640,094 | block | — | > 5,400 | stopped unfinished |
+
+MUMPS's peak is about 23 KB per saddle unknown with seven filaments and
+6.4 KB with one, against the 8 to 10 KB the SuperLU factor took on the small
+plane above; block's memory advantage no longer buys a solve that finishes.
+
+**Decision:** `auto` is `near` at every size, and the near factor is `"auto"`:
+MUMPS where the core is built with `-DPCB_NATIVE_MUMPS=ON`, SuperLU otherwise.
+`block` and `diagonal` stay, run only when named.  `AUTO_BLOCK_FROM_UNKNOWNS`
+is kept as the record of the old switch and no longer read.
+
+**Threads and bits.** MUMPS's OpenMP factorization sums in an order its team
+sets.  With its L0 tree parallelism (`ICNTL(48)`, on by default) the bits
+changed from run to run at a fixed thread count (three runs of the hot loop
+at 0.2 mm on 8 threads: three digests).  With it off (`ICNTL(48)` = 0, as
+set) a count gives the same bits run after run, but counts differ from one
+another, and the speed is much the same (8 threads, L0 off against on: 0.90
+of the time on the hot loop at 0.2 mm, 0.96 at 0.1 mm, 1.32 on the
+real-fill SW conductor).  Timing and digests of that setting, 214 kHz SW
+conductor of the real fill (70,618 branches, 28,664 nodes, two excitations)
+and the hot loop at 30 MHz:
+
+| Problem | Factor threads | Wall (s) | Peak RSS (GB) | Digest |
+|---|---:|---:|---:|---|
+| real-fill SW | SuperLU, budget 8 | 36.6 | 2.73 | `d3e4e2c7` |
+| real-fill SW | 1 | 11.7 | 1.24 | `c50e3d80` |
+| real-fill SW | 8 | 5.5 | 1.28 | `b015ba26` |
+| real-fill SW | 48 | 5.4 | 1.35 | `b015ba26` |
+| hot loop, 0.2 mm | 1 | 28.0 | 0.59 | `60ed23e7` |
+| hot loop, 0.2 mm | 8 | 19.4 | 0.59 | `1fa11390` |
+| hot loop, 0.2 mm | 48 | 19.1 | 0.64 | `1fa11390` |
+| hot loop, 0.1 mm | 8 | 87.6 | 2.11 | `81555a63` |
+| hot loop, 0.1 mm | 48 | 87.3 | 2.23 | `81555a63` |
+
+On the 8-core Ryzen of the tests 1 and 2, 3, and 4 and more threads gave three
+digests.  So the factor runs on one thread unless `near_factor_threads` (an
+integer, or `"budget"`) asks for more, and results are promised the same bits
+only at the same thread counts ([DESIGN.md](DESIGN.md#reproducibility)).
 
 ## The DC network on its own (`dc_network`)
 

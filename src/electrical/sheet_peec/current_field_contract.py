@@ -17,6 +17,7 @@ import numpy as np
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
 
 from .sheet_pfft import PfftSheetInductanceOperator
+from .near_factor import resolve_near_factor_threads, resolve_near_factorization
 from .sheet_operator import SheetInductanceOperator, SheetStackup
 from .sheet_peec import SheetMesh, Terminal, ViaBranch, solve_sheet_cases
 from .sheet_results import cell_current_density_phasor, sheet_fields
@@ -706,12 +707,14 @@ def solve_current_field_problems(
                 )
                 solved.append((solution, telemetry.as_metrics()))
         else:
-            near_factorization = str(settings.get("near_factorization", "superlu"))
+            near_factorization = resolve_near_factorization(str(settings.get("near_factorization", "auto")))
+            factor_threads = resolve_near_factor_threads(settings.get("near_factor_threads"))
             backend_metrics = {
                 "backend": "sheet_peec",
                 "resolved_backend": "numpy-scipy-sheet-peec",
                 "fallback_used": False,
                 "near_factorization": near_factorization,
+                "near_factor_threads": factor_threads,
             }
             solved = [
                 (solution, dict(backend_metrics, lockstep_columns=solution.lockstep_columns))
@@ -721,6 +724,7 @@ def solve_current_field_problems(
                         None if settings.get("near_regularization") is None
                         else float(settings["near_regularization"])
                     ),
+                    near_factor_threads=factor_threads,
                     **solve_arguments,
                 )
             ]

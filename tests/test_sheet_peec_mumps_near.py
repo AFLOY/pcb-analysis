@@ -74,7 +74,7 @@ def test_solving_with_the_mumps_factor_gives_the_superlu_solution(cases: int) ->
     value = _problem(frequency_hz=3e7)
     settings = {"maximum_filaments": 64, "preconditioner": "near", "relative_tolerance": 1e-11}
     problems = [value] * cases
-    reference = cfc.solve_current_field_problems(problems, settings)
+    reference = cfc.solve_current_field_problems(problems, dict(settings, near_factorization="superlu"))
     mumps = cfc.solve_current_field_problems(problems, dict(settings, near_factorization="mumps_quasi_definite"))
     for left, right in zip(reference, mumps):
         assert right.metrics["near_factorization"] == "mumps_quasi_definite"
@@ -83,6 +83,46 @@ def test_solving_with_the_mumps_factor_gives_the_superlu_solution(cases: int) ->
         a = np.array([left.voltage_phasor[k] for k in keys])
         b = np.array([right.voltage_phasor[k] for k in keys])
         assert np.max(np.abs(a - b)) <= 1e-8 * np.max(np.abs(a))
+
+
+def test_the_factor_threads_default_to_one_and_take_a_count_or_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(near_factor, "thread_budget", lambda: 6)
+    assert near_factor.resolve_near_factor_threads(None) == 1
+    assert near_factor.resolve_near_factor_threads(3) == 3
+    assert near_factor.resolve_near_factor_threads("budget") == 6
+    with pytest.raises(ValueError, match="near_factor_threads"):
+        near_factor.resolve_near_factor_threads(0)
+
+
+@needs_mumps
+def test_the_factor_runs_on_one_thread_unless_asked() -> None:
+    near, reduced = _near_system()
+    factor = MumpsQuasiDefiniteNear(near, reduced)
+    assert factor.threads == 1
+    factor.close()
+
+
+@needs_mumps
+def test_more_factor_threads_give_the_same_bits_at_the_same_count() -> None:
+    from electrical.sheet_peec import current_field_contract as cfc
+
+    from test_current_field_contract import _problem
+
+    value = _problem(frequency_hz=3e7)
+    settings = {
+        "maximum_filaments": 64, "preconditioner": "near", "relative_tolerance": 1e-11,
+        "near_factorization": "mumps_quasi_definite", "near_factor_threads": 3,
+    }
+    near_factor.clear_near_factor_cache()
+    runs = [cfc.solve_current_field_problems([value], settings)[0] for _ in range(2)]
+    near_factor.clear_near_factor_cache()
+    single = cfc.solve_current_field_problems([value], dict(settings, near_factor_threads=None))[0]
+    assert runs[0].metrics["near_factor_threads"] == 3
+    assert single.metrics["near_factor_threads"] == 1
+    keys = list(runs[0].voltage_phasor)
+    first, second, one = (np.array([r.voltage_phasor[k] for k in keys]) for r in (*runs, single))
+    assert np.array_equal(first, second)
+    assert np.max(np.abs(first - one)) <= 1e-8 * np.max(np.abs(one))
 
 
 def test_mumps_is_refused_where_the_core_lacks_it(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -352,7 +352,8 @@ def solve_port_impedance_problem(
 
     Settings, as the current-field contract reads them: ``relative_tolerance``
     (1e-9), ``maximum_iterations`` (200), ``restart`` (120),
-    ``preconditioner`` (``auto``), ``near_tiles``, ``cells_per_skin_depth``,
+    ``preconditioner`` (``auto``), ``near_tiles``, ``near_factor_threads``
+    (1, or an integer or ``"budget"``), ``cells_per_skin_depth``,
     ``maximum_filaments``, ``operator`` and the ``pfft_*`` keys.
     ``execution_backend`` ``cuda`` (with ``device_id``) solves on the device,
     with no fallback to the CPU; the default is ``cpu``.
@@ -391,6 +392,7 @@ def solve_port_impedance_problem(
         "near_tiles": None if settings.get("near_tiles") is None else int(settings["near_tiles"]),
         "backend": backend,
         "device_id": int(settings.get("device_id", 0)),
+        "near_factor_threads": settings.get("near_factor_threads"),
     }
 
     warm_start = bool(settings.get("warm_start", True))

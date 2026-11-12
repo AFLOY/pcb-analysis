@@ -46,7 +46,13 @@ import scipy.sparse.linalg as spla
 from scipy.spatial import cKDTree
 from scipy.linalg import get_lapack_funcs
 
-from .near_factor import NEAR_FACTORIZATIONS_CPU, NEAR_REGULARIZATION, MumpsQuasiDefiniteNear, mumps_available
+from .near_factor import (
+    NEAR_REGULARIZATION,
+    MumpsQuasiDefiniteNear,
+    mumps_available,
+    resolve_near_factor_threads,
+    resolve_near_factorization,
+)
 from .sheet_inductance import barrel_self_inductance
 from .sheet_operator import (
     COPPER_RESISTIVITY_OHM_M,
@@ -722,8 +728,9 @@ def solve_sheet_case(
     preconditioner: str = "auto",
     near_tiles: int | None = None,
     keep_terminal_components: bool = False,
-    near_factorization: str = "superlu",
+    near_factorization: str = "auto",
     near_regularization: float | None = None,
+    near_factor_threads: int | str | None = None,
 ) -> SheetSolution:
     """Solve one excitation of the mesh.
 
@@ -734,8 +741,7 @@ def solve_sheet_case(
     it, ``Z`` couples every branch to every other and is applied through the
     operator's transforms, so the reduction is carried out by a Krylov method.
 
-    ``preconditioner="auto"`` (default) picks ``near`` below :data:`AUTO_BLOCK_FROM_UNKNOWNS`
-    saddle-point unknowns and ``block`` above.  ``preconditioner="block"`` keeps the near-field impedance but factors it
+    ``preconditioner="auto"`` (default) picks ``near``.  ``preconditioner="block"`` keeps the near-field impedance but factors it
     on its own and approximates the Schur complement by the diagonal
     variant's nodal admittance: block elimination at a fraction of the
     saddle LU's memory.  ``preconditioner="near"`` factors the saddle-point matrix with
@@ -753,19 +759,23 @@ def solve_sheet_case(
     are factored and solved side by side on the thread budget.  ``None`` takes
     :data:`DEFAULT_NEAR_TILES`; ``1`` is the whole near block.
 
-    ``near_factorization`` (``near`` only): ``"superlu"`` factors the
+    ``near_factorization`` (``near`` only): ``"auto"`` (default) is MUMPS
+    where the core links it and SuperLU otherwise; ``"superlu"`` factors the
     saddle-point matrix by SciPy's sparse LU; ``"mumps_quasi_definite"``
     factors its quasi-definite form (node rows negated, ``-delta I`` in the
     zero block, ``delta`` = ``near_regularization`` over the median
     ``|Z_ii|``, ``None`` for :data:`.near_factor.NEAR_REGULARIZATION`) as a
-    symmetric LDL^T by MUMPS on the thread budget, in a core built with
-    ``-DPCB_NATIVE_MUMPS=ON`` (see :mod:`.near_factor`).
+    symmetric LDL^T by MUMPS, in a core built with ``-DPCB_NATIVE_MUMPS=ON``
+    (see :mod:`.near_factor`).  MUMPS runs on ``near_factor_threads``
+    threads: ``None`` (default) is one, so that every thread budget gives the
+    same bits; an integer, or ``"budget"`` for the thread budget, is faster
+    and gives the same bits only at the same count.
     """
     return solve_sheet_cases(
         mesh, operator, [terminals], frequency_hz=frequency_hz, tolerance=tolerance,
         max_iterations=max_iterations, restart=restart, preconditioner=preconditioner, near_tiles=near_tiles,
         keep_terminal_components=keep_terminal_components, near_factorization=near_factorization,
-        near_regularization=near_regularization,
+        near_regularization=near_regularization, near_factor_threads=near_factor_threads,
     )[0]
 
 
@@ -782,8 +792,9 @@ def solve_sheet_cases(
     near_tiles: int | None = None,
     keep_terminal_components: bool = False,
     initial: Sequence[SheetSolution | None] | None = None,
-    near_factorization: str = "superlu",
+    near_factorization: str = "auto",
     near_regularization: float | None = None,
+    near_factor_threads: int | str | None = None,
 ) -> list[SheetSolution]:
     """Solve several excitations of one mesh, in the order given.
 
@@ -813,17 +824,18 @@ def solve_sheet_cases(
     impedance, so the start is already close.  It changes the iterations,
     not the solution's tolerance.
 
-    ``near_factorization`` and ``near_regularization``: as in
+    ``near_factorization``, ``near_regularization`` and
+    ``near_factor_threads``: as in
     :func:`solve_sheet_case`.
     """
-    if near_factorization not in NEAR_FACTORIZATIONS_CPU:
-        raise ValueError(f"near_factorization must be one of {NEAR_FACTORIZATIONS_CPU}")
+    near_factorization = resolve_near_factorization(near_factorization)
     if near_factorization == "mumps_quasi_definite" and not mumps_available():
         raise ValueError(
             "near_factorization='mumps_quasi_definite' needs the C++ core built with -DPCB_NATIVE_MUMPS=ON"
         )
     if near_regularization is None:
         near_regularization = NEAR_REGULARIZATION[near_factorization]
+    factor_threads = resolve_near_factor_threads(near_factor_threads)
     if preconditioner not in ("auto", "near", "block", "diagonal"):
         raise ValueError("preconditioner must be 'auto', 'near', 'block' or 'diagonal'")
     near_tiles = DEFAULT_NEAR_TILES if near_tiles is None else int(near_tiles)
@@ -864,6 +876,7 @@ def solve_sheet_cases(
             frequency_hz, tolerance, max_iterations, restart, preconditioner, near_tiles,
             None if initial is None else [initial[k] for k in members],
             near_factorization=near_factorization, near_regularization=near_regularization,
+            near_factor_threads=factor_threads,
         )
         for index, solution in zip(members, solved):
             solutions[index] = solution
@@ -986,8 +999,9 @@ def _solve_ac(
     near_tiles: int,
     initial_list: list[SheetSolution | None] | None = None,
     *,
-    near_factorization: str = "superlu",
+    near_factorization: str = "auto",
     near_regularization: float | None = None,
+    near_factor_threads: int = 1,
 ) -> list[SheetSolution]:
     keep, grounded, dropped = reduction.keep, reduction.grounded, reduction.dropped
     active_branches, active_incidence, reduced = (
@@ -1123,7 +1137,7 @@ def _solve_ac(
             mesh, operator, preconditioner, omega, resistance, active_branches, reduced, branches,
             near_strips=_near_strips(active_incidence, near_tiles) if preconditioner == "block" else None,
             pool=pool, near_factorization=near_factorization, near_regularization=near_regularization,
-            closers=closers,
+            closers=closers, near_factor_threads=near_factor_threads,
         )
 
         def solve_alone(injected: np.ndarray, given: SheetSolution | None = None) -> SheetSolution:
@@ -1456,17 +1470,9 @@ def _near_impedance(
 NEAR_SOLVE_COLUMNS = 2
 
 
-# From this many saddle-point unknowns (branches + nodes) ``auto`` takes the
-# block elimination instead of the near LU, for memory alone.  With the near
-# field kept on each branch's own layer the near LU is faster than block at
-# every size measured (0.30 to 0.53 of its time on a 33 x 30 mm two-layer
-# plane from 24k to 599k unknowns) and its peak RSS stays within 8 to 10 KB per
-# unknown; this is where that peak, at its largest per unknown, reaches 4 GB
-# (docs/SHEET_PRECONDITIONER_AUTO_RESULTS.json).  On four layers with 0.2 mm
-# between the outer pairs block did not finish a 30-port solve of 83k unknowns in
-# 15 minutes where near took 100 s (docs/PORT_IMPEDANCE_SCALE_RESULTS.json).
-# A fixed size rather than the memory free at the time keeps the choice, and
-# so the bits, the same on every machine.
+# Where ``auto`` used to switch from near to block (SuperLU's saddle LU reaching
+# 4 GB).  ``auto`` is near at every size now; kept for the record in
+# docs/SHEET_PEEC.md.
 AUTO_BLOCK_FROM_UNKNOWNS = 400_000
 
 # Strips the ``block`` preconditioner factors the near-field impedance in;
@@ -1542,9 +1548,18 @@ def lockstep_width(count: int, column_bytes: int) -> int:
 
 
 def choose_preconditioner(unknowns: int) -> str:
-    """``near`` for a small saddle-point system, ``block`` for a large one."""
+    """``near`` at every size (see docs/SHEET_PEEC.md, "near at every size").
 
-    return "block" if unknowns >= AUTO_BLOCK_FROM_UNKNOWNS else "near"
+    ``block`` used to take over from :data:`AUTO_BLOCK_FROM_UNKNOWNS`, for the
+    memory of SuperLU's saddle LU.  Factored by MUMPS the near matrix fits far
+    beyond that, and block was slower everywhere it was measured: 2234 s
+    against 85 s on a 1.5M-unknown board conductor, and not finished in 90
+    minutes on two others near solved in 97 s and 1849 s.  ``block`` stays
+    available by name.
+    """
+
+    del unknowns
+    return "near"
 
 
 def _near_strips(active_incidence: sp.csr_matrix, tiles: int) -> list[np.ndarray] | None:
@@ -1616,6 +1631,7 @@ def _build_preconditioner(
     near_factorization: str = "superlu",
     near_regularization: float = 1e-8,
     closers: list[Callable[[], None]] | None = None,
+    near_factor_threads: int = 1,
 ) -> Callable[[np.ndarray], np.ndarray]:
     """The approximate inverse of the saddle-point matrix used by the inner GMRES.
 
@@ -1625,7 +1641,7 @@ def _build_preconditioner(
 
     if kind == "near" and hasattr(operator, "near_inductance") and near_factorization == "mumps_quasi_definite":
         impedance = _near_impedance(mesh, operator, omega, resistance, active_branches)
-        factor = MumpsQuasiDefiniteNear(impedance, reduced, near_regularization)
+        factor = MumpsQuasiDefiniteNear(impedance, reduced, near_regularization, threads=near_factor_threads)
         if closers is not None:
             closers.append(factor.close)
         # Every column of a lockstep block in one MUMPS solve: its OpenMP team

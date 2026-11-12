@@ -41,14 +41,30 @@ only threading control is the process-wide budget of `electrical.threads`.
 
 ## Reproducibility
 
-**Same bits.** On one machine and one build, the same input gives the same
-bits in every process, whatever the thread budget, `PYTHONHASHSEED`, the
-memory free (which sets how a lockstep group is cut) or how many sets the
-operator applies at once:
+**Same bits, at the same thread counts.** On one machine and one build, the
+same input solved with the same thread budget and the same
+`near_factor_threads` gives the same bits in every process, whatever
+`PYTHONHASHSEED`, the memory free (which sets how a lockstep group is cut) or
+how many sets the operator applies at once.  This is the promise; other
+thread counts agree within the solver's tolerance.
+
+The MUMPS near factor (the CPU sheet solve's default where the core links
+MUMPS) is what ties the bits to a thread count.  Its OpenMP factorization
+sums in an order set by its team: with its L0 tree parallelism
+(`ICNTL(48)`) the order changed from run to run even at one count, and with
+it off (as set) the bits are fixed per count but differ between counts (on a
+small mesh 1 and 2, 3, and 4 and more threads gave three digests; on
+Flow2's EPYC 9965, 8 and 48 threads agreed and 1 did not).  So the factor
+runs on one thread unless `near_factor_threads` asks for more, and with the
+default every part of the solve still gives the same bits at any thread
+budget (the tests below check it).  That is a property of the present code,
+not a promise: a caller that compares bits keeps the thread counts the same.
 
 - Every sum runs in a fixed order.  A native kernel gives each output to
   one task, which sums in layer (or entry) order; a lockstep group solves each
-  column as it would be solved alone; BLAS is held to one thread.
+  column as it would be solved alone; BLAS is held to one thread; MUMPS runs
+  without its L0 tree parallelism on `near_factor_threads` threads.
+
 - No set or `frozenset` is iterated where its order could reach a number.
   Sets of names, or of cells keyed by a layer's name, iterate in another
   order in every process, because Python randomises string hashes.  The
@@ -60,6 +76,8 @@ operator applies at once:
     every float they return, in the order returned.
   - `tests/test_native_sheet_operator.py` and `tests/test_sheet_peec.py`
     check thread budgets, operator batches and lockstep cuts.
+  - `tests/test_sheet_peec_mumps_near.py` repeats a solve with the MUMPS
+    factor on three threads and compares the bits.
   - Kicad_PowerOpt's LM5156 hot loop (eight excitations, `near`) gave the
     same results with lockstep widths 1, 2 and 8, at thread budgets 1 and 8,
     and in separate processes.
@@ -72,6 +90,9 @@ operator applies at once:
   versions.  The core's operator gave the same bits built with GCC 12.5.0 and
   with AOCC 5.2.0 on one machine (`docs/SHEET_OPERATOR_BATCHING_RESULTS.json`),
   but no compiler is promised.
+- Another thread budget or another `near_factor_threads`.
+- MUMPS against SuperLU as the near factor (`near_factorization`): the same
+  preconditioner factored two ways, so the GMRES iterates differ.
 - The CUDA path against the CPU.
 - A port-impedance frequency solved with a warm start (the default) depends
   on which frequencies were solved before it on the same mesh.  The
