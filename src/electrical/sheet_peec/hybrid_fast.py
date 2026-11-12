@@ -144,17 +144,30 @@ class HybridOperator:
         # Near corrections and the near inductance, per distinct key, in dof space.
         self._corr = {}
         self._near = {}
+        # Only a <= b is integrated; (b, a) is its transpose, so the operator is
+        # symmetric as the inductance is.  The near moments integrate the outer
+        # element by quadrature and the inner one in closed form, which is not
+        # symmetric in the pair: between adjacent sliver triangles the two
+        # orders differed by up to ~10 %, and MUMPS's LDL^T (the upper triangle)
+        # then solved its own matrix only to 1e-2.  A sheet's pairs with itself
+        # take the mean of both orders.
         for (a, b), (key, gap) in self._pair_key.items():
-            if key in self._corr:
+            if key in self._corr or a > b:
                 continue
             sa_, sb_ = sheets[a], sheets[b]
             ia, ib = self.space_of[a], self.space_of[b]
             exact, approx = self._near_pair(ia, ib, gap, thickness_nodes(sa_.thickness, sa_.z, sb_.thickness, sb_.z),
                                             near_factor)
+            reverse_key = self._pair_key[b, a][0]
+            if reverse_key == key and ia == ib:
+                exact = ((exact + exact.T) * 0.5).tocsr()
             ca = [spaces[ia].component(d) for d in range(2)]
             cb = [spaces[ib].component(d) for d in range(2)]
             self._corr[key] = KAPPA * sum((ca[d] @ (exact - approx) @ cb[d].T) for d in range(2)).tocsr()
             self._near[key] = KAPPA * sum((ca[d] @ exact @ cb[d].T) for d in range(2)).tocsr()
+            if reverse_key != key:
+                self._corr[reverse_key] = self._corr[key].T.tocsr()
+                self._near[reverse_key] = self._near[key].T.tocsr()
         t2 = time.time()
 
         # Resistance (block diagonal) and links.
