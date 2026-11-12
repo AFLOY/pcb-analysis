@@ -100,7 +100,7 @@ class HybridOperator:
 
     def __init__(self, sheets: list[Sheet], links, frequency: float, grid_pitch: float, near_factor: float = 2.5,
                  close_factor: float = 1.2, near_floor: float = 0.0, taper_radius: float = 2.0e-3,
-                 node_ports=(), node_links=(), node_element_links=(), log=print) -> None:
+                 node_ports=(), node_links=(), node_element_links=(), node_link_blocks=(), log=print) -> None:
         t0 = time.time()
         self.taper_radius = float(taper_radius)
         self.close_factor = float(close_factor)
@@ -139,8 +139,14 @@ class HybridOperator:
         # sheet (a barrel's end on a layer without a hole: copper over it)
         self.node_element_links = list(node_element_links)
         n_node_el = sum(len(l[2]) for l in self.node_element_links)
+        # Coupled node links: each block is (pairs [(port_a, port_b), ...],
+        # resistances (k,), inductance matrix (k, k)) -- a barrel cut into
+        # azimuthal strips, coupled to one another.
+        self.node_link_blocks = [(list(pairs), np.asarray(r, dtype=float), np.asarray(l, dtype=float))
+                                 for pairs, r, l in node_link_blocks]
+        n_blocks = sum(len(b[0]) for b in self.node_link_blocks)
         self.m_plane = int(self.dof0[-1])
-        self.m = self.m_plane + nlink + len(self.node_links) + n_node_el
+        self.m = self.m_plane + nlink + len(self.node_links) + n_node_el + n_blocks
         self.n_elements = int(self.el0[-1])
         self.n = self.n_elements + len(self.node_ports)
 
@@ -202,8 +208,10 @@ class HybridOperator:
         node_el_z = np.concatenate([link_impedance((None, None, l[2], None, l[3])) for l in self.node_element_links]) \
             if self.node_element_links else np.zeros(0)
         diagonal = np.concatenate([link_r, node_z, node_el_z])
-        self.resistance = sp.block_diag([sp.csr_matrix(bk) for bk in blocks] + ([sp.diags(diagonal)] if len(diagonal) else []),
-                                        format="csr")
+        coupled = [sp.csr_matrix(np.diag(r) + 1j * self.omega * l) if self.omega > 0 else sp.csr_matrix(np.diag(r))
+                   for _pairs, r, l in self.node_link_blocks]
+        self.resistance = sp.block_diag([sp.csr_matrix(bk) for bk in blocks] + ([sp.diags(diagonal)] if len(diagonal) else [])
+                                        + coupled, format="csr")
         # Ports.
         ports = np.full(self.m, -1)
         for a, s_ in enumerate(sheets):
@@ -241,6 +249,12 @@ class HybridOperator:
             cols += [np.full(len(elements), self.n_elements + self.node_of_port[port]), self.el0[sheet] + np.asarray(elements)]
             vals += [np.ones(len(elements)), -np.ones(len(elements))]
             row += len(elements)
+        for pairs, _r, _l in self.node_link_blocks:
+            for pa, pb in pairs:
+                rows += [np.array([row]), np.array([row])]
+                cols += [np.array([self.n_elements + self.node_of_port[pa]]), np.array([self.n_elements + self.node_of_port[pb]])]
+                vals += [np.ones(1), -np.ones(1)]
+                row += 1
         self.divergence = sp.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(self.m, self.n))
         self.timings = dict(grid_s=round(t1 - t0, 2), near_s=round(t2 - t1, 2), resistance_s=round(time.time() - t2, 2))
         log(f"hybrid operator: {len(sheets)} sheets, {self.m} dofs, {self.n} elements, grid {self.grid.shape}, "
