@@ -741,7 +741,9 @@ def solve_sheet_case(
     it, ``Z`` couples every branch to every other and is applied through the
     operator's transforms, so the reduction is carried out by a Krylov method.
 
-    ``preconditioner="auto"`` (default) picks ``near``.  ``preconditioner="block"`` keeps the near-field impedance but factors it
+    ``preconditioner="auto"`` (default) picks ``near``, or ``block`` from
+    :data:`AUTO_BLOCK_FROM_UNKNOWNS` saddle-point unknowns when the near
+    matrix would be factored by SuperLU (no MUMPS in the core).  ``preconditioner="block"`` keeps the near-field impedance but factors it
     on its own and approximates the Schur complement by the diagonal
     variant's nodal admittance: block elimination at a fraction of the
     saddle LU's memory.  ``preconditioner="near"`` factors the saddle-point matrix with
@@ -1120,7 +1122,7 @@ def _solve_ac(
         return x0
 
     if preconditioner == "auto":
-        preconditioner = choose_preconditioner(size)
+        preconditioner = choose_preconditioner(size, near_factorization)
     # The near block's strips are factored and solved on this pool; it lives
     # for the solve and its width is the budget, capped by the strips.  The
     # near LU solves a lockstep group's columns on it, a pair at a time.
@@ -1470,9 +1472,14 @@ def _near_impedance(
 NEAR_SOLVE_COLUMNS = 2
 
 
-# Where ``auto`` used to switch from near to block (SuperLU's saddle LU reaching
-# 4 GB).  ``auto`` is near at every size now; kept for the record in
-# docs/SHEET_PEEC.md.
+# From this many saddle-point unknowns (branches + nodes) ``auto`` takes block
+# when the near matrix would be factored by SuperLU (a core without MUMPS, or
+# ``near_factorization="superlu"``), for memory alone: where SuperLU's saddle
+# LU, at its largest per-unknown peak (8 to 10 KB), reaches 4 GB
+# (docs/SHEET_PRECONDITIONER_AUTO_RESULTS.json).  Factored by MUMPS the near
+# matrix fits far beyond, and ``auto`` is near at every size.  A fixed size
+# rather than the memory free keeps the choice, and the bits, the same on
+# every machine.
 AUTO_BLOCK_FROM_UNKNOWNS = 400_000
 
 # Strips the ``block`` preconditioner factors the near-field impedance in;
@@ -1547,18 +1554,19 @@ def lockstep_width(count: int, column_bytes: int) -> int:
     return max(1, min(count, int(LOCKSTEP_MEMORY_FRACTION * available) // int(column_bytes)))
 
 
-def choose_preconditioner(unknowns: int) -> str:
-    """``near`` at every size (see docs/SHEET_PEEC.md, "near at every size").
+def choose_preconditioner(unknowns: int, near_factorization: str = "mumps_quasi_definite") -> str:
+    """What ``auto`` takes, given the resolved near factorization.
 
-    ``block`` used to take over from :data:`AUTO_BLOCK_FROM_UNKNOWNS`, for the
-    memory of SuperLU's saddle LU.  Factored by MUMPS the near matrix fits far
-    beyond that, and block was slower everywhere it was measured: 2234 s
-    against 85 s on a 1.5M-unknown board conductor, and not finished in 90
-    minutes on two others near solved in 97 s and 1849 s.  ``block`` stays
-    available by name.
+    With MUMPS, ``near`` at every size (docs/SHEET_PEEC.md, "near at every
+    size"): block was slower everywhere it was measured, 2234 s against 85 s
+    on a 1.5M-unknown board conductor, and not finished in 90 minutes on two
+    others near solved in 97 s and 1849 s.  With SuperLU, ``block`` from
+    :data:`AUTO_BLOCK_FROM_UNKNOWNS`, where SuperLU's saddle LU would need
+    more than 4 GB: slower, but it fits.
     """
 
-    del unknowns
+    if near_factorization == "superlu" and unknowns >= AUTO_BLOCK_FROM_UNKNOWNS:
+        return "block"
     return "near"
 
 

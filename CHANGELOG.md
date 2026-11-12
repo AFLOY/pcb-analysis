@@ -6,15 +6,15 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
-- The sheet solve's `preconditioner="auto"` is `near` at every size, and the
-  near factor (`near_factorization`, default `"auto"`) is MUMPS where the core
-  is built with `-DPCB_NATIVE_MUMPS=ON` (`cpp/third_party/build_mumps.sh`),
-  SciPy's SuperLU otherwise.  Solves above 400,000 saddle-point unknowns,
-  which ran `block`, now run `near` and their bits move within the
-  tolerance.  On a filled two-layer board's ground conductor (1.05M branches,
+- The near factor of the sheet solve (`near_factorization`, default
+  `"auto"`) is MUMPS where the core is built with `-DPCB_NATIVE_MUMPS=ON`
+  (`cpp/third_party/build_mumps.sh`), SciPy's SuperLU otherwise, and with
+  MUMPS `preconditioner="auto"` is `near` at every size: solves above
+  400,000 saddle-point unknowns, which ran `block`, now run `near` and their
+  bits move within the tolerance.  With SuperLU `auto` still takes `block`
+  from 400,000.  On a filled two-layer board's ground conductor (1.05M branches,
   214 kHz) `near` with MUMPS took 84.5 s where `block` took 2,233.6 s and
-  SuperLU ran out of 86 GB (docs/SHEET_PEEC.md).  `block` and `diagonal` run
-  when named.
+  SuperLU ran out of 86 GB (docs/SHEET_PEEC.md).
 - The MUMPS factor runs on one thread unless `near_factor_threads` (an
   integer, or `"budget"`; solve functions, current-field and port-impedance
   settings) asks for more.  Results are now promised the same bits only at

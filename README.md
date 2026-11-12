@@ -176,7 +176,8 @@ OpenMP and `-DPCB_NATIVE_MARCH=x86-64-v3` (for example) replaces
 for the CPU near preconditioner, the default wherever it is linked; build it
 once per machine with `cpp/third_party/build_mumps.sh` and the same compilers
 as the core. Without it the near preconditioner is factored by SciPy's
-SuperLU. The scripts in `experiments/` regenerate the numbers quoted
+SuperLU, and from 400,000 unknowns the solve falls back to the slower `block`
+preconditioner, whose memory still fits. The scripts in `experiments/` regenerate the numbers quoted
 in `docs/`; run them from the repository root.
 
 ## License
