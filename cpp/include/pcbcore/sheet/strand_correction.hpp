@@ -65,6 +65,10 @@ private:
         std::vector<std::int32_t> block;
         std::int32_t width{0};
         std::vector<double> correction, exact;
+        // An uncut neighbour's mirrored entries, in a fixed order: source i
+        // writes its own at mirror_start[i].., and they are summed into the
+        // neighbour in that order, so the result does not depend on threads.
+        std::vector<std::int64_t> mirror_start, mirror_target;
     };
 
     template <typename Visit>
