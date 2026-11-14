@@ -384,9 +384,38 @@ of the FEM.  On the EVM-2L real fill (214 kHz, ten cases) the loss moved by
 less than 1 % and the current density peaks by -3 to -19 %, for 30 % more
 time and twice the memory (17 to 34 GB for the whole evaluation).
 
-**Decision:** both kept as options, off by default.  The hybrid
-triangle/square mesh (`exp/sheet-hybrid-triangles`) meets the same two errors
-by geometry instead.
+**Decision (2026-11-14): both on by default.**  `edge_strands` defaults to
+`"auto"`: strands are cut wherever they are built -- on the CPU, with the
+uniform convolution operator and the near preconditioner (the `auto`
+preconditioner takes `near` for a stranded mesh), above zero frequency --
+and `True` asks for them and refuses a setup without them.
+`rasterize_board(faces="auto")` records the faces on a uniform grid when the
+geometry native extension is built.  The metrics record both
+(`edge_strands`, `face_coverage`).  A port-impedance sweep cuts its strands
+once, for its top frequency, so the mesh and the impedance stay smooth in
+frequency.  The hybrid triangle/square mesh (`exp/sheet-hybrid-triangles`,
+tag `work/sheet-hybrid-triangles`) met the same two errors by geometry, but
+its thickness filaments' near zone outgrew the larger nets' memory at
+30-150 MHz (measured, not adopted).
+
+Rechecked on `exp/uniform-edge-via-accuracy` against the 2D FEM: a 1.2 mm
+strip pair at 0.1 mm without strands was 22 % (30 MHz) and 27 % (150 MHz)
+low; at 45 degrees it was +5.1 % at 1 MHz from the staircase alone, and with
+the faces and strands -0.02 % (1 MHz), -2.1 % (30 MHz) and -4.8 % (150 MHz),
+L within 0.5 %.  The 45-degree staircase at 150 MHz is the largest error left
+(0 degrees: -1.4 %).
+
+**Vias against a 3D FEM.**  Five two-layer cases (Coulomb-gauged A-V FEM,
+NGSolve, second order, converged to 0.15 % at DC and 214 kHz): a via pair, the
+pair 0.27 mm from the plates' edge, a 3 x 2 array carrying all the current
+between layers, two vias in thermal reliefs, one 0.6 mm drill.  Laid on the
+grid as plane_opt lays them (the barrel's footprint filled copper, its
+resistance rho * D / A over the wall cells by their share of the
+circumference), the uniform grid at 0.1 mm with strands was within
+-1.2..+1.4 % at DC, 214 kHz and 1 MHz.  At 0.2 mm the reliefs' 0.2 mm spokes
+are lost (+60..+76 %): a relief needs 0.1 mm or less.  The FEM puts the
+barrel's effective length at D - T/2, but with the footprint filled that is
+not better overall, so the resistance keeps D.
 
 ## Graded grids: precorrected FFT
 
