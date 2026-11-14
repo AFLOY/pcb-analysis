@@ -15,8 +15,8 @@ Versions before 0.7.0 were not tagged; see the Git history.
   `conductor_width`.  Below 100k unknowns in the largest conductor the call
   stays in the caller's process.
 - The uniform grid's two edge corrections are on by default: `edge_strands`
-  defaults to `"auto"` (cut on the CPU with the uniform operator and the near
-  preconditioner, above zero frequency; `True` refuses a setup without them,
+  defaults to `"auto"` (cut on the CPU and on CUDA, with the uniform operator
+  and the near preconditioner, above zero frequency; `True` refuses a setup without them,
   `False` leaves them out), the `auto` preconditioner takes `near` for a
   stranded mesh, and `rasterize_board(faces="auto")` records the faces' copper
   coverage on a uniform grid when the geometry native extension is built.
@@ -29,6 +29,13 @@ Versions before 0.7.0 were not tagged; see the Git history.
   of a stranded mesh sum each branch's strands.  Vias on the uniform grid
   were checked against a 3D FEM: within -1.14..+0.34 % at 0.1 mm, DC-1 MHz,
   and a via array's current sharing within 3 % (docs/SHEET_PEEC.md).
+  The CUDA sheet solve cuts the same strands and narrows the same faces: the
+  strands' currents are laid on the grid and read back by sparse products on
+  the device and the correction is a sparse product beside the convolution.
+  A stranded mesh's near matrix is formed on the host and factored on the
+  device.  On a GB200 the EVM-2L hot loop at 0.1 mm agreed with the CPU to
+  5e-5 in R and 1e-6 in L (214 kHz, 1 MHz, 30 MHz), in 5.2, 4.1 and 6.4 s
+  with the cuDSS near factors against 61, 73 and 240 s on 36 CPU cores.
 - Sheet solves can correct the two edge errors of the uniform grid, both
   off by default (docs/SHEET_PEEC.md, "Edges: strands and face coverage"):
   `edge_strands` cuts the branches along an edge across their width into

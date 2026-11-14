@@ -385,8 +385,8 @@ less than 1 % and the current density peaks by -3 to -19 %, for 30 % more
 time and twice the memory (17 to 34 GB for the whole evaluation).
 
 **Decision (2026-11-14): both on by default.**  `edge_strands` defaults to
-`"auto"`: strands are cut wherever they are built -- on the CPU, with the
-uniform convolution operator and the near preconditioner (the `auto`
+`"auto"`: strands are cut wherever they are built -- on the CPU or on CUDA,
+with the uniform convolution operator and the near preconditioner (the `auto`
 preconditioner takes `near` for a stranded mesh), above zero frequency --
 and `True` asks for them and refuses a setup without them.
 `rasterize_board(faces="auto")` records the faces on a uniform grid when the
