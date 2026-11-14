@@ -193,7 +193,10 @@ def test_a_second_frequency_reuses_the_near_plan_and_solves_as_a_fresh_plan_does
     pytest.importorskip("nvmath.sparse.advanced")
     from electrical.sheet_peec import sheet_cuda
 
-    common = {"relative_tolerance": 1e-9, "maximum_iterations": 240, "restart": 60, "execution_backend": "cuda",
+    # Solved two decades below the bound they are compared at: a cycle stops
+    # anywhere under its tolerance, and at 1e-9 the reused and the fresh
+    # solutions were once 1.4e-8 of the voltages apart (A100, whole suite).
+    common = {"relative_tolerance": 1e-11, "maximum_iterations": 240, "restart": 60, "execution_backend": "cuda",
               "device_id": 0, "preconditioner": "near", "near_factorization": "cudss_quasi_definite",
               # strands are cut to the skin depth: each frequency's mesh, and its pattern, is its own
               "maximum_filaments": 1, "edge_strands": False}
@@ -205,7 +208,7 @@ def test_a_second_frequency_reuses_the_near_plan_and_solves_as_a_fresh_plan_does
     sheet_cuda.clear_cuda_sheet_caches()
     fresh = solve_current_field_problem(_problem(frequency_hz=3e7), common)
     assert reused.metrics["converged"] and fresh.metrics["converged"]
-    # both solved to 1e-9; the reused and the fresh factors steer GMRES apart below that
+    # the reused and the fresh factors steer GMRES apart below the tolerance
     scale = max(abs(value) for value in fresh.voltage_phasor.values())
     assert max(abs(reused.voltage_phasor[n] - fresh.voltage_phasor[n]) for n in fresh.voltage_phasor) < 1e-8 * scale
     sheet_cuda.clear_cuda_sheet_caches()
