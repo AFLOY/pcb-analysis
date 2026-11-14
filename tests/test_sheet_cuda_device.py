@@ -113,8 +113,12 @@ def test_port_impedance_on_cuda_as_on_the_cpu() -> None:
         # the second conductor carries no net current in the first port's solve: its open voltage is read
         assert abs(b.z_ohm[1, 0]) > 0.0
         assert abs(b.z_ohm - a.z_ohm).max() < 1e-7 * abs(a.z_ohm).max()
-    cold = solve_port_impedance_problem(problem, {**common, "execution_backend": "cuda", "warm_start": False})
-    assert (sum(r["maximum_iterations"] for r in cuda.metrics["frequencies"][1:])
+    # A stranded mesh's near matrix holds its strands' exact couplings and leaves a cold start
+    # nothing to save; the start is weighed where the grid's near field alone preconditions.
+    plain = {**common, "edge_strands": False, "execution_backend": "cuda", "device_id": 0}
+    warm = solve_port_impedance_problem(problem, plain)
+    cold = solve_port_impedance_problem(problem, {**plain, "warm_start": False})
+    assert (sum(r["maximum_iterations"] for r in warm.metrics["frequencies"][1:])
             < sum(r["maximum_iterations"] for r in cold.metrics["frequencies"][1:]))
 
 
@@ -127,7 +131,14 @@ def test_the_cudss_quasi_definite_near_preconditioner_solves_as_superlu_does() -
     superlu = solve_current_field_problem(problem, common)
     cudss = solve_current_field_problem(problem, {**common, "near_factorization": "cudss_quasi_definite"})
     assert cudss.metrics["converged"] and superlu.metrics["converged"]
-    assert cudss.metrics["preconditioner_factorization_backend"] == "cudss_quasi_definite_ldlt"
+    # the mesh is cut into edge strands by default: its near matrix is the host's
+    assert cudss.metrics["edge_strands"] and superlu.metrics["edge_strands"]
+    assert cudss.metrics["preconditioner_factorization_backend"] == "cudss_quasi_definite_ldlt_host_near"
+    plain = solve_current_field_problem(
+        problem, {**common, "near_factorization": "cudss_quasi_definite", "edge_strands": False}
+    )
+    assert plain.metrics["converged"]
+    assert plain.metrics["preconditioner_factorization_backend"] == "cudss_quasi_definite_ldlt"
     assert cudss.metrics["solver_relative_residual"] < 1e-9
     assert max(abs(superlu.voltage_phasor[node] - cudss.voltage_phasor[node]) for node in superlu.voltage_phasor) < 1e-9
 
@@ -164,7 +175,8 @@ def test_a_second_frequency_reuses_the_near_plan_and_solves_as_a_fresh_plan_does
 
     common = {"relative_tolerance": 1e-9, "maximum_iterations": 240, "restart": 60, "execution_backend": "cuda",
               "device_id": 0, "preconditioner": "near", "near_factorization": "cudss_quasi_definite",
-              "maximum_filaments": 1}
+              # strands are cut to the skin depth: each frequency's mesh, and its pattern, is its own
+              "maximum_filaments": 1, "edge_strands": False}
     sheet_cuda.clear_cuda_sheet_caches()
     solve_current_field_problem(_problem(frequency_hz=1e6), common)
     planned = dict(sheet_cuda._CUDSS_CACHE)

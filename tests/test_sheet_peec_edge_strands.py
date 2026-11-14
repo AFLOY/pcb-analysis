@@ -280,3 +280,33 @@ def test_the_device_flux_of_a_stranded_mesh_is_the_host_s() -> None:
         full[active] = batch[b]
         want = host_flux(full)[active]
         assert np.allclose(got[b], want, rtol=0, atol=1e-10 * np.abs(want).max())
+
+
+def test_the_regularization_of_a_stranded_near_matrix_is_set_against_its_branches_not_its_strands() -> None:
+    """Strands in parallel make up their branch: the scale is the uncut mesh's, not the narrow strands'."""
+    import numpy as np
+
+    from electrical.sheet_peec import current_field_contract as cfc
+    from electrical.sheet_peec import sheet_peec as sheet
+    from electrical.sheet_peec.sheet_cuda import quasi_definite_near_matrix, strand_bundle_scale
+
+    from test_current_field_contract import _problem
+
+    def near_of(strands: bool):
+        problem = cfc.CurrentFieldProblem.from_mapping(_problem(frequency_hz=3e7))
+        mesh, operator, geometry = cfc._sheet_geometry(problem, {"edge_strands": strands})
+        operator = sheet._with_barrels(mesh, operator)
+        terminals = cfc._sheet_terminals(problem, geometry)
+        reduction = sheet._reduce(mesh, mesh.incidence(), sheet._source_vector(mesh, terminals), None)
+        near = sheet._near_impedance(mesh, operator, 2 * np.pi * 3e7, mesh.resistances(), reduction.active_branches)
+        return mesh, near, reduction
+
+    _, uncut, _ = near_of(False)
+    mesh, cut, reduction = near_of(True)
+    uncut_median = float(np.median(np.abs(uncut.diagonal())))
+    strand_median = float(np.median(np.abs(cut.diagonal())))
+    scale = strand_bundle_scale(mesh, cut, reduction.active_branches)
+    assert strand_median > 50.0 * uncut_median  # what the strands alone would have set
+    assert 0.5 * uncut_median < scale < 2.0 * uncut_median
+    _, _, delta = quasi_definite_near_matrix(cut, reduction.reduced, 1e-8, scale)
+    assert delta == 1e-8 / scale
