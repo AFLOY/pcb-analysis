@@ -116,3 +116,91 @@ def test_port_impedance_on_cuda_as_on_the_cpu() -> None:
     cold = solve_port_impedance_problem(problem, {**common, "execution_backend": "cuda", "warm_start": False})
     assert (sum(r["maximum_iterations"] for r in cuda.metrics["frequencies"][1:])
             < sum(r["maximum_iterations"] for r in cold.metrics["frequencies"][1:]))
+
+
+def test_the_cudss_quasi_definite_near_preconditioner_solves_as_superlu_does() -> None:
+    _require_cuda_device()
+    pytest.importorskip("nvmath.sparse.advanced")
+    problem = _problem(frequency_hz=3e7)
+    common = {"relative_tolerance": 1e-9, "maximum_iterations": 240, "restart": 60,
+              "execution_backend": "cuda", "device_id": 0, "preconditioner": "near"}
+    superlu = solve_current_field_problem(problem, common)
+    cudss = solve_current_field_problem(problem, {**common, "near_factorization": "cudss_quasi_definite"})
+    assert cudss.metrics["converged"] and superlu.metrics["converged"]
+    assert cudss.metrics["preconditioner_factorization_backend"] == "cudss_quasi_definite_ldlt"
+    assert cudss.metrics["solver_relative_residual"] < 1e-9
+    assert max(abs(superlu.voltage_phasor[node] - cudss.voltage_phasor[node]) for node in superlu.voltage_phasor) < 1e-9
+
+
+def test_the_layer_pair_kernel_mixes_as_the_batched_product_does() -> None:
+    _require_cuda_device()
+    import cupy as cp
+    import numpy as np
+
+    from electrical.sheet_peec.current_field_contract import CurrentFieldProblem, _sheet_geometry
+    from electrical.sheet_peec.sheet_cuda import CudaSheetInductanceOperator
+
+    problem = CurrentFieldProblem.from_mapping(_problem(frequency_hz=3e7))
+    _mesh, operator, _geometry = _sheet_geometry(problem, {"maximum_filaments": 8})
+    device = CudaSheetInductanceOperator(operator, cp)
+    host = CudaSheetInductanceOperator(operator, np)  # NumPy: the batched matmul path
+    rng = np.random.default_rng(11)
+    rows, cols = device.shape
+    for batch in (1, 2, 3, 5):
+        x = rng.standard_normal((batch, device.layer_count, rows, cols))
+        y = rng.standard_normal((batch, device.layer_count, rows, cols))
+        z = rng.standard_normal((batch, len(device.vertical_levels), rows, cols))
+        got = device.apply_batch(cp.asarray(x), cp.asarray(y), cp.asarray(z))
+        want = host.apply_batch(x, y, z)
+        for a, b in zip(got, want):
+            assert np.allclose(cp.asnumpy(a), b, rtol=1e-11, atol=1e-11 * np.abs(b).max())
+
+
+
+def test_a_second_frequency_reuses_the_near_plan_and_solves_as_a_fresh_plan_does() -> None:
+    _require_cuda_device()
+    pytest.importorskip("nvmath.sparse.advanced")
+    from electrical.sheet_peec import sheet_cuda
+
+    common = {"relative_tolerance": 1e-9, "maximum_iterations": 240, "restart": 60, "execution_backend": "cuda",
+              "device_id": 0, "preconditioner": "near", "near_factorization": "cudss_quasi_definite",
+              "maximum_filaments": 1}
+    sheet_cuda.clear_cuda_sheet_caches()
+    solve_current_field_problem(_problem(frequency_hz=1e6), common)
+    planned = dict(sheet_cuda._CUDSS_CACHE)
+    reused = solve_current_field_problem(_problem(frequency_hz=3e7), common)
+    assert set(sheet_cuda._CUDSS_CACHE) == set(planned)  # one pattern, planned once
+    sheet_cuda.clear_cuda_sheet_caches()
+    fresh = solve_current_field_problem(_problem(frequency_hz=3e7), common)
+    assert reused.metrics["converged"] and fresh.metrics["converged"]
+    # both solved to 1e-9; the reused and the fresh factors steer GMRES apart below that
+    scale = max(abs(value) for value in fresh.voltage_phasor.values())
+    assert max(abs(reused.voltage_phasor[n] - fresh.voltage_phasor[n]) for n in fresh.voltage_phasor) < 1e-8 * scale
+    sheet_cuda.clear_cuda_sheet_caches()
+
+
+def test_excitations_solved_in_lockstep_match_each_solved_alone() -> None:
+    _require_cuda_device()
+    pytest.importorskip("nvmath.sparse.advanced")
+    from electrical.sheet_peec.current_field_contract import solve_current_field_problems
+
+    common = {"relative_tolerance": 1e-9, "maximum_iterations": 240, "restart": 60, "execution_backend": "cuda",
+              "device_id": 0, "preconditioner": "near", "near_factorization": "cudss_quasi_definite"}
+    problems = []
+    for k, (source, sink, scale) in enumerate(((0, 2, 1.0), (1, 0, 2.0j), (2, 1, -0.5))):
+        value = _problem(frequency_hz=3e7)
+        value["name"] = f"case_{k}"
+        value["terminals"][0]["cells"] = [{"layer": "F.Cu", "x": source, "y": 0}]
+        value["terminals"][1]["cells"] = [{"layer": "B.Cu", "x": sink, "y": 0}]
+        value["terminals"][0]["current_a"] = {"real": scale.real if isinstance(scale, complex) else scale,
+                                              "imag": scale.imag if isinstance(scale, complex) else 0.0}
+        value["terminals"][1]["current_a"] = {"real": -(scale.real if isinstance(scale, complex) else scale),
+                                              "imag": -(scale.imag if isinstance(scale, complex) else 0.0)}
+        problems.append(value)
+    together = solve_current_field_problems(problems, common)
+    assert all("lockstep3" in result.metrics["preconditioner_factorization_backend"] for result in together)
+    for value, result in zip(problems, together):
+        alone = solve_current_field_problems([value], common)[0]
+        assert result.metrics["converged"] and alone.metrics["converged"]
+        scale = max(abs(v) for v in alone.voltage_phasor.values())
+        assert max(abs(result.voltage_phasor[n] - alone.voltage_phasor[n]) for n in alone.voltage_phasor) < 1e-7 * scale
