@@ -61,7 +61,9 @@ if case == "current_field":
     for result in solve_current_field_problems([first, second, _problem(frequency_hz=0.0)]):
         add(result.voltage_phasor)
         add(result.current_density_phasor)
-        add({k: v for k, v in result.metrics.items() if "seconds" not in k and not k.endswith("_ms")})
+        # times and the conductors solved side by side describe the run, not its answer
+        add({k: v for k, v in result.metrics.items()
+             if "seconds" not in k and not k.endswith("_ms") and k != "conductor_width"})
 elif case == "port_impedance":
     from electrical.sheet_peec.port_impedance_contract import solve_port_impedance_problem
     from tests.test_port_impedance_contract import ONE_FILAMENT, _problem

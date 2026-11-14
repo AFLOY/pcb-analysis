@@ -382,3 +382,83 @@ def test_the_near_preconditioner_keeps_a_cut_layer_s_filaments_together() -> Non
     assert cut.metrics["converged"] and max(cut.metrics["filament_counts"].values()) > 5
     # 31 iterations when the filaments' mutual terms were dropped from the near matrix
     assert cut.metrics["solver_iterations"] <= 3 * whole.metrics["solver_iterations"]
+
+
+def test_conductors_are_solved_side_by_side_to_the_bits_they_get_alone(monkeypatch) -> None:
+    # Three conductors (one problem each, at three frequencies) on a budget
+    # of four: they run at once, each in a process of its own on a budget of
+    # one, and each result is the one its own solve gives.
+    from electrical.sheet_peec import current_field_contract as contract
+    from electrical.threads import thread_budget_scope
+
+    monkeypatch.setattr(contract, "CONDUCTOR_PROCESS_FROM_UNKNOWNS", 1)  # these are tiny
+
+    problems = []
+    for k, frequency in enumerate((1000.0, 2000.0, 5000.0)):
+        value = _problem(frequency_hz=frequency)
+        value["name"] = f"three_layer_{k}"
+        problems.append(value)
+    with thread_budget_scope(4):
+        together = solve_current_field_problems(problems)
+    assert [result.metrics["problem_name"] for result in together] == [p["name"] for p in problems]
+    assert {result.metrics["conductor_width"] for result in together} == {3}
+    for value, result in zip(problems, together):
+        alone = solve_current_field_problem(value)
+        assert alone.metrics["conductor_width"] == 1
+        assert result.voltage_phasor == alone.voltage_phasor
+        assert result.current_density_phasor == alone.current_density_phasor
+        assert result.metrics["solver_iterations"] == alone.metrics["solver_iterations"]
+
+
+def test_only_the_conductors_that_fit_in_memory_run_side_by_side(monkeypatch) -> None:
+    from electrical.sheet_peec import current_field_contract as contract
+
+    estimates = [40, 30, 20, 10]
+    monkeypatch.setattr(contract, "_available_memory_bytes", lambda: None)
+    assert contract.conductor_width(estimates, 8) == 4  # memory unknown: the budget and the count bound it
+    assert contract.conductor_width(estimates, 2) == 2
+    assert contract.conductor_width(estimates[:1], 8) == 1
+    monkeypatch.setattr(contract, "_available_memory_bytes", lambda: 150)
+    assert contract.conductor_width(estimates, 8) == 2  # 40 + 30 fit in half of 150, 40 + 30 + 20 do not
+    monkeypatch.setattr(contract, "_available_memory_bytes", lambda: 10)
+    assert contract.conductor_width(estimates, 8) == 1  # not even the largest: one at a time
+
+
+def test_a_conductor_is_reckoned_by_its_unknowns() -> None:
+    from electrical.sheet_peec import current_field_contract as contract
+    from electrical.sheet_peec import near_factor
+
+    problem = CurrentFieldProblem.from_mapping(_problem())
+    # three layers of three cells in a row, one filament each at DC: 3 nodes
+    # and 2 branches a layer, and the four vertical segments
+    unknowns = 3 * (3 + 2) + len(problem.vertical_segments)
+    assert contract.conductor_unknowns(problem, {"maximum_filaments": 1}) == (unknowns, 1)
+    per = contract.CONDUCTOR_BYTES_PER_UNKNOWN + contract.CONDUCTOR_BYTES_PER_UNKNOWN_PER_FILAMENT
+    mumps = {"maximum_filaments": 1, "near_factorization": "mumps_quasi_definite"} if near_factor.mumps_available() else None
+    if mumps is not None:
+        assert contract.conductor_bytes(problem, mumps) == per * unknowns
+    superlu = {"maximum_filaments": 1, "near_factorization": "superlu"}
+    assert contract.conductor_bytes(problem, superlu) == int(per * contract.SUPERLU_MEMORY_RATIO * unknowns)
+    # more filaments: more unknowns and more bytes each
+    cut = CurrentFieldProblem.from_mapping(_problem(frequency_hz=3e7))
+    many, filaments = contract.conductor_unknowns(cut, {"maximum_filaments": 64})
+    assert filaments > 1 and many > unknowns
+    assert contract.conductor_bytes(cut, superlu | {"maximum_filaments": 64}) > contract.conductor_bytes(problem, superlu) * many / unknowns
+
+
+def test_a_memory_share_scales_the_lockstep_cut(monkeypatch) -> None:
+    from electrical.sheet_peec import sheet_peec
+
+    monkeypatch.setattr(sheet_peec, "_available_memory_bytes", lambda: 1000)
+    assert sheet_peec.lockstep_width(10, 100) == 5  # half of 1000 in columns of 100
+    with sheet_peec.memory_share(0.5):
+        assert sheet_peec.lockstep_width(10, 100) == 2
+        with sheet_peec.memory_share(0.5):
+            assert sheet_peec.lockstep_width(10, 100) == 1
+    assert sheet_peec.lockstep_width(10, 100) == 5
+
+
+def test_small_conductors_stay_in_the_caller_s_process() -> None:
+    # below CONDUCTOR_PROCESS_FROM_UNKNOWNS a worker's start would cost more than the solve
+    problems = [_problem(frequency_hz=f) for f in (1000.0, 2000.0)]
+    assert {result.metrics["conductor_width"] for result in solve_current_field_problems(problems)} == {1}

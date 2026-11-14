@@ -9,17 +9,20 @@ owns only the physical sheet mesh and solve.
 from __future__ import annotations
 
 import math
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
 import numpy as np
 
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
+from electrical.threads import set_thread_budget, thread_budget
 
 from .sheet_pfft import PfftSheetInductanceOperator
 from .near_factor import resolve_near_factor_threads, resolve_near_factorization
 from .sheet_operator import SheetInductanceOperator, SheetStackup
-from .sheet_peec import SheetMesh, Terminal, ViaBranch, solve_sheet_cases
+from .sheet_peec import SheetMesh, Terminal, ViaBranch, _available_memory_bytes, memory_share, solve_sheet_cases
 from .sheet_results import cell_current_density_phasor, sheet_fields
 from .skin_filaments import filament_links, graded_filaments, skin_depth_m, tube_resistance_ratio
 
@@ -785,45 +788,84 @@ def solve_current_field_problems(
         else:
             groups.append([index])
     results: list[CurrentFieldSolveResult | None] = [None] * len(problems)
-    for members in groups:
-        first = problems[members[0]]
-        mesh, operator, geometry = _sheet_geometry(first, settings)
-        terminal_sets = [_sheet_terminals(problems[index], geometry) for index in members]
-        solve_arguments = {
-            "frequency_hz": first.frequency_hz,
-            "tolerance": float(settings.get("relative_tolerance", 1e-9)),
-            "max_iterations": int(settings.get("maximum_iterations", 200)),
-            "restart": int(settings.get("restart", 120)),
-            "preconditioner": str(settings.get("preconditioner", "auto")),
-        }
-        if execution_backend == "cuda" and getattr(mesh, "strands", None) is not None:
-            raise ValueError("edge strands are solved on the CPU only")
-        if execution_backend == "cuda":
-            from .sheet_cuda import solve_sheet_case_cuda
+    width = 1
+    if execution_backend == "cpu" and len(groups) > 1:
+        estimates = [conductor_bytes(problems[members[0]], settings) for members in groups]
+        largest = max(conductor_unknowns(problems[members[0]], settings)[0] for members in groups)
+        if largest >= CONDUCTOR_PROCESS_FROM_UNKNOWNS:
+            width = conductor_width(estimates, thread_budget())
+        # largest first, so that the last to finish is a small one
+        groups = [groups[k] for k in sorted(range(len(groups)), key=lambda k: -estimates[k])]
 
-            solved = []
-            for terminals in terminal_sets:
-                solution, telemetry = solve_sheet_case_cuda(
-                    mesh,
-                    operator,
-                    terminals,
-                    device_id=int(settings.get("device_id", 0)),
-                    **solve_arguments,
-                )
-                solved.append((solution, dict(telemetry.as_metrics(), edge_strands=geometry.edge_strands,
-                                              face_coverage=geometry.face_coverage)))
-        else:
-            near_factorization = resolve_near_factorization(str(settings.get("near_factorization", "auto")))
-            factor_threads = resolve_near_factor_threads(settings.get("near_factor_threads"))
-            backend_metrics = {
-                "backend": "sheet_peec",
-                "resolved_backend": "numpy-scipy-sheet-peec",
-                "fallback_used": False,
-                "near_factorization": near_factorization,
-                "near_factor_threads": factor_threads,
-                "edge_strands": geometry.edge_strands,
-                "face_coverage": geometry.face_coverage,
-            }
+    if width == 1:
+        for members in groups:
+            for index, result in zip(members, _solve_conductor([problems[k] for k in members], settings, 1)):
+                results[index] = result
+    else:
+        # Conductors share nothing, so they are solved side by side, each in
+        # a process of its own on an even share of the budget and of the free
+        # memory; each gets the bits it gets alone.  Threads would share one
+        # interpreter: on five full-board conductors (1.1M unknowns each) the
+        # GMRES steps queued on its lock and five side by side took 0.86 of
+        # the time one by one, against 0.27 in processes.
+        threads = max(1, thread_budget() // width)
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=width, mp_context=context) as pool:
+            futures = [
+                (members, pool.submit(_solve_conductor_in_process, [problems[k] for k in members], settings, width, threads))
+                for members in groups
+            ]
+            for members, future in futures:
+                for index, result in zip(members, future.result()):
+                    results[index] = result
+    return [result for result in results if result is not None]
+
+
+def _solve_conductor(
+    problems: Sequence[CurrentFieldProblem], settings: Mapping[str, Any], width: int
+) -> list[CurrentFieldSolveResult]:
+    """Solve the problems of one conductor (one geometry, several excitations) together."""
+    execution_backend = str(settings.get("execution_backend", "cpu"))
+    first = problems[0]
+    mesh, operator, geometry = _sheet_geometry(first, settings)
+    terminal_sets = [_sheet_terminals(problem, geometry) for problem in problems]
+    solve_arguments = {
+        "frequency_hz": first.frequency_hz,
+        "tolerance": float(settings.get("relative_tolerance", 1e-9)),
+        "max_iterations": int(settings.get("maximum_iterations", 200)),
+        "restart": int(settings.get("restart", 120)),
+        "preconditioner": str(settings.get("preconditioner", "auto")),
+    }
+    if execution_backend == "cuda" and getattr(mesh, "strands", None) is not None:
+        raise ValueError("edge strands are solved on the CPU only")
+    if execution_backend == "cuda":
+        from .sheet_cuda import solve_sheet_case_cuda
+
+        solved = []
+        for terminals in terminal_sets:
+            solution, telemetry = solve_sheet_case_cuda(
+                mesh,
+                operator,
+                terminals,
+                device_id=int(settings.get("device_id", 0)),
+                **solve_arguments,
+            )
+            solved.append((solution, dict(telemetry.as_metrics(), edge_strands=geometry.edge_strands,
+                                          face_coverage=geometry.face_coverage)))
+    else:
+        near_factorization = resolve_near_factorization(str(settings.get("near_factorization", "auto")))
+        factor_threads = resolve_near_factor_threads(settings.get("near_factor_threads"))
+        backend_metrics = {
+            "backend": "sheet_peec",
+            "resolved_backend": "numpy-scipy-sheet-peec",
+            "fallback_used": False,
+            "near_factorization": near_factorization,
+            "near_factor_threads": factor_threads,
+            "conductor_width": width,
+            "edge_strands": geometry.edge_strands,
+            "face_coverage": geometry.face_coverage,
+        }
+        with memory_share(1.0 / width):
             solved = [
                 (solution, dict(backend_metrics, lockstep_columns=solution.lockstep_columns))
                 for solution in solve_sheet_cases(
@@ -836,11 +878,88 @@ def solve_current_field_problems(
                     **solve_arguments,
                 )
             ]
-        for index, terminals, (solution, backend_metrics) in zip(members, terminal_sets, solved):
-            results[index] = _field_result(
-                mesh, operator, solution, terminals, _sheet_context(problems[index], geometry), backend_metrics
-            )
-    return [result for result in results if result is not None]
+    return [
+        _field_result(mesh, operator, solution, terminals, _sheet_context(problem, geometry), metrics)
+        for problem, terminals, (solution, metrics) in zip(problems, terminal_sets, solved)
+    ]
+
+
+def _solve_conductor_in_process(
+    problems: Sequence[CurrentFieldProblem], settings: Mapping[str, Any], width: int, threads: int
+) -> list[CurrentFieldSolveResult]:
+    """:func:`_solve_conductor` in a worker process, on its share of the budget."""
+    set_thread_budget(threads)
+    return _solve_conductor(problems, settings, width)
+
+
+# Peak memory of one conductor's solve, per saddle-point unknown (branches and
+# nodes, every filament counted): a constant and a part per filament of its
+# layer, because the near factor couples a branch to the branches of every
+# filament of its layer above it.  Measured with near + MUMPS (peak RSS of the
+# whole solve, Flow2): 6.4 KB at one filament (EVM-2L hot loop, 0.1 mm,
+# 442k unknowns, 2.84 GB) and 22.7 KB at seven (its PGND real fill at 30 MHz,
+# 2.45M unknowns, 55.7 GB); the line through them, a quarter added.  SciPy's
+# SuperLU, where the core lacks MUMPS, peaks at 8 to 10 KB at one filament
+# (sheet_peec.AUTO_BLOCK_FROM_UNKNOWNS) and is taken to grow the same way.
+CONDUCTOR_BYTES_PER_UNKNOWN = 4_600
+CONDUCTOR_BYTES_PER_UNKNOWN_PER_FILAMENT = 3_400
+SUPERLU_MEMORY_RATIO = 1.5
+# Conductors solved side by side may together take this fraction of the memory
+# available when the call starts.
+CONDUCTOR_MEMORY_FRACTION = 0.5
+# A worker process costs its start (an interpreter, NumPy, SciPy, this
+# package) and the copy of its problems and results, a few seconds; below this
+# many unknowns in the largest conductor a call's conductors are solved one
+# after another in the caller's process.
+CONDUCTOR_PROCESS_FROM_UNKNOWNS = 100_000
+
+
+def conductor_unknowns(problem: CurrentFieldProblem, settings: Mapping[str, Any]) -> tuple[int, int]:
+    """A conductor's saddle-point unknowns and the most filaments any of its layers is cut into.
+
+    Counted without building the mesh: a node per occupied cell and filament,
+    a branch per pair of neighbours on a filament, the vertical segments.
+    """
+    cuts = _filament_cuts(problem.layers, problem.frequency_hz, settings)
+    unknowns = len(problem.vertical_segments)
+    for layer in problem.layers:
+        cells = problem.copper_by_layer[layer.name]
+        pairs = sum((x + 1, y) in cells for x, y in cells) + sum((x, y + 1) in cells for x, y in cells)
+        unknowns += len(cuts[layer.name]) * (len(cells) + pairs)
+    filaments = max((len(cuts[layer.name]) for layer in problem.layers), default=1)
+    return unknowns, filaments
+
+
+def conductor_bytes(problem: CurrentFieldProblem, settings: Mapping[str, Any]) -> int:
+    """Memory the solve of one conductor is reckoned to take, from its cells alone."""
+    unknowns, filaments = conductor_unknowns(problem, settings)
+    per_unknown = CONDUCTOR_BYTES_PER_UNKNOWN + CONDUCTOR_BYTES_PER_UNKNOWN_PER_FILAMENT * filaments
+    if resolve_near_factorization(str(settings.get("near_factorization", "auto"))) == "superlu":
+        per_unknown *= SUPERLU_MEMORY_RATIO
+    return int(per_unknown * unknowns)
+
+
+def conductor_width(estimates: Sequence[int], budget: int) -> int:
+    """How many conductors of a call to solve side by side, at least one.
+
+    No more than there are conductors or budget threads, and only as many of
+    the largest as fit together in :data:`CONDUCTOR_MEMORY_FRACTION` of the
+    memory available (all of them when that is unknown).
+    """
+    width = min(len(estimates), max(1, int(budget)))
+    if width < 2:
+        return 1
+    available = _available_memory_bytes()
+    if available is None:
+        return width
+    allowance = CONDUCTOR_MEMORY_FRACTION * available
+    taken = fitted = 0
+    for estimate in sorted(estimates, reverse=True)[:width]:
+        if taken + estimate > allowance:
+            break
+        taken += estimate
+        fitted += 1
+    return max(1, fitted)
 
 
 def _same_geometry(first: CurrentFieldProblem, second: CurrentFieldProblem) -> bool:
