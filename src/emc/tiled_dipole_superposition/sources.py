@@ -223,6 +223,10 @@ def dipoles_from_sheet_peec(mesh, solution) -> CurrentDipoles:
     current = np.asarray(solution.branch_current, dtype=np.complex128)
     if current.shape != (mesh.branch_count,):
         raise ValueError("solution.branch_current must hold one value per branch")
+    if getattr(mesh, "strands", None) is not None:
+        # Edge strands (and partly covered faces) split a branch across its
+        # width; seen from afar the branch carries their sum at its centre.
+        current = mesh.fold(current)
 
     # Assembled with array indexing rather than one Python tuple per branch:
     # a plane at the acceptance grid has 10^5 to 10^6 branches, and the
@@ -234,8 +238,8 @@ def dipoles_from_sheet_peec(mesh, solution) -> CurrentDipoles:
         [(via.lower_layer, via.upper_layer, via.row, via.col) for via in mesh.via_branches], dtype=np.int64
     ).reshape(-1, 4)
     count_x, count_y = branch_x.shape[0], branch_y.shape[0]
-    positions = np.empty((mesh.branch_count, 3), dtype=np.float64)
-    moments = np.zeros((mesh.branch_count, 3), dtype=np.complex128)
+    positions = np.empty((len(current), 3), dtype=np.float64)
+    moments = np.zeros((len(current), 3), dtype=np.complex128)
     positions[:count_x] = np.column_stack(
         (x0 + (branch_x[:, 2] + 1.0) * pitch, y0 + (branch_x[:, 1] + 0.5) * pitch, heights[branch_x[:, 0]])
     )
@@ -262,14 +266,18 @@ def _dipoles_on_graded_grid(mesh, solution) -> CurrentDipoles:
     current = np.asarray(solution.branch_current, dtype=np.complex128)
     if current.shape != (mesh.branch_count,):
         raise ValueError("solution.branch_current must hold one value per branch")
+    if getattr(mesh, "strands", None) is not None:
+        # Edge strands (and partly covered faces) split a branch across its
+        # width; seen from afar the branch carries their sum at its centre.
+        current = mesh.fold(current)
     branch_x = np.asarray(mesh.branch_x, dtype=np.int64).reshape(-1, 3)
     branch_y = np.asarray(mesh.branch_y, dtype=np.int64).reshape(-1, 3)
     vias = np.asarray(
         [(via.lower_layer, via.upper_layer, via.row, via.col) for via in mesh.via_branches], dtype=np.int64
     ).reshape(-1, 4)
     count_x, count_y = branch_x.shape[0], branch_y.shape[0]
-    positions = np.empty((mesh.branch_count, 3), dtype=np.float64)
-    moments = np.zeros((mesh.branch_count, 3), dtype=np.complex128)
+    positions = np.empty((len(current), 3), dtype=np.float64)
+    moments = np.zeros((len(current), 3), dtype=np.complex128)
     left, right = xc[branch_x[:, 2]], xc[branch_x[:, 2] + 1]
     positions[:count_x] = np.column_stack((0.5 * (left + right), yc[branch_x[:, 1]], heights[branch_x[:, 0]]))
     moments[:count_x, 0] = current[:count_x] * (right - left)
