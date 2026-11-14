@@ -6,6 +6,20 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
+- The CUDA sheet solve factors its near preconditioner with cuDSS by default
+  (`near_factorization="auto"`: `cudss_quasi_definite` where nvmath-python is
+  installed, `superlu` on the host otherwise; the `cuda` extra now installs
+  `nvmath-python[cu13]`).  With the host's SuperLU factors a CUDA solve was
+  slower than the CPU's (EVM-2L hot loop at 0.1 mm on a GB200: 80 to 586 s,
+  cuDSS 4 to 6 s, 36 CPU cores 61 to 240 s).  Results agree to the solver
+  tolerance; `preconditioner_factorization_backend` records which ran.
+- Fixed: a CUDA solve of one excitation with cuDSS factors could stay just
+  above its tolerance for every cycle allowed (a real fill's VOUT at 0.1 mm
+  on a GB200: 1.04e-9 against 1e-9 for 200 cycles, 224 s).  Each restart
+  cycle now solves for the correction of the current residual, as the
+  lockstep path did, so the error of factors that are not pivoted does not
+  stay in the answer (EVM-2L hot loop, 0.2 mm, 30 MHz, A100, tolerance 1e-11:
+  8.6e-10 unconverged after 30 cycles before, 1.5e-12 after 10 now).
 - `solve_current_field_problems` solves the conductors of one call side by
   side in worker processes (`spawn`), each on an even share of the thread
   budget and of the free memory, as many as fit in half of `MemAvailable` by
