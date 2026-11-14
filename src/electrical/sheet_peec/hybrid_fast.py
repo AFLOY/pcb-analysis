@@ -31,6 +31,35 @@ from .hybrid_rt0 import MU0, RT0Space, Sheet, element_points, near_moments_over,
 KAPPA = MU0 / (4.0 * math.pi)
 
 
+def _native_sheet(name: str):
+    """The native sheet module when it has ``name``, else None."""
+    from electrical import backend as _backend
+
+    core = _backend.core()
+    sheet = getattr(core, "sheet", None) if core is not None else None
+    return sheet if sheet is not None and hasattr(sheet, name) else None
+
+
+def _near_pairs(ca: np.ndarray, da: np.ndarray, cb: np.ndarray, db: np.ndarray, factor: float, floor: float):
+    """Element pairs (e, f) with |c_e - c_f| < max(factor max(d_e, d_f), floor), ordered by e then f."""
+    sheet = _native_sheet("rt0_near_pairs")
+    if sheet is not None:
+        from electrical.threads import thread_budget
+
+        e, f = sheet.rt0_near_pairs(np.ascontiguousarray(ca), np.ascontiguousarray(da), np.ascontiguousarray(cb),
+                                    np.ascontiguousarray(db), float(factor), float(floor), thread_budget())
+        return np.asarray(e, dtype=np.int64), np.asarray(f, dtype=np.int64)
+    from scipy.spatial import cKDTree
+
+    radius = max(factor * max(float(da.max()), float(db.max())), floor)
+    near = cKDTree(ca).sparse_distance_matrix(cKDTree(cb), radius, output_type="ndarray")
+    e, f = near["i"].astype(np.int64), near["j"].astype(np.int64)
+    reach = np.maximum(factor * np.maximum(da[e], db[f]), floor)
+    keep = near["v"] < reach
+    order = np.lexsort((f[keep], e[keep]))
+    return e[keep][order], f[keep][order]
+
+
 def _point_phi(space: RT0Space):
     """Far quadrature points (P, 2) and Phi (P, 3E): each point's weighted [1, r - c] in its element's columns."""
     pts, w = element_points(space.vertices, space.corners, space.kind, order="far")
@@ -100,9 +129,35 @@ class HybridOperator:
 
     def __init__(self, sheets: list[Sheet], links, frequency: float, grid_pitch: float, near_factor: float = 2.5,
                  close_factor: float = 1.2, near_floor: float = 0.0, taper_radius: float = 2.0e-3,
-                 node_ports=(), node_links=(), node_element_links=(), node_link_blocks=(), log=print) -> None:
+                 node_ports=(), node_links=(), node_element_links=(), node_link_blocks=(), log=print,
+                 correction_floor: float | None = None, grid_reach_pitches: float | None = None,
+                 correction_gap: float | None = None, near_same_layer: bool = False,
+                 sheet_impedance=None, sheet_couplings=()) -> None:
+        """Near zone (the defaults keep the earlier behaviour).  A pair of elements is corrected
+        (exact moments for the grid's) within max(near_factor * diameter,
+        grid_reach_pitches * grid pitch, correction_floor); grid_reach_pitches
+        defaults to 2 near_factor and correction_floor to max(near_floor,
+        taper_radius), which ties the corrected zone to the preconditioner's
+        taper.  correction_gap: sheet pairs farther apart than this (vertical
+        gap) take the grid alone -- across a board's core the kernel is smooth
+        on the grid.  near_same_layer: the preconditioner keeps only the sheet
+        pairs of one layer (a layer's filaments).  The preconditioner's taper
+        must not reach past the corrected zone.
+
+        Surface sheets (hybrid_surface): ``sheet_impedance`` maps a sheet to
+        its complex impedance per square, which then replaces rho / t, and
+        ``sheet_couplings`` lists (a, b, z) -- sheets on one mesh whose
+        currents at the same place couple through z per square (a layer's two
+        faces).  Both enter the impedance with the RT0 mass matrix.
+        """
         t0 = time.time()
         self.taper_radius = float(taper_radius)
+        self.correction_floor = max(float(near_floor), float(taper_radius)) if correction_floor is None else float(correction_floor)
+        self.grid_reach_pitches = 2.0 * float(near_factor) if grid_reach_pitches is None else float(grid_reach_pitches)
+        self.correction_gap = None if correction_gap is None else float(correction_gap)
+        self.near_same_layer = bool(near_same_layer)
+        if self.taper_radius > max(self.correction_floor, self.grid_reach_pitches * float(grid_pitch)) + 1e-15:
+            raise ValueError("taper_radius reaches past the corrected near zone")
         self.close_factor = float(close_factor)
         self.near_floor = float(near_floor)
         self.sheets = sheets
@@ -142,8 +197,14 @@ class HybridOperator:
         # Coupled node links: each block is (pairs [(port_a, port_b), ...],
         # resistances (k,), inductance matrix (k, k)) -- a barrel cut into
         # azimuthal strips, coupled to one another.
-        self.node_link_blocks = [(list(pairs), np.asarray(r, dtype=float), np.asarray(l, dtype=float))
-                                 for pairs, r, l in node_link_blocks]
+        # A block may carry a fourth entry, a group label per branch (a barrel's
+        # strips share one): the preconditioner then keeps only the couplings
+        # within a group, so a block coupling every barrel to every other does
+        # not tie the whole board together in the near factor (the operator
+        # itself keeps them all).
+        self.node_link_blocks = [(list(b[0]), np.asarray(b[1], dtype=float), np.asarray(b[2], dtype=float))
+                                 for b in node_link_blocks]
+        self._node_link_groups = [np.asarray(b[3]) if len(b) > 3 else None for b in node_link_blocks]
         n_blocks = sum(len(b[0]) for b in self.node_link_blocks)
         self.m_plane = int(self.dof0[-1])
         self.m = self.m_plane + nlink + len(self.node_links) + n_node_el + n_blocks
@@ -171,11 +232,22 @@ class HybridOperator:
         # orders differed by up to ~10 %, and MUMPS's LDL^T (the upper triangle)
         # then solved its own matrix only to 1e-2.  A sheet's pairs with itself
         # take the mean of both orders.
+        skipped = 0
         for (a, b), (key, gap) in self._pair_key.items():
             if key in self._corr or a > b:
                 continue
             sa_, sb_ = sheets[a], sheets[b]
             ia, ib = self.space_of[a], self.space_of[b]
+            if self.correction_gap is not None and gap > self.correction_gap:
+                shape = (sa_.space.size, sb_.space.size)
+                self._corr[key] = sp.csr_matrix(shape)
+                self._near[key] = sp.csr_matrix(shape)
+                reverse_key = self._pair_key[b, a][0]
+                if reverse_key != key:
+                    self._corr[reverse_key] = sp.csr_matrix(shape[::-1])
+                    self._near[reverse_key] = sp.csr_matrix(shape[::-1])
+                skipped += 1
+                continue
             exact, approx, kept = self._near_pair(ia, ib, gap, thickness_nodes(sa_.thickness, sa_.z, sb_.thickness, sb_.z),
                                                   near_factor)
             reverse_key = self._pair_key[b, a][0]
@@ -192,7 +264,10 @@ class HybridOperator:
         t2 = time.time()
 
         # Resistance (block diagonal) and links.
-        blocks = [s_.space.resistance(s_.resistivity / s_.thickness) for s_ in sheets]
+        sheet_impedance = dict(sheet_impedance or {})
+        self.sheet_couplings = list(sheet_couplings)
+        blocks = [s_.space.resistance_sparse(sheet_impedance.get(a, s_.resistivity / s_.thickness))
+                  for a, s_ in enumerate(sheets)]
         # A link's fifth entry is its resistance, or (resistance, inductance):
         # a via barrel's own inductance, uncoupled.
         def link_impedance(entry):
@@ -210,8 +285,29 @@ class HybridOperator:
         diagonal = np.concatenate([link_r, node_z, node_el_z])
         coupled = [sp.csr_matrix(np.diag(r) + 1j * self.omega * l) if self.omega > 0 else sp.csr_matrix(np.diag(r))
                    for _pairs, r, l in self.node_link_blocks]
-        self.resistance = sp.block_diag([sp.csr_matrix(bk) for bk in blocks] + ([sp.diags(diagonal)] if len(diagonal) else [])
-                                        + coupled, format="csr")
+        coupled_near = []
+        for (_pairs, r, l), groups in zip(self.node_link_blocks, self._node_link_groups):
+            if groups is None or self.omega == 0:
+                coupled_near.append(sp.csr_matrix(np.diag(r) + 1j * self.omega * l) if self.omega > 0 else sp.csr_matrix(np.diag(r)))
+            else:
+                same = groups[:, None] == groups[None, :]
+                coupled_near.append(sp.csr_matrix(np.diag(r) + 1j * self.omega * np.where(same, l, 0.0)))
+        plane_and_links = [sp.csr_matrix(bk) for bk in blocks] + ([sp.diags(diagonal)] if len(diagonal) else [])
+        self.resistance = sp.block_diag(plane_and_links + coupled, format="csr")
+        self._impedance_near_links = sp.block_diag(plane_and_links + coupled_near, format="csr")
+        if self.sheet_couplings:
+            rows, cols, vals = [], [], []
+            for a, b, z in self.sheet_couplings:
+                if sheets[a].space is not sheets[b].space:
+                    raise ValueError("coupled surface sheets must share a mesh")
+                mass = sheets[a].space.resistance_sparse(1.0).tocoo()
+                for (p_, q_) in ((a, b), (b, a)):
+                    rows.append(mass.row + self.dof0[p_])
+                    cols.append(mass.col + self.dof0[q_])
+                    vals.append(z * mass.data)
+            extra = sp.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(self.m, self.m))
+            self.resistance = (self.resistance.astype(np.complex128) + extra).tocsr()
+            self._impedance_near_links = (self._impedance_near_links.astype(np.complex128) + extra).tocsr()
         # Ports.
         ports = np.full(self.m, -1)
         for a, s_ in enumerate(sheets):
@@ -258,22 +354,25 @@ class HybridOperator:
         self.divergence = sp.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(self.m, self.n))
         self.timings = dict(grid_s=round(t1 - t0, 2), near_s=round(t2 - t1, 2), resistance_s=round(time.time() - t2, 2))
         log(f"hybrid operator: {len(sheets)} sheets, {self.m} dofs, {self.n} elements, grid {self.grid.shape}, "
-            f"{len(self._corr)} pair kinds, near nnz {sum(v.nnz for v in self._near.values())}, {self.timings}")
+            f"{len(self._corr)} pair kinds ({skipped} beyond correction_gap), near nnz {sum(v.nnz for v in self._near.values())}, "
+            f"correction nnz {sum(v.nnz for v in self._corr.values())}, {self.timings}")
 
     # -- near pairs ------------------------------------------------------------
     def _near_pair(self, ia: int, ib: int, gap: float, nodes, near_factor: float):
         """Exact near moments and the grid's approximation of the same pairs, (3E_a, 3E_b) sparse."""
         sa, sb = self.spaces[ia], self.spaces[ib]
-        reach = np.maximum(near_factor * np.maximum(np.maximum(sa.diameter[:, None], sb.diameter[None, :]),
-                                                    2.0 * self.grid.pitch), max(self.near_floor, self.taper_radius))
-        near_e, near_f = [], []
-        for start in range(0, len(sa.kind), 2000):
-            d = np.linalg.norm(sa.centroid[start:start + 2000, None, :] - sb.centroid[None, :, :], axis=2)
-            e, f = np.nonzero(d * d + gap * gap < reach[start:start + 2000] ** 2)
-            near_e.append(e + start)
-            near_f.append(f)
-        e = np.concatenate(near_e)
-        f = np.concatenate(near_f)
+        floor = max(self.grid_reach_pitches * self.grid.pitch, self.correction_floor)
+        # The pairs within reach in the plane, once per pair of meshes (every
+        # sheet pair of those meshes filters them by its own gap).
+        cache = self.__dict__.setdefault("_pair_cache", {})
+        if (ia, ib, near_factor) not in cache:
+            cache[ia, ib, near_factor] = _near_pairs(sa.centroid, sa.diameter, sb.centroid, sb.diameter, near_factor, floor)
+        e, f = cache[ia, ib, near_factor]
+        if gap > 0.0 and len(e):
+            reach = np.maximum(near_factor * np.maximum(sa.diameter[e], sb.diameter[f]), floor)
+            d = sa.centroid[e] - sb.centroid[f]
+            keep = np.einsum("pi,pi->p", d, d) + gap * gap < reach * reach
+            e, f = e[keep], f[keep]
         if len(e) == 0:
             z = sp.csr_matrix((3 * len(sa.kind), 3 * len(sb.kind)))
             return z, z, z
@@ -311,9 +410,22 @@ class HybridOperator:
     def _point_moments(self, ia: int, ib: int, e: np.ndarray, f: np.ndarray, nodes, chunk: int = 20000) -> np.ndarray:
         """(P, 3, 3) moments of element pairs by point quadrature on both, the kernel averaged over ``nodes``."""
         sa, sb = self.spaces[ia], self.spaces[ib]
-        pa, wa = element_points(sa.vertices, sa.corners, sa.kind, order="far")
-        pb, wb = element_points(sb.vertices, sb.corners, sb.kind, order="far")
+        quad = self.__dict__.setdefault("_far_points", {})
+        for i, s_ in ((ia, sa), (ib, sb)):
+            if i not in quad:
+                quad[i] = element_points(s_.vertices, s_.corners, s_.kind, order="far")
+        (pa, wa), (pb, wb) = quad[ia], quad[ib]
         h, hw = nodes
+        sheet = _native_sheet("rt0_point_moments")
+        if sheet is not None:
+            from electrical.threads import thread_budget
+
+            return np.asarray(sheet.rt0_point_moments(
+                np.ascontiguousarray(pa, dtype=np.float64), np.ascontiguousarray(wa, dtype=np.float64),
+                np.ascontiguousarray(sa.centroid), np.ascontiguousarray(pb, dtype=np.float64),
+                np.ascontiguousarray(wb, dtype=np.float64), np.ascontiguousarray(sb.centroid),
+                np.ascontiguousarray(e, dtype=np.int64), np.ascontiguousarray(f, dtype=np.int64),
+                np.ascontiguousarray(h, dtype=np.float64), np.ascontiguousarray(hw, dtype=np.float64), thread_budget()))
         out = np.zeros((len(e), 3, 3))
         for start in range(0, len(e), chunk):
             ee, ff = e[start:start + chunk], f[start:start + chunk]
@@ -468,7 +580,10 @@ class HybridOperator:
             row = []
             for b in range(len(self.sheets)):
                 key, _ = self._pair_key[a, b]
-                row.append(self._near[key])
+                if self.near_same_layer and self.sheets[a].layer != self.sheets[b].layer:
+                    row.append(sp.csr_matrix(self._near[key].shape))
+                else:
+                    row.append(self._near[key])
             rows.append(row)
         return sp.bmat(rows, format="csr")
 
@@ -480,7 +595,7 @@ class HybridOperator:
         return y
 
     def near_impedance(self) -> sp.csr_matrix:
-        z = self.resistance.astype(np.complex128)
+        z = self._impedance_near_links.astype(np.complex128)
         if self.omega > 0:
             near = self.near_inductance()
             pad = sp.csr_matrix((self.m - self.m_plane, self.m - self.m_plane))
