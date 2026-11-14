@@ -411,8 +411,12 @@ pair 0.27 mm from the plates' edge, a 3 x 2 array carrying all the current
 between layers, two vias in thermal reliefs, one 0.6 mm drill.  Laid on the
 grid as plane_opt lays them (the barrel's footprint filled copper, its
 resistance rho * D / A over the wall cells by their share of the
-circumference), the uniform grid at 0.1 mm with strands was within
--1.2..+1.4 % at DC, 214 kHz and 1 MHz.  At 0.2 mm the reliefs' 0.2 mm spokes
+circumference), the uniform grid at 0.1 mm with the default edge strands and
+face coverage was within -1.14..+0.34 % at DC, 214 kHz and 1 MHz (0.05 mm:
+-2.0..+0.8 %); the faces took the reliefs' DC error from +1.41 % to -0.15 %.
+The array's sharing follows the FEM: outer and inner vias 0.2025 / 0.1050 of
+the port current at 1 MHz against 0.1996 / 0.1064 (DC 0.1697 / 0.1605
+against 0.1701 / 0.1598).  At 0.2 mm the reliefs' 0.2 mm spokes
 are lost (+60..+76 %): a relief needs 0.1 mm or less.  The FEM puts the
 barrel's effective length at D - T/2, but with the footprint filled that is
 not better overall, so the resistance keeps D.
