@@ -6,6 +6,21 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## Unreleased
 
+- The uniform grid's two edge corrections are on by default: `edge_strands`
+  defaults to `"auto"` (cut on the CPU with the uniform operator and the near
+  preconditioner, above zero frequency; `True` refuses a setup without them,
+  `False` leaves them out), the `auto` preconditioner takes `near` for a
+  stranded mesh, and `rasterize_board(faces="auto")` records the faces' copper
+  coverage on a uniform grid when the geometry native extension is built.
+  Results above zero frequency change: a 1.2 mm strip pair at 0.1 mm was 22 %
+  (30 MHz) and 27 % (150 MHz) low without strands, a 45 degree strip 5 % high
+  even at 1 MHz without the faces; with both, within about 2 % of a 2D FEM
+  (45 degrees at 150 MHz: -4.8 %).
+  The metrics record `edge_strands` and `face_coverage`; a port-impedance
+  sweep cuts its strands once, for its top frequency; the far-field dipoles
+  of a stranded mesh sum each branch's strands.  Vias on the uniform grid
+  were checked against a 3D FEM: within -1.2..+1.4 % at 0.1 mm, DC-1 MHz
+  (docs/SHEET_PEEC.md).
 - Sheet solves can correct the two edge errors of the uniform grid, both
   off by default (docs/SHEET_PEEC.md, "Edges: strands and face coverage"):
   `edge_strands` cuts the branches along an edge across their width into
