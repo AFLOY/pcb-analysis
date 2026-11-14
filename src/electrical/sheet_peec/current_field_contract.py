@@ -628,8 +628,8 @@ def _sheet_geometry(
     # width, the first strand half a skin depth wide at this frequency unless
     # ``edge_strand_first_um`` says otherwise.  See :mod:`.edge_strands`.
     # ``edge_strands`` "auto" (default) cuts them wherever they are built: on
-    # the CPU, with the uniform convolution operator and the near
-    # preconditioner, above zero frequency (without them R per length was
+    # the CPU or the device, with the uniform convolution operator and the
+    # near preconditioner, above zero frequency (without them R per length was
     # 22 to 27 % low at 30-150 MHz on a 1.2 mm strip pair at 0.1 mm, with
     # them within 1.4 % of a 2D FEM).  True asks for them and refuses a
     # setup that cannot have them; False leaves them out.
@@ -638,8 +638,7 @@ def _sheet_geometry(
     if requested == "auto":
         edge = (
             strand_frequency > 0.0
-            and str(settings.get("execution_backend", "cpu")) == "cpu"
-            and str(settings.get("preconditioner", "auto")) != "block"
+            and str(settings.get("preconditioner", "auto")) not in ("block", "diagonal")
             and isinstance(operator, SheetInductanceOperator)
         )
     elif isinstance(requested, bool):
@@ -836,8 +835,6 @@ def _solve_conductor(
         "restart": int(settings.get("restart", 120)),
         "preconditioner": str(settings.get("preconditioner", "auto")),
     }
-    if execution_backend == "cuda" and getattr(mesh, "strands", None) is not None:
-        raise ValueError("edge strands are solved on the CPU only")
     if execution_backend == "cuda":
         from .sheet_cuda import solve_sheet_cases_cuda
 

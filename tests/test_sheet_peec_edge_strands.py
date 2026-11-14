@@ -146,9 +146,6 @@ def test_edge_strands_bring_a_narrow_strip_s_resistance_to_the_fem() -> None:
 
 
 def test_edge_strands_are_refused_where_they_are_not_built() -> None:
-    problem = cfc.CurrentFieldProblem.from_mapping(_strip_pair(1.2, 4.0, 0.2, 3e7))
-    with pytest.raises(ValueError, match="CPU"):
-        cfc.solve_current_field_problems([problem], {"edge_strands": True, "execution_backend": "cuda"})
     mesh, operator = _stranded()
     from electrical.sheet_peec.sheet_peec import solve_sheet_cases
 
@@ -191,7 +188,7 @@ def test_the_compact_correction_gives_the_same_bits_at_any_thread_count() -> Non
 
 
 def test_edge_strands_are_cut_by_default_where_they_are_built() -> None:
-    """``edge_strands`` "auto": cut on the CPU above zero frequency, not at DC nor with the block preconditioner."""
+    """``edge_strands`` "auto": cut above zero frequency, not at DC nor without the near preconditioner."""
     def applied(frequency: float, **settings) -> bool:
         problem = cfc.CurrentFieldProblem.from_mapping(_strip_pair(1.2, 4.0, 0.2, frequency))
         _mesh, _operator, geometry = cfc._sheet_geometry(problem, {"maximum_filaments": 1, **settings})
@@ -200,6 +197,8 @@ def test_edge_strands_are_cut_by_default_where_they_are_built() -> None:
     assert applied(3e7)
     assert not applied(0.0)
     assert not applied(3e7, preconditioner="block")
+    assert not applied(3e7, preconditioner="diagonal")
+    assert applied(3e7, execution_backend="cuda")  # the device cuts them as the CPU does
     assert not applied(3e7, edge_strands=False)
     result = cfc.solve_current_field_problem(_strip_pair(1.2, 4.0, 0.2, 3e7), {"maximum_filaments": 1})
     assert result.metrics["edge_strands"] is True and result.metrics["face_coverage"] is False
@@ -235,3 +234,49 @@ def test_a_neighbour_of_another_region_is_an_edge_for_the_strands() -> None:
 
     assert strands_on_row(1, regions=False) == 0  # inside one net: no edge
     assert strands_on_row(1, regions=True) > 0  # beside the other net: an edge
+
+
+def test_the_device_flux_of_a_stranded_mesh_is_the_host_s() -> None:
+    """The CUDA path's product on a stranded mesh, NumPy standing in for CuPy: the host's flux.
+
+    The device spreads the strands over the grid and reads them back with two
+    sparse matrices and adds the precorrection as a third; the host does the
+    same through the mesh's scatter and gather and the core's blocks.
+    """
+    import scipy.sparse as sp
+
+    from electrical.sheet_peec.sheet_cuda import (
+        CudaSheetInductanceOperator, _branch_indices, _device_flux, _strand_projection, strand_projection_matrices,
+    )
+
+    mesh, operator = _stranded()
+    assert mesh.via_branches and mesh.strands.extra_count > 0
+    rng = np.random.default_rng(5)
+    # the maps as matrices are the mesh's scatter and gather
+    scatter_x, scatter_y = strand_projection_matrices(mesh)
+    currents = rng.standard_normal(mesh.branch_count)
+    grid_x, grid_y = mesh.scatter(currents)
+    assert np.allclose(scatter_x @ currents, grid_x.reshape(-1), rtol=0, atol=1e-13)
+    assert np.allclose(scatter_y @ currents, grid_y.reshape(-1), rtol=0, atol=1e-13)
+    probe_x, probe_y = rng.standard_normal(grid_x.shape), rng.standard_normal(grid_y.shape)
+    gathered = scatter_x.T @ probe_x.reshape(-1) + scatter_y.T @ probe_y.reshape(-1)
+    assert np.allclose(gathered, mesh.gather(probe_x, probe_y), rtol=0, atol=1e-13)
+
+    def host_flux(full: np.ndarray) -> np.ndarray:
+        gx, gy = mesh.scatter(full)
+        fx, fy, fz = operator.apply(gx, gy, mesh.scatter_vertical(full))
+        flux = mesh.gather(fx, fy)
+        mesh.gather_vertical(fz, flux)
+        return flux + mesh.inductance_correction @ full
+
+    device = CudaSheetInductanceOperator(operator, np)
+    projection = _strand_projection(mesh, np, sp, True)
+    assert projection is not None and projection.correction is not None
+    active = np.sort(rng.choice(mesh.branch_count, size=mesh.branch_count - 7, replace=False))
+    batch = rng.standard_normal((2, active.size))
+    got = _device_flux(np, mesh, device, _branch_indices(mesh, np), projection, active, batch)
+    for b in range(2):
+        full = np.zeros(mesh.branch_count)
+        full[active] = batch[b]
+        want = host_flux(full)[active]
+        assert np.allclose(got[b], want, rtol=0, atol=1e-10 * np.abs(want).max())
