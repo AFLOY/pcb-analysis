@@ -1661,14 +1661,12 @@ def _solve_group_cuda(
             solve_started = time.perf_counter()
             injected_device = cp.asarray(cases[index][0])
             right_hand_side = cp.concatenate([cp.zeros(branches, dtype=cp.complex128), injected_device[keep]])
-            left_right_hand_side = precondition(right_hand_side)
             counter = {"restarts": 0}
 
             def count(_value: Any) -> None:
                 counter["restarts"] += 1
 
             rhs_norm = float(cp.linalg.norm(right_hand_side).get())
-            left_norm = float(cp.linalg.norm(left_right_hand_side).get())
             given = given_list[index]
             if given is not None:
                 result = _cuda_start(cp, saddle, given, mesh, active_branches, keep, branches, unknowns, right_hand_side)
@@ -1687,20 +1685,29 @@ def _solve_group_cuda(
                 # well-preconditioned solve converges in a few tens of iterations
                 # and must not pay for a full cycle to find out.
                 cycle_length = min(effective_restart, 10 * 2**cycles)
-                # CuPy judges the left-preconditioned residual; scale its target by
-                # the current ratio of the two residuals so that meeting it brings
-                # the saddle-point residual to the requested tolerance, and stop
-                # when that target falls below what float64 can resolve.
-                raw = saddle(result) - right_hand_side
-                preconditioned = float(cp.linalg.norm(precondition(raw)).get()) / max(left_norm, 1e-30)
-                ratio = preconditioned / max(residual, 1e-300) if residual > 0.0 else 1.0
-                target = 0.5 * tolerance * ratio
+                # Each cycle solves for the correction of the current residual,
+                # M^-1 A d = M^-1 (b - A x) from zero, as the lockstep path does.
+                # Restarting CuPy's GMRES from x on M^-1 A x = M^-1 b has it
+                # take its residual as the difference of M^-1 b and M^-1 A x,
+                # each carrying the factors' own error.  cuDSS does not pivot
+                # and its factors solve the regularized near matrix less
+                # exactly the smaller the regularization: on a GB200 that left
+                # the saddle-point residual at 1e-9 to 4e-9 for as many cycles
+                # as were allowed.  (On the host, a factor without pivoting on
+                # a 45 degree strip: 2.6e-9 that way, 3.5e-13 this way.)
+                # CuPy judges the preconditioned residual of the correction;
+                # half the reduction the saddle-point residual still needs
+                # brings it to the tolerance, and the solve stops when that
+                # falls below what float64 can resolve.
+                start = precondition(right_hand_side - saddle(result))
+                target = 0.5 * tolerance / max(residual, 1e-300)
                 if target < floor:
                     break
-                result, _info = csl.gmres(
-                    linear_system, left_right_hand_side, x0=result, rtol=target, restart=cycle_length,
+                correction, _info = csl.gmres(
+                    linear_system, start, rtol=target, restart=cycle_length,
                     maxiter=cycle_length, callback=count, callback_type="pr_norm",
                 )
+                result = result + correction
                 cycles += 1
                 residual = float((cp.linalg.norm(saddle(result) - right_hand_side)).get()) / max(rhs_norm, 1e-30)
             current_device = cp.zeros(mesh.branch_count, dtype=cp.complex128)

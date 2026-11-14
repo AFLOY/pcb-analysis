@@ -143,6 +143,22 @@ def test_the_cudss_quasi_definite_near_preconditioner_solves_as_superlu_does() -
     assert max(abs(superlu.voltage_phasor[node] - cudss.voltage_phasor[node]) for node in superlu.voltage_phasor) < 1e-9
 
 
+def test_a_single_excitation_converges_below_the_error_of_its_cudss_factors() -> None:
+    _require_cuda_device()
+    pytest.importorskip("nvmath.sparse.advanced")
+    # A small regularization makes the factors, which cuDSS does not pivot,
+    # inexact; each restart cycle solves for the correction of the residual,
+    # so their error does not stay in the answer.
+    solved = solve_current_field_problem(
+        _problem(frequency_hz=3e7),
+        {"relative_tolerance": 1e-11, "maximum_iterations": 40, "restart": 60, "execution_backend": "cuda",
+         "device_id": 0, "preconditioner": "near", "near_factorization": "cudss_quasi_definite",
+         "near_regularization": 1e-10},
+    )
+    assert solved.metrics["converged"]
+    assert solved.metrics["solver_relative_residual"] < 1e-11
+
+
 def test_the_layer_pair_kernel_mixes_as_the_batched_product_does() -> None:
     _require_cuda_device()
     import cupy as cp
