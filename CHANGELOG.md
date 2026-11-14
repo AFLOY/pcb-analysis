@@ -4,7 +4,12 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
-## Unreleased
+## 0.14.0
+
+The sheet solve's results above zero frequency change: the uniform grid's
+edge strands and face coverage are on by default, on the CPU and on CUDA.
+The CUDA sheet solve factors its near preconditioner with cuDSS by default,
+and the conductors of one call are solved side by side in processes.
 
 - The CUDA sheet solve factors its near preconditioner with cuDSS by default
   (`near_factorization="auto"`: `cudss_quasi_definite` where nvmath-python is
@@ -20,6 +25,12 @@ Versions before 0.7.0 were not tagged; see the Git history.
   lockstep path did, so the error of factors that are not pivoted does not
   stay in the answer (EVM-2L hot loop, 0.2 mm, 30 MHz, A100, tolerance 1e-11:
   8.6e-10 unconverged after 30 cycles before, 1.5e-12 after 10 now).
+- Fixed: the CUDA inner cycle of the matrix-free MPIR solve imported CuPy's
+  cuBLAS bindings before CuPy had loaded its own libcublas, so the dynamic
+  linker chose one: with a CUDA toolkit on `LD_LIBRARY_PATH` its libcublas
+  was mixed with the wheel's libcublasLt and every later dgemm, cgemm and
+  zgemm of the process failed with `CUBLAS_STATUS_NOT_INITIALIZED`; without
+  one the import failed.  The handle is taken first.
 - `solve_current_field_problems` solves the conductors of one call side by
   side in worker processes (`spawn`), each on an even share of the thread
   budget and of the free memory, as many as fit in half of `MemAvailable` by
@@ -50,8 +61,9 @@ Versions before 0.7.0 were not tagged; see the Git history.
   device.  On a GB200 the EVM-2L hot loop at 0.1 mm agreed with the CPU to
   5e-5 in R and 1e-6 in L (214 kHz, 1 MHz, 30 MHz), in 5.2, 4.1 and 6.4 s
   with the cuDSS near factors against 61, 73 and 240 s on 36 CPU cores.
-- Sheet solves can correct the two edge errors of the uniform grid, both
-  off by default (docs/SHEET_PEEC.md, "Edges: strands and face coverage"):
+- How the two edge corrections work (docs/SHEET_PEEC.md, "Edges: strands and
+  face coverage"; both can be switched off, `edge_strands=False` and
+  `rasterize_board(faces=False)`):
   `edge_strands` cuts the branches along an edge across their width into
   strands graded from half a skin depth, kept as repeating blocks in the C++
   core (R of a strip pair within -2.7..+0.4 % of a 2D FEM at 30-150 MHz,
