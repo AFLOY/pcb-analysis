@@ -331,19 +331,23 @@ def _pattern_digest(matrix: Any) -> str:
     return digest.hexdigest()
 
 
-def quasi_definite_near_matrix(near: Any, reduced: Any, regularization: float) -> tuple[Any, np.ndarray, float]:
+def quasi_definite_near_matrix(
+    near: Any, reduced: Any, regularization: float, scale: float | None = None
+) -> tuple[Any, np.ndarray, float]:
     """``(matrix, sign, delta)``: the near saddle-point matrix made quasi-definite.
 
     ``matrix`` is ``[[Z, -A], [-A^T, -delta I]]`` (SciPy CSR, complex128,
     sorted), ``sign`` the row signs that take the saddle-point right-hand side
     to it (``+1`` on branches, ``-1`` on nodes), ``delta`` the regularization
-    over the median ``|Z_ii|``.  See :class:`CudssQuasiDefiniteNear`.
+    over ``scale``, the median ``|Z_ii|`` unless given.  See
+    :class:`CudssQuasiDefiniteNear`.
     """
     import scipy.sparse as sp
 
     near = sp.csr_matrix(near)
-    diagonal = np.abs(near.diagonal())
-    scale = float(np.median(diagonal[diagonal > 0.0])) if np.any(diagonal > 0.0) else 1.0
+    if scale is None:
+        diagonal = np.abs(near.diagonal())
+        scale = float(np.median(diagonal[diagonal > 0.0])) if np.any(diagonal > 0.0) else 1.0
     delta = float(regularization) / scale
     nodes = reduced.shape[1]
     matrix = sp.bmat(
@@ -353,6 +357,32 @@ def quasi_definite_near_matrix(near: Any, reduced: Any, regularization: float) -
     matrix.sort_indices()
     sign = np.concatenate([np.ones(near.shape[0]), -np.ones(nodes)]).astype(np.complex128)
     return matrix, sign, delta
+
+
+def strand_bundle_scale(mesh: Any, near: Any, active_branches: np.ndarray) -> float:
+    """The median ``|Z_ii|`` of a stranded mesh's branches, each cut branch's strands taken in parallel.
+
+    The regularization ``delta`` is set against the branch impedances the
+    node block sees.  A cut branch is many narrow strands, each of a far
+    higher impedance than the branch they make up, and their median took
+    ``delta`` down with it: on a small two-layer problem at 30 MHz from
+    9.6e-5 (uncut) to 3.0e-7, where the LDL^T without pivoting lost the
+    digits the Krylov iteration needs -- the saddle-point residual stayed at
+    4e-9 on a GB200 through 240 cycles, and reached 2e-11 in one with
+    ``delta`` near its uncut value.  The strands of a branch join the same
+    two nodes, so the node block sees their parallel combination.
+    """
+    strands = mesh.strands
+    parent = np.arange(mesh.branch_count)
+    parent[strands.strand_index] = strands.branch
+    diagonal = np.abs(np.asarray(near.diagonal()))
+    live = diagonal > 0.0
+    if not live.any():
+        return 1.0
+    admittance = np.bincount(
+        parent[np.flatnonzero(active_branches)][live], weights=1.0 / diagonal[live], minlength=mesh.branch_count
+    )
+    return float(np.median(1.0 / admittance[admittance > 0.0]))
 
 
 class CudssQuasiDefiniteNear:
@@ -381,7 +411,7 @@ class CudssQuasiDefiniteNear:
 
     def __init__(
         self, near: Any, reduced: Any, regularization: float, cp: Any, prepared: tuple[Any, Any, float] | None = None,
-        columns: int = 1,
+        columns: int = 1, scale: float | None = None,
     ) -> None:
         try:
             import nvmath.bindings.cudss as cudss_bindings
@@ -399,7 +429,7 @@ class CudssQuasiDefiniteNear:
         # ``prepared``: the matrix already formed on the device by
         # device_quasi_definite_near, in place of the host's near matrix
         matrix, sign, delta = (
-            prepared if prepared is not None else quasi_definite_near_matrix(near, reduced, regularization)
+            prepared if prepared is not None else quasi_definite_near_matrix(near, reduced, regularization, scale)
         )
         self._cp = cp
         self._sign = cp.asarray(sign)
@@ -1571,7 +1601,10 @@ def _solve_group_cuda(
                 factor_backend = "cudss_quasi_definite_ldlt"
             else:
                 near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
-                factored = CudssQuasiDefiniteNear(near_cpu, reduced_cpu, near_regularization, cp, columns=lockstep)
+                factored = CudssQuasiDefiniteNear(
+                    near_cpu, reduced_cpu, near_regularization, cp, columns=lockstep,
+                    scale=None if projection is None else strand_bundle_scale(mesh, near_cpu, active_branches),
+                )
                 factor_backend = "cudss_quasi_definite_ldlt_host_near"
         else:
             near_cpu = _near_impedance(mesh, operator, omega, resistance, active_branches)
