@@ -354,9 +354,15 @@ class _CudaGmresKernels:
 
     def __init__(self, xp: Any) -> None:
         self.xp = xp
+        # The handle first: getting it has CuPy load the libcublas it was
+        # installed with.  Imported before that, the raw binding left the
+        # choice to the dynamic linker -- none found without a CUDA toolkit on
+        # LD_LIBRARY_PATH (ImportError), and with one, the toolkit's libcublas
+        # beside the wheel's libcublasLt: every later dgemm, cgemm and zgemm
+        # of the process failed with CUBLAS_STATUS_NOT_INITIALIZED.
+        self.handle = xp.cuda.device.get_cublas_handle()
         self.cublas = importlib.import_module("cupy_backends.cuda.libs.cublas")
         self.runtime_api = xp.cuda.runtime
-        self.handle = xp.cuda.device.get_cublas_handle()
         self.one = np.ones(1, dtype=np.complex64)
         self.zero = np.zeros(1, dtype=np.complex64)
         self.minus_one = -np.ones(1, dtype=np.complex64)
