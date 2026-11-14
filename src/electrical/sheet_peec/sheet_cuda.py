@@ -1080,6 +1080,119 @@ def _branch_indices(mesh: SheetMesh, cp: Any) -> _BranchIndices:
     )
 
 
+@dataclass(frozen=True)
+class _StrandProjection:
+    """A stranded mesh's grid maps and precorrection as sparse matrices where the solve lives."""
+
+    scatter_x: Any   # (layers * rows * cols, branches): branch currents onto the x grid
+    scatter_y: Any
+    gather_x: Any    # their transposes: the grid's flux read back with the same weights
+    gather_y: Any
+    correction: Any  # (branches, branches), or None when the mesh carries none
+
+
+def strand_projection_matrices(mesh: SheetMesh) -> tuple[sp.csr_matrix, sp.csr_matrix]:
+    """``(P_x, P_y)``: :meth:`StrandedSheetMesh.scatter` as matrices, grid values from branch currents.
+
+    A branch that is not cut puts its current on its own grid position; a
+    strand spreads over its three positions across the branch by its Lagrange
+    weights (the first strand of a cut branch has the branch's index).  The
+    transposes are :meth:`StrandedSheetMesh.gather`.
+    """
+    strands = mesh.strands  # type: ignore[attr-defined]
+    layers = len(mesh.stackup)
+    rows, cols = mesh.shape
+    count = mesh.branch_count
+    flat = mesh.__dict__["_strand_flat"]
+    cut = np.zeros(strands.base_count, dtype=bool)
+    cut[strands.cut_branches] = True
+    matrices = []
+    first = 0
+    for axis, group in ((0, mesh.branch_x), (1, mesh.branch_y)):
+        cells = np.asarray(group, dtype=np.int64).reshape(-1, 3)
+        number = first + np.arange(len(group))
+        whole = ~cut[number]
+        position = (cells[whole, 0] * rows + cells[whole, 1]) * cols + cells[whole, 2]
+        mine = strands.axis == axis
+        row = np.concatenate([position, flat[mine].reshape(-1)])
+        col = np.concatenate([number[whole], np.repeat(strands.strand_index[mine], 3)])
+        value = np.concatenate([np.ones(position.size), strands.weight[mine].reshape(-1)])
+        used = value != 0.0
+        matrix = sp.csr_matrix((value[used], (row[used], col[used])), shape=(layers * rows * cols, count))
+        matrix.sum_duplicates()
+        matrices.append(matrix)
+        first += len(group)
+    return matrices[0], matrices[1]
+
+
+def _strand_projection(mesh: SheetMesh, cp: Any, csp: Any, inductance: bool) -> _StrandProjection | None:
+    """The device maps of a mesh with edge strands or face coverage; None for a mesh without."""
+    if getattr(mesh, "strands", None) is None:
+        return None
+    scatter_x, scatter_y = strand_projection_matrices(mesh)
+    correction = None
+    if inductance and getattr(mesh, "inductance_correction", None) is not None:
+        correction = csp.csr_matrix(sp.csr_matrix(mesh.correction_matrix()))  # type: ignore[attr-defined]
+    return _StrandProjection(
+        scatter_x=csp.csr_matrix(scatter_x), scatter_y=csp.csr_matrix(scatter_y),
+        gather_x=csp.csr_matrix(sp.csr_matrix(scatter_x.T)), gather_y=csp.csr_matrix(sp.csr_matrix(scatter_y.T)),
+        correction=correction,
+    )
+
+
+def _device_flux(
+    cp: Any, mesh: SheetMesh, cuda_operator: Any, indices: "_BranchIndices",
+    projection: "_StrandProjection | None", active_branches_device: Any, currents: Any,
+) -> Any:
+    """The partial inductance on ``currents`` ``(B, active branches)``, real, all ``B`` in one application."""
+    levels = mesh.vertical_levels
+    has_vertical = bool(levels)
+    rows, cols = mesh.shape
+    batch = currents.shape[0]
+    full_currents = cp.zeros((batch, mesh.branch_count), dtype=cp.float64)
+    full_currents[:, active_branches_device] = currents
+    grid_x = cp.zeros((batch, len(mesh.stackup), rows, cols), dtype=cp.float64)
+    grid_y = cp.zeros_like(grid_x)
+    x_count = len(mesh.branch_x)
+    y_count = len(mesh.branch_y)
+    # the vertical branches follow the in-plane ones; a stranded mesh's
+    # appended strands come after them
+    z_stop = x_count + y_count + len(mesh.via_branches)
+    if projection is None:
+        grid_x[:, indices.x_layer, indices.x_row, indices.x_col] = full_currents[:, :x_count]
+        grid_y[:, indices.y_layer, indices.y_row, indices.y_col] = full_currents[:, x_count : x_count + y_count]
+    else:
+        # Edge strands: every strand spread over its three grid positions
+        # across its branch (StrandedSheetMesh.scatter as one sparse product).
+        columns = cp.ascontiguousarray(full_currents.T)
+        grid_x = cp.ascontiguousarray((projection.scatter_x @ columns).T).reshape(grid_x.shape)
+        grid_y = cp.ascontiguousarray((projection.scatter_y @ columns).T).reshape(grid_y.shape)
+    if has_vertical:
+        grid_z = cp.zeros((batch, len(levels), rows, cols), dtype=cp.float64)
+        grid_z[:, indices.z_level, indices.z_row, indices.z_col] = full_currents[:, x_count + y_count : z_stop]
+        flux_x, flux_y, flux_z = cuda_operator.apply_batch(grid_x, grid_y, grid_z)
+    else:
+        flux_x, flux_y = cuda_operator.apply_batch(grid_x, grid_y)
+        flux_z = None
+    if projection is None:
+        full_output = cp.zeros((batch, mesh.branch_count), dtype=cp.float64)
+        full_output[:, :x_count] = flux_x[:, indices.x_layer, indices.x_row, indices.x_col]
+        full_output[:, x_count : x_count + y_count] = flux_y[:, indices.y_layer, indices.y_row, indices.y_col]
+    else:
+        # read back with the same weights, and what the grid gets wrong
+        # about the strands added at branch level (the precorrection)
+        gathered = (
+            projection.gather_x @ cp.ascontiguousarray(flux_x.reshape(batch, -1).T)
+            + projection.gather_y @ cp.ascontiguousarray(flux_y.reshape(batch, -1).T)
+        )
+        if projection.correction is not None:
+            gathered = gathered + projection.correction @ columns
+        full_output = cp.ascontiguousarray(gathered.T)
+    if flux_z is not None:
+        full_output[:, x_count + y_count : z_stop] = flux_z[:, indices.z_level, indices.z_row, indices.z_col]
+    return full_output[:, active_branches_device]
+
+
 def _cuda_identity(cp: Any, device_id: int) -> dict[str, Any]:
     properties = cp.cuda.runtime.getDeviceProperties(device_id)
     raw_name = properties["name"]
@@ -1210,6 +1323,13 @@ def solve_sheet_cases_cuda(
         raise ValueError("preconditioner must be 'auto', 'near' or 'diagonal'")
     if near_factorization not in NEAR_FACTORIZATIONS:
         raise ValueError(f"near_factorization must be one of {NEAR_FACTORIZATIONS}")
+    stranded = getattr(mesh, "strands", None) is not None
+    if stranded and not hasattr(operator, "_tables"):
+        raise ValueError("edge strands and face coverage need the uniform convolution operator")
+    if stranded and frequency_hz and preconditioner != "near":
+        # as on the CPU: the diagonal variant reads one self inductance per
+        # grid branch; only the near matrix knows the strands
+        raise ValueError("a mesh with edge strands is solved with the near preconditioner")
     near_regularization = float(near_regularization)
     if not (math.isfinite(near_regularization) and near_regularization > 0.0):
         raise ValueError("near_regularization must be positive")
@@ -1265,13 +1385,14 @@ def solve_sheet_cases_cuda(
                 else:
                     cuda_operator = _cached_device_operator(operator, cp, device_id)
                 indices = _branch_indices(mesh, cp)
+                projection = _strand_projection(mesh, cp, csp, frequency_hz > 0.0)
                 cp.cuda.get_current_stream().synchronize()
                 shared_prepare_ms = (time.perf_counter() - prepare_started) * 1000.0
                 for members in groups.values():
                     _solve_group_cuda(
                         cp, csp, csl, mesh, operator, cuda_operator, indices, resistance, cases, members,
                         given_list, solved, frequency_hz, tolerance, max_iterations, restart, preconditioner,
-                        shared_prepare_ms, near_factorization, near_regularization,
+                        shared_prepare_ms, near_factorization, near_regularization, projection,
                     )
                 pool_peak = int(pool.total_bytes())
                 free_after, _ = cp.cuda.runtime.memGetInfo()
@@ -1325,8 +1446,13 @@ def _solve_group_cuda(
     resistance: np.ndarray, cases: list, members: list[int], given_list: list, solved: list,
     frequency_hz: float, tolerance: float, max_iterations: int, restart: int, preconditioner: str,
     shared_prepare_ms: float, near_factorization: str = "superlu", near_regularization: float = 1e-8,
+    projection: "_StrandProjection | None" = None,
 ) -> None:
-    """The excitations ``members`` of one reduction: their system prepared once, each solved in turn."""
+    """The excitations ``members`` of one reduction: their system prepared once, each solved in turn.
+
+    ``projection``: the grid maps and precorrection of a mesh with edge
+    strands or face coverage (:func:`_strand_projection`).
+    """
     group_started = time.perf_counter()
     reduction = cases[members[0]][1]
     keep, grounded, dropped = reduction.keep, reduction.grounded, reduction.dropped
@@ -1390,30 +1516,7 @@ def _solve_group_cuda(
     omega = 2.0 * math.pi * frequency_hz
 
     def _flux(currents: Any) -> Any:
-        """The operator on ``currents`` ``(B, branches)``, real, all ``B`` in one application."""
-        rows, cols = mesh.shape
-        batch = currents.shape[0]
-        full_currents = cp.zeros((batch, mesh.branch_count), dtype=cp.float64)
-        full_currents[:, active_branches_device] = currents
-        grid_x = cp.zeros((batch, len(mesh.stackup), rows, cols), dtype=cp.float64)
-        grid_y = cp.zeros_like(grid_x)
-        x_count = len(mesh.branch_x)
-        y_count = len(mesh.branch_y)
-        grid_x[:, indices.x_layer, indices.x_row, indices.x_col] = full_currents[:, :x_count]
-        grid_y[:, indices.y_layer, indices.y_row, indices.y_col] = full_currents[:, x_count : x_count + y_count]
-        if has_vertical:
-            grid_z = cp.zeros((batch, len(levels), rows, cols), dtype=cp.float64)
-            grid_z[:, indices.z_level, indices.z_row, indices.z_col] = full_currents[:, x_count + y_count :]
-            flux_x, flux_y, flux_z = cuda_operator.apply_batch(grid_x, grid_y, grid_z)
-        else:
-            flux_x, flux_y = cuda_operator.apply_batch(grid_x, grid_y)
-            flux_z = None
-        full_output = cp.zeros((batch, mesh.branch_count), dtype=cp.float64)
-        full_output[:, :x_count] = flux_x[:, indices.x_layer, indices.x_row, indices.x_col]
-        full_output[:, x_count : x_count + y_count] = flux_y[:, indices.y_layer, indices.y_row, indices.y_col]
-        if flux_z is not None:
-            full_output[:, x_count + y_count :] = flux_z[:, indices.z_level, indices.z_row, indices.z_col]
-        return full_output[:, active_branches_device]
+        return _device_flux(cp, mesh, cuda_operator, indices, projection, active_branches_device, currents)
 
     def impedance(currents: Any) -> Any:
         # the real and imaginary parts are one batch of two: one read of the operator
@@ -1452,8 +1555,10 @@ def _solve_group_cuda(
 
         if near_factorization == "cudss_quasi_definite":
             prepared = None
-            if hasattr(getattr(operator, "_base", operator), "_tables"):
+            if projection is None and hasattr(getattr(operator, "_base", operator), "_tables"):
                 # the near matrix formed on the device, unless it would not fit there
+                # (a stranded mesh's is the host's: the exact partial inductances of
+                # every pair with a strand in it are not read off the tables)
                 try:
                     prepared = device_quasi_definite_near(
                         mesh, operator, omega, resistance, active_branches, reduced_cpu, near_regularization, cp, csp,
