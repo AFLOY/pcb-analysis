@@ -1167,7 +1167,9 @@ def _solve_ac(
         return x0
 
     if preconditioner == "auto":
-        preconditioner = choose_preconditioner(size, near_factorization)
+        # a mesh with edge strands is solved with the near preconditioner only
+        stranded = getattr(mesh, "strands", None) is not None
+        preconditioner = "near" if stranded else choose_preconditioner(size, near_factorization)
     # The near block's strips are factored and solved on this pool; it lives
     # for the solve and its width is the budget, capped by the strips.  The
     # near LU solves a lockstep group's columns on it, a pair at a time.

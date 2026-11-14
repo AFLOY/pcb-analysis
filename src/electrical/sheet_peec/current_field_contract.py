@@ -469,6 +469,9 @@ class _SheetGeometry:
     layer_by_name: Mapping[str, CurrentFieldLayer]
     # (row, col, lower filament, upper filament) of each vertical branch -> its connection's name
     via_name_by_key: Mapping[tuple[int, int, int, int], str] = field(default_factory=dict)
+    # whether the edge branches were cut into strands, and the faces' coverage applied
+    edge_strands: bool = False
+    face_coverage: bool = False
 
 
 def _filament_cuts(
@@ -618,11 +621,28 @@ def _sheet_geometry(
             vertical_levels=mesh.vertical_levels,
         )
 
-    # Edge strands (opt-in): the branches along the copper's edges cut across
-    # their width, the first strand half a skin depth wide at this frequency
-    # unless ``edge_strand_first_um`` says otherwise.  See :mod:`.edge_strands`.
+    # Edge strands: the branches along the copper's edges cut across their
+    # width, the first strand half a skin depth wide at this frequency unless
+    # ``edge_strand_first_um`` says otherwise.  See :mod:`.edge_strands`.
+    # ``edge_strands`` "auto" (default) cuts them wherever they are built: on
+    # the CPU, with the uniform convolution operator and the near
+    # preconditioner, above zero frequency (without them R per length was
+    # 22 to 27 % low at 30-150 MHz on a 1.2 mm strip pair at 0.1 mm, with
+    # them within 1.4 % of a 2D FEM).  True asks for them and refuses a
+    # setup that cannot have them; False leaves them out.
     strand_frequency = problem.frequency_hz if frequency_hz is None else frequency_hz
-    edge = bool(settings.get("edge_strands", False)) and strand_frequency > 0.0
+    requested = settings.get("edge_strands", "auto")
+    if requested == "auto":
+        edge = (
+            strand_frequency > 0.0
+            and str(settings.get("execution_backend", "cpu")) == "cpu"
+            and str(settings.get("preconditioner", "auto")) != "block"
+            and isinstance(operator, SheetInductanceOperator)
+        )
+    elif isinstance(requested, bool):
+        edge = requested and strand_frequency > 0.0
+    else:
+        raise ValueError("edge_strands must be 'auto', true or false")
     coverage = _branch_coverage(mesh, problem, filament_of) if problem.copper_faces else None
     if edge or coverage:
         if not isinstance(operator, SheetInductanceOperator):
@@ -646,7 +666,8 @@ def _sheet_geometry(
         )
 
     return mesh, operator, _SheetGeometry(
-        filament_of=filament_of, layer_by_name=layer_by_name, via_name_by_key=via_name_by_key
+        filament_of=filament_of, layer_by_name=layer_by_name, via_name_by_key=via_name_by_key,
+        edge_strands=bool(edge), face_coverage=bool(coverage),
     )
 
 
@@ -789,7 +810,8 @@ def solve_current_field_problems(
                     device_id=int(settings.get("device_id", 0)),
                     **solve_arguments,
                 )
-                solved.append((solution, telemetry.as_metrics()))
+                solved.append((solution, dict(telemetry.as_metrics(), edge_strands=geometry.edge_strands,
+                                              face_coverage=geometry.face_coverage)))
         else:
             near_factorization = resolve_near_factorization(str(settings.get("near_factorization", "auto")))
             factor_threads = resolve_near_factor_threads(settings.get("near_factor_threads"))
@@ -799,6 +821,8 @@ def solve_current_field_problems(
                 "fallback_used": False,
                 "near_factorization": near_factorization,
                 "near_factor_threads": factor_threads,
+                "edge_strands": geometry.edge_strands,
+                "face_coverage": geometry.face_coverage,
             }
             solved = [
                 (solution, dict(backend_metrics, lockstep_columns=solution.lockstep_columns))

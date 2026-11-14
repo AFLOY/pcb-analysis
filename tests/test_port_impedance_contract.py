@@ -27,7 +27,7 @@ PITCH_MM, COPPER_MM, GAP_MM, RHO = 0.2, 0.035, 0.2, 1.724e-8
 LENGTH, WIDTH = 40, 5
 ROWS, COLUMNS = WIDTH + 2, LENGTH + 3
 VIA_OHM = 1e-6
-ONE_FILAMENT = {"maximum_filaments": 1, "relative_tolerance": 1e-10}
+ONE_FILAMENT = {"maximum_filaments": 1, "relative_tolerance": 1e-10, "edge_strands": False}  # the contract against hand-built meshes without strands
 
 
 def _cells(layer: str, col: int, rows=range(1, 1 + WIDTH)) -> list[dict]:
