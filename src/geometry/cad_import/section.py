@@ -297,7 +297,7 @@ def rasterize_board(
     y_down: bool = False,
     thickness_tolerance: float = 0.05,
     grid: TensorGrid | None = None,
-    faces: bool = False,
+    faces: bool | str = "auto",
 ) -> BoardRaster:
     """Sample the board outline and each layer's copper onto the grid.
 
@@ -314,7 +314,12 @@ def rasterize_board(
     ``faces`` also records how much of every grid face each layer's copper
     covers (exact sections, uniform grids), for a sheet mesh that sizes its
     branches by the faces they cross; a plated barrel's footprint covers the
-    faces between the cells it fills.
+    faces between the cells it fills.  ``"auto"`` (default) records them on a
+    uniform grid when the geometry native extension is built (it computes
+    them), not on a graded one (a 45-degree edge's staircase made a
+    diagonal strip pair's R 5 % and L 2.7 % high at 0.1 mm; with the faces,
+    -0.02 % and -0.4 % of a 2D FEM); True asks for them and refuses a graded
+    grid.
     """
 
     board = resolved.board
@@ -357,6 +362,12 @@ def rasterize_board(
         by_layer[name].extend(via_solids)
     found = barrels_of(via_solids)
     fill = np.zeros((len(spec.layers), rows, cols))
+    if faces == "auto":
+        from . import mesh as _mesh
+
+        faces = bool(grid.is_uniform) and _mesh._native is not None
+    elif not isinstance(faces, bool):
+        raise ValueError("faces must be 'auto', true or false")
     if faces and not grid.is_uniform:
         raise ValueError("face coverage needs a uniform grid")
     face_layers: list[tuple[np.ndarray, ...]] = []

@@ -171,3 +171,21 @@ def test_a_clearance_narrower_than_a_cell_is_not_bridged() -> None:
         mesh, _, _ = cfc._sheet_geometry(problem, {})
         count, _ = csgraph.connected_components(mesh.incidence().T @ mesh.incidence(), directed=False)
         assert count == (2 if faces else 1)
+
+
+def test_the_faces_are_recorded_by_default_on_a_uniform_grid() -> None:
+    """``rasterize_board`` records the faces unless asked not to (``faces="auto"`` on a uniform grid)."""
+    from geometry.cad_import import rasterize_board
+    from geometry.cad_import.bodymap import CopperSpec, ResolvedBodies
+
+    pitch, margin, reach = 0.1, 1.5, 2.0
+    reader, spec, board = _resolved([], margin, reach)
+    strip = _strip_solid(reader, "F", 0.0, 0.0, 1.0, 1.2, math.pi / 4, 1)
+    resolved = ResolvedBodies(board=board, copper=((CopperSpec("F", "F.Cu"), (strip,)),), vias=(), bodies=())
+    size = int(math.ceil((reach + 2 * margin) / pitch))
+    raster = rasterize_board(resolved, spec, pitch_mm=pitch, origin_mm=(-margin, -margin), shape=(size, size),
+                             method="section")
+    assert raster.faces is not None
+    off = rasterize_board(resolved, spec, pitch_mm=pitch, origin_mm=(-margin, -margin), shape=(size, size),
+                          method="section", faces=False)
+    assert off.faces is None
