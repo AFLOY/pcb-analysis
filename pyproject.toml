@@ -42,7 +42,10 @@ dependencies = [
 [project.optional-dependencies]
 # CuPy is the only optional runtime: it needs an NVIDIA driver and has no
 # macOS wheel.  Every CUDA path falls back to the CPU without it.
-cuda = ["cupy-cuda13x>=14,<15"]
+# nvmath-python brings cuDSS, which factors the sheet solve's near
+# preconditioner on the device; without it the factors are SuperLU's, on the
+# host.
+cuda = ["cupy-cuda13x>=14,<15", "nvmath-python[cu13]>=1,<2"]
 test = ["pytest>=8,<9"]
 native = ["pybind11>=2.12,<4"]
 # Kept for installs written against 0.7.0; the CAD reader is now included.

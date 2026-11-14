@@ -97,7 +97,31 @@ class _CudssEntry:
 
 
 # How the ``near`` preconditioner is factored and applied on the device.
-NEAR_FACTORIZATIONS = ("superlu", "cudss_quasi_definite")
+NEAR_FACTORIZATIONS = ("auto", "superlu", "cudss_quasi_definite")
+
+
+def cudss_available() -> bool:
+    """Whether nvmath-python's cuDSS bindings can be imported."""
+    try:
+        import nvmath.bindings.cudss  # noqa: F401
+        import nvmath.sparse.advanced  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def resolve_cuda_near_factorization(name: str) -> str:
+    """``auto``: cuDSS where nvmath-python offers it, SuperLU on the host otherwise.
+
+    The host's SuperLU factors leave the device waiting on the host: on a
+    GB200 the EVM-2L hot loop at 0.1 mm took 80 to 586 s with them against
+    4 to 6 s with cuDSS's and 61 to 240 s on 36 CPU cores.
+    """
+    if name not in NEAR_FACTORIZATIONS:
+        raise ValueError(f"near_factorization must be one of {NEAR_FACTORIZATIONS}")
+    if name == "auto":
+        return "cudss_quasi_definite" if cudss_available() else "superlu"
+    return name
 
 
 class NearMatrixTooLarge(RuntimeError):
@@ -1280,7 +1304,7 @@ def solve_sheet_case_cuda(
     preconditioner: str = "near",
     keep_terminal_components: bool = False,
     initial: SheetSolution | None = None,
-    near_factorization: str = "superlu",
+    near_factorization: str = "auto",
     near_regularization: float = 1e-8,
 ) -> tuple[SheetSolution, CudaSheetTelemetry]:
     """Solve one sheet case with cuFFT, CuPy sparse algebra, and CUDA GMRES."""
@@ -1307,7 +1331,7 @@ def solve_sheet_cases_cuda(
     preconditioner: str = "near",
     keep_terminal_components: bool = False,
     initial: Sequence[SheetSolution | None] | None = None,
-    near_factorization: str = "superlu",
+    near_factorization: str = "auto",
     near_regularization: float = 1e-8,
 ) -> list[tuple[SheetSolution, CudaSheetTelemetry]]:
     """Solve several excitations of one mesh on the device, in the order given.
@@ -1323,9 +1347,11 @@ def solve_sheet_cases_cuda(
     preparation and its group's factorisation.
 
     ``near_factorization`` chooses how the ``near`` preconditioner is factored
-    and applied: ``superlu`` (SciPy SuperLU factors, CuPy triangular solves)
-    or ``cudss_quasi_definite`` (:class:`CudssQuasiDefiniteNear`, cuDSS LDL^T
-    of the regularized near matrix, ``near_regularization`` relative).
+    and applied: ``cudss_quasi_definite`` (:class:`CudssQuasiDefiniteNear`,
+    cuDSS LDL^T of the regularized near matrix, ``near_regularization``
+    relative), ``superlu`` (SciPy SuperLU factors on the host, CuPy triangular
+    solves) or ``auto`` (default): cuDSS where nvmath-python is installed,
+    SuperLU otherwise.  The telemetry's factorization backend says which ran.
     """
     cp = cupy_module if cupy_module is not None else _import_cupy()
     try:
@@ -1351,8 +1377,7 @@ def solve_sheet_cases_cuda(
         preconditioner = "near"
     if preconditioner not in ("near", "diagonal"):
         raise ValueError("preconditioner must be 'auto', 'near' or 'diagonal'")
-    if near_factorization not in NEAR_FACTORIZATIONS:
-        raise ValueError(f"near_factorization must be one of {NEAR_FACTORIZATIONS}")
+    near_factorization = resolve_cuda_near_factorization(near_factorization)
     stranded = getattr(mesh, "strands", None) is not None
     if stranded and not hasattr(operator, "_tables"):
         raise ValueError("edge strands and face coverage need the uniform convolution operator")

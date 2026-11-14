@@ -128,9 +128,13 @@ def test_the_cudss_quasi_definite_near_preconditioner_solves_as_superlu_does() -
     problem = _problem(frequency_hz=3e7)
     common = {"relative_tolerance": 1e-9, "maximum_iterations": 240, "restart": 60,
               "execution_backend": "cuda", "device_id": 0, "preconditioner": "near"}
-    superlu = solve_current_field_problem(problem, common)
+    superlu = solve_current_field_problem(problem, {**common, "near_factorization": "superlu"})
     cudss = solve_current_field_problem(problem, {**common, "near_factorization": "cudss_quasi_definite"})
     assert cudss.metrics["converged"] and superlu.metrics["converged"]
+    assert superlu.metrics["preconditioner_factorization_backend"] == "scipy_superlu_factor_cupy_triangular_solve"
+    # unnamed, the factorization is cuDSS's where nvmath-python offers it
+    default = solve_current_field_problem(problem, common)
+    assert default.metrics["preconditioner_factorization_backend"] == "cudss_quasi_definite_ldlt_host_near"
     # the mesh is cut into edge strands by default: its near matrix is the host's
     assert cudss.metrics["edge_strands"] and superlu.metrics["edge_strands"]
     assert cudss.metrics["preconditioner_factorization_backend"] == "cudss_quasi_definite_ldlt_host_near"

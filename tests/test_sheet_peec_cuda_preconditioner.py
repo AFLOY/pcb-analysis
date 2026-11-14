@@ -126,3 +126,13 @@ def test_the_device_near_matrix_is_the_same_in_any_blocks_and_refuses_what_will_
     assert np.array_equal(whole.data, pieces.data)
     with pytest.raises(NearMatrixTooLarge):
         device_quasi_definite_near(*arguments, memory_budget=1)
+
+
+def test_the_unnamed_device_near_factorization_is_cudss_where_nvmath_offers_it() -> None:
+    from electrical.sheet_peec.sheet_cuda import cudss_available, resolve_cuda_near_factorization
+
+    assert resolve_cuda_near_factorization("auto") == ("cudss_quasi_definite" if cudss_available() else "superlu")
+    assert resolve_cuda_near_factorization("superlu") == "superlu"
+    assert resolve_cuda_near_factorization("cudss_quasi_definite") == "cudss_quasi_definite"
+    with pytest.raises(ValueError, match="near_factorization"):
+        resolve_cuda_near_factorization("mumps_quasi_definite")

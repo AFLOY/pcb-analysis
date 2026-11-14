@@ -851,7 +851,7 @@ def _solve_conductor(
                 operator,
                 terminal_sets,
                 device_id=int(settings.get("device_id", 0)),
-                near_factorization=str(settings.get("near_factorization", "superlu")),
+                near_factorization=str(settings.get("near_factorization", "auto")),
                 near_regularization=float(settings.get("near_regularization", 1e-8)),
                 **solve_arguments,
             )
