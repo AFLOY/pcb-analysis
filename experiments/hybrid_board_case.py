@@ -31,6 +31,7 @@ from geometry.cad_import.reader import load_step
 MM = 1e-3
 import os
 VIA_L_SCALE = float(os.environ.get("HYBRID_VIA_L_SCALE", "1"))
+VIA_R_SCALE = float(os.environ.get("HYBRID_VIA_R_SCALE", "1"))  # a test: 1e6 takes the vias out
 
 
 def chain_loops(seg, tol=1e-9):
@@ -198,6 +199,72 @@ def solve_case(prob, step_path, args, reference=None):
             for k in filaments_of[name]:
                 sheets[k] = Sheet(space, sheets[k].z, sheets[k].thickness, sheets[k].resistivity, name, port_ids=ids)
 
+    # edges: every wall edge of a via's hole is its own node port (one edge
+    # per node: a node joining edges at different places is a current path
+    # without partial inductance, and AC loops through it carry spurious
+    # eddies -- 3D FEM, work/via_ref); a hole several vias share gives each
+    # of its edges to the nearest of them.
+    edge_walls = {}  # (via, layer) -> (rows, angles about the via's centre)
+    edge_port = {}  # (layer, row) -> port id
+    if args.via_model == "edges":
+        from shapely.geometry import Point as _Point
+
+        for name, (mesh, cuts) in meshes.items():
+            sp_ = mesh.space
+            region = regions[name]
+            holes = [h for part in (region.geoms if hasattr(region, "geoms") else [region]) for h in part.interiors]
+            hole_polys = [Polygon(h) for h in holes]
+            if not hole_polys:
+                continue
+            tree = shapely.STRtree(hole_polys)
+            mid = 0.5 * (sp_.vertices[sp_.boundary_edges[:, 0]] + sp_.vertices[sp_.boundary_edges[:, 1]])
+            in_hole = {}
+            for v, via in enumerate(prob["vertical_connections"]):
+                if name not in via["layers"]:
+                    continue
+                barrel = via.get("resistance_barrel") or via.get("barrel") or {}
+                limit = math.pi * (0.5 * barrel.get("outer_diameter_mm", 0.3) * MM + 0.1 * MM) ** 2
+                centre = _Point(via_centre(via))
+                found = [k for k in tree.query(centre) if hole_polys[k].contains(centre) and hole_polys[k].area < limit]
+                if found:
+                    in_hole.setdefault(found[0], []).append(v)
+            for h, vs in in_hole.items():
+                rows = np.flatnonzero(shapely.distance(holes[h], shapely.points(mid)) < 5e-6)
+                if len(rows) < 3:
+                    continue
+                centres = np.array([via_centre(prob["vertical_connections"][v]) for v in vs])
+                nearest = np.argmin(np.hypot(mid[rows, 0, None] - centres[None, :, 0], mid[rows, 1, None] - centres[None, :, 1]), axis=1)
+                for j, v in enumerate(vs):
+                    mine = rows[nearest == j]
+                    if len(mine) == 0:
+                        continue
+                    # angles about the hole's own centre when it is this via's alone
+                    # (the merged cells place a via up to ~45 um off its hole)
+                    cx, cy = Polygon(holes[h]).centroid.coords[0] if len(vs) == 1 else centres[j]
+                    ang = np.arctan2(mid[mine, 1] - cy, mid[mine, 0] - cx) % (2 * math.pi)
+                    edge_walls[v, name] = (mine, ang, mid[mine])
+        if __import__("os").environ.get("HYBRID_EDGE_DEBUG"):
+            for (v, name), (rows, ang, _m) in sorted(edge_walls.items()):
+                sp_ = meshes[name][0].space
+                mid = 0.5 * (sp_.vertices[sp_.boundary_edges[rows, 0]] + sp_.vertices[sp_.boundary_edges[rows, 1]])
+                cx, cy = via_centre(prob["vertical_connections"][v])
+                r = np.hypot(mid[:, 0] - cx, mid[:, 1] - cy)
+                via = prob["vertical_connections"][v]
+                print("edge wall", v, via["name"], name, "edges", len(rows), "r mm %.3f..%.3f" % (r.min() * 1e3, r.max() * 1e3),
+                      "barrel od", (via.get("resistance_barrel") or {}).get("outer_diameter_mm"), "cells", via.get("cells_merged"))
+        next_id = 10_000_000
+        for name, (mesh, cuts) in meshes.items():
+            sp_ = mesh.space
+            rows = sorted(r for (v, n), (rr, _a, _m) in edge_walls.items() if n == name for r in rr)
+            for r in rows:
+                edge_port[name, r] = next_id
+                next_id += 1
+            space = RT0Space(sp_.vertices, sp_.corners, sp_.kind,
+                             port_edges=tuple(sp_.boundary_edges[[r], :2] for r in rows))
+            ids = tuple(edge_port[name, r] for r in rows)
+            for k in filaments_of[name]:
+                sheets[k] = Sheet(space, sheets[k].z, sheets[k].thickness, sheets[k].resistivity, name, port_ids=ids)
+
     # Terminals: each layer of a terminal takes an equal share (as the uniform
     # contract does), fed into the layer's first filament over the elements
     # inside its cells, by area.
@@ -247,7 +314,7 @@ def solve_case(prob, step_path, args, reference=None):
             ang_b = np.arctan2(sb.centroid[eb, 1] - cy, sb.centroid[eb, 0] - cx)
             pair_b = eb[np.argmin(np.abs(np.angle(np.exp(1j * (ang_a[:, None] - ang_b[None, :])))), axis=1)]
             n = len(ea)
-            links.append((a, b, ea, pair_b, (np.full(n, r_dc * ratio * n), np.full(n, inductance * n))))
+            links.append((a, b, ea, pair_b, (np.full(n, VIA_R_SCALE * r_dc * ratio * n), np.full(n, inductance * n))))
 
 
     # Vias: a barrel between its two hole walls (node ports), or, where a
@@ -257,7 +324,101 @@ def solve_case(prob, step_path, args, reference=None):
     _os_env = os.environ
     node_ports, node_links, node_element_links, wall_vias = [], [], [], 0
     one_sided = 0
-    for v, via in enumerate(prob["vertical_connections"]):
+    blocks, edge_vias = [], 0
+    if args.via_model == "edges":
+        # Each barrel as vertical strips, one per wall edge of its hole (on
+        # the layer with more of them), each joined to its own edge on both
+        # layers -- or, on a layer where copper covers the via, to the element
+        # under the strip on every filament.  All strips of all barrels are
+        # one coupled block: a strip with the others of its barrel as a cut
+        # tube, with every strip of the other barrels as parallel filaments.
+        # The barrel's resistance takes its length less half the copper's
+        # thickness (3D FEM: the current leaves the barrel across the plate).
+        from electrical.sheet_peec.hybrid_vias import strip_inductance
+        from electrical.sheet_peec.sheet_inductance import parallel_filament_mutual_inductance
+
+        pairs, res, pos, length_of, strip_sets = [], [], [], [], []
+        next_node = 20_000_000
+        thickness = {L["name"]: L["thickness_mm"] * MM for L in layers}
+        for v, via in enumerate(prob["vertical_connections"]):
+            upper, lower = via["layers"][0], via["layers"][-1]
+            have = [L for L in (upper, lower) if (v, L) in edge_walls]
+            if not have:
+                _element_via(v, via)
+                continue
+            barrel = via.get("resistance_barrel") or via.get("barrel") or {}
+            ro = 0.5 * barrel.get("outer_diameter_mm", 0.3) * MM
+            ri = 0.0 if barrel.get("solid_pin") else 0.5 * barrel.get("drill_diameter_mm", 0.0) * MM
+            cx, cy = via_centre(via)
+            span = via["length_mm"] * MM
+            ratio = tube_resistance_ratio(ro, ri, freq, 1.724e-8) if barrel and freq > 0 else 1.0
+            r_eff = via["resistance_ohm"] * ratio * (span - 0.25 * (thickness[upper] + thickness[lower])) / span
+            # strips at the wall edges of the layer with more of them; the other
+            # layer's end of a strip is its edge nearest in the plane (by
+            # position, not by angle about the via's centre: the merged cells
+            # put that centre up to ~45 um off the hole, and strips paired by
+            # angle about it ran askew -- a horizontal jump with no inductance,
+            # which more than doubled SW's AC loss)
+            base = max(have, key=lambda L: len(edge_walls[v, L][0]))
+            order = np.argsort(edge_walls[v, base][1])
+            angles = edge_walls[v, base][1][order]
+            spots = edge_walls[v, base][2][order]
+            n = len(angles)
+            ends = {}
+            for L in (upper, lower):
+                if (v, L) in edge_walls:
+                    rows, _ang, mids_ = edge_walls[v, L]
+                    gap = np.hypot(spots[:, None, 0] - mids_[None, :, 0], spots[:, None, 1] - mids_[None, :, 1])
+                    ends[L] = [edge_port[L, int(r)] for r in rows[np.argmin(gap, axis=1)]]
+                    if __import__("os").environ.get("HYBRID_EDGE_DEBUG") and L != base:
+                        print("strip pairing", v, via["name"], "n", n, "max offset um %.1f" % (gap.min(axis=1).max() * 1e6),
+                              "distinct other-layer edges", len(set(ends[L])), "of", len(rows), flush=True)
+                else:
+                    ids = []
+                    for px, py in spots:
+                        for f in filaments_of[L]:
+                            sp_ = sheets[f].space
+                            e = int(np.argmin(np.hypot(sp_.centroid[:, 0] - px, sp_.centroid[:, 1] - py)))
+                            r_land = sheets[f].resistivity * sheets[f].thickness / sp_.area[e]
+                            node_element_links.append((next_node, f, np.array([e]), np.array([r_land])))
+                        ids.append(next_node)
+                        next_node += 1
+                    ends[L] = ids
+                    one_sided += 1
+                node_ports += ends[L]
+            first = len(pairs)
+            for k in range(n):
+                pairs.append((ends[upper][k], ends[lower][k]))
+                res.append(r_eff * n)
+                pos.append(tuple(spots[k]))
+                length_of.append(span)
+            strip_sets.append((np.arange(first, len(pairs)), span, ro, ri))
+            edge_vias += 1
+        # Every wall edge is a node, also one no strip lands on: a port that is
+        # not a node is held at 0 V by the injection solve, and such an edge
+        # grounded the copper (VIN: two of 30 edges per hole on one layer,
+        # tying F and B through 0 V and halving the loss).
+        node_ports += list(edge_port.values())
+        if pairs:
+            pos = np.array(pos)
+            length_of = np.array(length_of)
+            d = np.hypot(pos[:, None, 0] - pos[None, :, 0], pos[:, None, 1] - pos[None, :, 1])
+            lm = parallel_filament_mutual_inductance(length_of[:, None], length_of[None, :], 0.0, np.maximum(d, 1e-9))
+            for s_idx, span, ro, ri in strip_sets:
+                lm[np.ix_(s_idx, s_idx)] = strip_inductance(span, ro, ri, len(s_idx))
+            if __import__("os").environ.get("HYBRID_EDGE_NOCROSS"):
+                keep = np.zeros_like(lm, dtype=bool)
+                for s_idx, *_ in strip_sets:
+                    keep[np.ix_(s_idx, s_idx)] = True
+                lm = np.where(keep, lm, 0.0)
+            if __import__("os").environ.get("HYBRID_EDGE_DEBUG"):
+                w_ = np.linalg.eigvalsh(lm)
+                print("edge block", lm.shape, "eig min %.3e max %.3e negative %d" % (w_.min(), w_.max(), (w_ < 0).sum()), flush=True)
+            group = np.empty(len(pairs), dtype=np.int64)
+            for g_, (s_idx, *_rest) in enumerate(strip_sets):
+                group[s_idx] = g_
+            blocks.append((pairs, VIA_R_SCALE * np.array(res), VIA_L_SCALE * lm, group))
+    for v, via in enumerate(prob["vertical_connections"] if args.via_model != "edges" else []):
         upper, lower = via["layers"][0], via["layers"][-1]
         if (v, upper) in owner and (v, lower) in owner:
             barrel = via.get("resistance_barrel") or via.get("barrel") or {}
@@ -302,12 +463,53 @@ def solve_case(prob, step_path, args, reference=None):
     node_ports = sorted(set(node_ports))
     op = HybridOperator(sheets, links, freq, grid_pitch=args.grid_mm * MM, taper_radius=args.taper_mm * MM,
                         node_ports=node_ports, node_links=node_links,
-                        node_element_links=node_element_links, log=lambda *_: None)
+                        node_element_links=node_element_links, node_link_blocks=blocks,
+                        correction_floor=None if args.correction_mm is None else args.correction_mm * MM,
+                        grid_reach_pitches=args.grid_reach_pitches,
+                        correction_gap=None if args.correction_gap_mm is None else args.correction_gap_mm * MM,
+                        near_same_layer=args.same_layer,
+                        log=(lambda *a: print(*a, flush=True)) if __import__("os").environ.get("HYBRID_LOG") else (lambda *_: None))
+    if __import__("os").environ.get("HYBRID_LOG"):
+        print("sheets per layer", {k: len(v) for k, v in filaments_of.items()}, "thicknesses um",
+              {k: [round(sheets[i].thickness * 1e6, 2) for i in v] for k, v in filaments_of.items()},
+              "elements per layer", {k: len(m.space.kind) for k, (m, _c) in meshes.items()},
+              "distinct pair keys", len(op._corr), flush=True)
     t2 = time.time()
     s = np.concatenate(injected + [np.zeros(len(node_ports), dtype=np.complex128)])
-    current, phi, iterations = solve_injection_fast(op, s, factor_threads=args.factor_threads, log=lambda *_: None)
+    current, phi, iterations = solve_injection_fast(op, s, factor_threads=args.factor_threads,
+                                                    log=(lambda *a: print(*a, flush=True)) if __import__("os").environ.get("HYBRID_LOG") else (lambda *_: None))
     t3 = time.time()
     power = np.vdot(s, phi)
+    if __import__("os").environ.get("HYBRID_EDGE_DEBUG"):
+        rr = op.resistance.copy(); rr.data = rr.data.real
+        per = [float(np.real(np.vdot(current[op.dof0[k]:op.dof0[k + 1]], rr[op.dof0[k]:op.dof0[k + 1], op.dof0[k]:op.dof0[k + 1]] @ current[op.dof0[k]:op.dof0[k + 1]]))) for k in range(len(sheets))]
+        tail = current[op.m_plane:]
+        rest = float(np.real(np.vdot(current, rr @ current))) - sum(per)
+        print("loss per sheet", [round(x, 4) for x in per], "[" + ", ".join(sheets[k].layer for k in range(len(sheets))) + "]",
+              "links+nodes+blocks", round(rest, 4), flush=True)
+        row0, ev = op.m_plane, []
+        for l in links:
+            if isinstance(l[4], tuple):
+                ev.append(round(abs(current[row0:row0 + len(l[2])].sum()), 3))
+            row0 += len(l[2])
+        if ev:
+            print("element via totals", ev, flush=True)
+        centres = np.array([via_centre(v_) for v_ in prob["vertical_connections"]])
+        for k, sh in enumerate(sheets):
+            sp_ = sh.space
+            ik = current[op.dof0[k]:op.dof0[k + 1]]
+            a = [sp_.component(d).T @ ik for d in range(2)]
+            mm_ = sp_.mass_moments()
+            le = sum(np.real(np.einsum("ei,eij,ej->e", np.conj(a[d].reshape(-1, 3)), mm_, a[d].reshape(-1, 3))) for d in range(2)) * sh.resistivity / sh.thickness
+            dist = np.min(np.hypot(sp_.centroid[:, None, 0] - centres[None, :, 0], sp_.centroid[:, None, 1] - centres[None, :, 1]), axis=1)
+            print("sheet", k, sh.layer, "loss %.4f: within 0.2 mm of a via %.4f, 0.2-0.6 mm %.4f, beyond %.4f" % (
+                le.sum(), le[dist < 0.2e-3].sum(), le[(dist >= 0.2e-3) & (dist < 0.6e-3)].sum(), le[dist >= 0.6e-3].sum()), flush=True)
+        if blocks:
+            nb = len(blocks[0][0])
+            ib = current[op.m - nb:]
+            print("strips: |I| max %.3f mean %.3f; via totals" % (np.abs(ib).max(), np.abs(ib).mean()),
+                  [round(abs(ib[sset].sum()), 3) for sset, *_ in strip_sets], "sum|I| per via",
+                  [round(float(np.abs(ib[sset]).sum()), 3) for sset, *_ in strip_sets], flush=True)
     r_real = op.resistance.copy()
     r_real.data = r_real.data.real
     dissipated = float(np.real(np.vdot(current, r_real @ current)))
@@ -362,7 +564,8 @@ def solve_case(prob, step_path, args, reference=None):
         print("via currents (A): largest", [round(c, 3) for c in currents[:8]], "sum", round(sum(currents), 3), "count", len(currents))
     print("energy", out["energy_check"], flush=True)
     out.update(hybrid=dict(loss_w=power.real, dofs=op.m, elements=op.n, sheets=len(sheets), iterations=iterations,
-                           wall_vias=wall_vias, element_vias=len(prob["vertical_connections"]) - wall_vias,
+                           wall_vias=wall_vias, edge_vias=edge_vias,
+                           element_vias=len(prob["vertical_connections"]) - wall_vias - edge_vias,
                            one_sided_vias=one_sided,
                            mesh_s=round(t_mesh, 1), operator_s=round(t2 - t1, 1), solve_s=round(t3 - t2, 1),
                            **op.timings))
@@ -385,7 +588,11 @@ def main():
     ap.add_argument("--band-mm", type=float, default=0.3)
     ap.add_argument("--taper-mm", type=float, default=2.0)
     ap.add_argument("--max-filaments", type=int, default=64)
-    ap.add_argument("--via-model", choices=["wall", "elements"], default="wall")
+    ap.add_argument("--correction-mm", type=float, default=None, help="corrected near zone floor (default: the taper)")
+    ap.add_argument("--grid-reach-pitches", type=float, default=None, help="corrected zone in grid pitches (default 5)")
+    ap.add_argument("--correction-gap-mm", type=float, default=None, help="sheet pairs farther apart take the grid alone")
+    ap.add_argument("--same-layer", action="store_true", help="the preconditioner keeps a layer's own sheet pairs only")
+    ap.add_argument("--via-model", choices=["edges", "wall", "elements"], default="edges")
     ap.add_argument("--factor-threads", default=None)
     ap.add_argument("--frequency", type=float, default=None, help="solve at this frequency instead of the case's")
     ap.add_argument("--uniform", action="store_true", help="also solve the case on the uniform grid, same frequency")
