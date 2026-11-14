@@ -90,7 +90,7 @@ def test_the_device_near_matrix_is_the_host_one(filaments: int, barrels: bool) -
         for connection in value["vertical_connections"]:
             connection["barrel"] = {"outer_diameter_mm": 0.3, "drill_diameter_mm": 0.25}
     problem = cfc.CurrentFieldProblem.from_mapping(value)
-    mesh, operator, geometry = cfc._sheet_geometry(problem, {"maximum_filaments": filaments})
+    mesh, operator, geometry = cfc._sheet_geometry(problem, {"maximum_filaments": filaments, "edge_strands": False})
     operator = sheet._with_barrels(mesh, operator)
     assert hasattr(operator, "_delta_branch") == barrels
     terminals = cfc._sheet_terminals(problem, geometry)
