@@ -38,7 +38,7 @@ in an automated, LLM-driven PCB design workflow.
 
 ```console
 pip install pcb-analysis            # CPU only
-pip install 'pcb-analysis[cuda]'    # adds CuPy for the CUDA paths
+pip install 'pcb-analysis[cuda]'    # adds CuPy and nvmath-python (cuDSS) for the CUDA paths
 ```
 
 Requirements:
