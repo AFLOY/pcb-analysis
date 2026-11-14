@@ -1108,10 +1108,24 @@ converged).
 `sheet_cuda.py` uses the same mesh and closed-form kernels as the CPU solver.
 Prepared spectra, batched 2D transforms, sparse incidence products, Krylov
 vectors, and preconditioner triangular solves reside in CuPy. There is no
-implicit CPU fallback. CuPy 14 builds the sparse LU factors with SciPy
-SuperLU, then uploads the factors and performs each triangular solve on CUDA;
-the result records this as
-`scipy_superlu_factor_cupy_triangular_solve`.
+implicit CPU fallback. The near preconditioner is factored by cuDSS on the
+device where nvmath-python is installed (`near_factorization="auto"`, the
+default; `cudss_quasi_definite` names it): an LDL^T without pivoting of the
+near matrix made quasi-definite by `near_regularization` (1e-8 over the
+branches' median `|Z_ii|`), recorded as `cudss_quasi_definite_ldlt` (near
+matrix formed on the device), `..._host_near` (a stranded mesh, formed on the
+host) or `..._lockstepN` (N excitations together). Without nvmath-python, or
+with `near_factorization="superlu"`, SciPy SuperLU factors on the host and
+CuPy performs each triangular solve on the device, recorded as
+`scipy_superlu_factor_cupy_triangular_solve`; the host factorization then
+sets the time (EVM-2L hot loop at 0.1 mm on a GB200: 80 to 586 s against 4 to
+6 s with cuDSS and 61 to 240 s on 36 CPU cores).
+Each restart cycle solves for the correction of the current residual,
+`M^-1 A d = M^-1 (b - A x)` from zero, so the error of factors that were not
+pivoted does not stay in the answer: restarting from `x` on
+`M^-1 A x = M^-1 b` left the residual at 1e-9 to 4e-9 (EVM-2L hot loop,
+0.2 mm, 30 MHz, A100, tolerance 1e-11: 8.6e-10 after 30 cycles that way,
+1.5e-12 after 10 this way).
 `max_iterations` means restart cycles on both paths. The CUDA adapter runs
 CuPy's GMRES one restart cycle at a time and checks the public saddle-point
 residual between cycles: CuPy judges the left-preconditioned residual, whose
