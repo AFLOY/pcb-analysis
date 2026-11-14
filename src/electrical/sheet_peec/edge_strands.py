@@ -187,8 +187,17 @@ def plan_edge_strands(
     occupancy = mesh.occupancy
     layers, rows, cols = occupancy.shape
 
-    def filled(layer: int, row: int, col: int) -> bool:
-        return 0 <= row < rows and 0 <= col < cols and bool(occupancy[layer, row, col])
+    region = getattr(mesh, "region", None)
+
+    def filled(layer: int, row: int, col: int, beside: tuple[int, int]) -> bool:
+        """Copper at (row, col) joined to the branch's cell ``beside``: a cell of
+        another net (a different non-zero region) is an edge, as no branch joins them."""
+        if not (0 <= row < rows and 0 <= col < cols and occupancy[layer, row, col]):
+            return False
+        if region is None:
+            return True
+        ra, rb = int(region[layer, row, col]), int(region[layer, beside[0], beside[1]])
+        return ra == rb or ra == 0 or rb == 0
 
     branch: list[int] = []
     strand_index: list[int] = []
@@ -201,11 +210,11 @@ def plan_edge_strands(
     for axis, group in ((0, mesh.branch_x), (1, mesh.branch_y)):
         for layer, row, col in group:
             if axis == 0:
-                open_plus = not (filled(layer, row + 1, col) and filled(layer, row + 1, col + 1))
-                open_minus = not (filled(layer, row - 1, col) and filled(layer, row - 1, col + 1))
+                open_plus = not (filled(layer, row + 1, col, (row, col)) and filled(layer, row + 1, col + 1, (row, col + 1)))
+                open_minus = not (filled(layer, row - 1, col, (row, col)) and filled(layer, row - 1, col + 1, (row, col + 1)))
             else:
-                open_plus = not (filled(layer, row, col + 1) and filled(layer, row + 1, col + 1))
-                open_minus = not (filled(layer, row, col - 1) and filled(layer, row + 1, col - 1))
+                open_plus = not (filled(layer, row, col + 1, (row, col)) and filled(layer, row + 1, col + 1, (row + 1, col)))
+                open_minus = not (filled(layer, row, col - 1, (row, col)) and filled(layer, row + 1, col - 1, (row + 1, col)))
             low, high = _covered_interval(coverage.get(position))
             partial = low > -0.5 + 1e-12 or high < 0.5 - 1e-12
             open_minus = open_minus or low > -0.5 + 1e-12

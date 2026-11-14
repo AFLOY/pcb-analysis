@@ -205,3 +205,33 @@ def test_edge_strands_are_cut_by_default_where_they_are_built() -> None:
     assert result.metrics["edge_strands"] is True and result.metrics["face_coverage"] is False
     with pytest.raises(ValueError, match="edge_strands"):
         applied(3e7, edge_strands="yes")
+
+
+def test_a_neighbour_of_another_region_is_an_edge_for_the_strands() -> None:
+    """Two nets a clearance narrower than a cell apart: their touching rows are edges."""
+    def strands_on_row(row: int, regions: bool) -> int:
+        cells = [{"x": x, "y": y} for x in range(10) for y in range(4)]
+        value = {
+            "schema": cfc.CURRENT_FIELD_PROBLEM_SCHEMA, "name": "two_nets", "role": "A", "state": "steady",
+            "weight": 1.0, "frequency_hz": 3e7,
+            "grid": {"min_x_mm": 0.0, "min_y_mm": 0.0, "columns": 10, "rows": 4, "pitch_mm": 0.2},
+            "layers": [{"name": "F.Cu", "order": 0, "center_z_mm": 0.0, "thickness_mm": 0.035,
+                        "resistivity_ohm_m": 1.724e-8}],
+            "copper_by_layer": {"F.Cu": cells}, "vertical_connections": [],
+            "terminals": [
+                {"name": "in", "pad": "IN.1", "current_a": {"real": 1.0, "imag": 0.0},
+                 "cells": [{"layer": "F.Cu", "x": 0, "y": y} for y in (0, 1)]},
+                {"name": "out", "pad": "OUT.1", "current_a": {"real": -1.0, "imag": 0.0},
+                 "cells": [{"layer": "F.Cu", "x": 9, "y": y} for y in (0, 1)]},
+            ],
+        }
+        if regions:
+            value["cell_regions"] = {"F.Cu": [{"x": c["x"], "y": c["y"], "region": 1 if c["y"] < 2 else 2} for c in cells]}
+        problem = cfc.CurrentFieldProblem.from_mapping(value)
+        mesh, _operator, _geometry = cfc._sheet_geometry(problem, {"maximum_filaments": 1, "edge_strands": True})
+        rows = {position: r for position, (_layer, r, _col) in enumerate(mesh.branch_x)}
+        cut = mesh.strands.branch
+        return int(np.count_nonzero([rows.get(int(p)) == row for p in cut]))
+
+    assert strands_on_row(1, regions=False) == 0  # inside one net: no edge
+    assert strands_on_row(1, regions=True) > 0  # beside the other net: an edge
