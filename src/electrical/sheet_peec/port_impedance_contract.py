@@ -322,8 +322,10 @@ def _cut_key(problem: PortImpedanceProblem, frequency_hz: float, settings: Mappi
         for _, _, segment in problem.vertical_segments
         if segment.skin_outer_diameter_mm is not None
     )
+    # edge strands are cut above zero frequency only (their width is fixed per sweep)
+    stranded = frequency_hz > 0.0 and settings.get("edge_strands", "auto") is not False
     return tuple((layer.name, tuple(cuts[layer.name].layers(layer.name, layer.resistivity_ohm_m)))
-                 for layer in problem.layers) + (("barrel_skin", barrels),)
+                 for layer in problem.layers) + (("barrel_skin", barrels), ("strands", stranded))
 
 
 def _port_pads(problem: PortImpedanceProblem, filament_of: Mapping[str, tuple[int, ...]]) -> list[PortPad]:
@@ -386,6 +388,17 @@ def solve_port_impedance_problem(
         raise ValueError("port-impedance solves do not allow implicit backend fallback")
     problem = value if isinstance(value, PortImpedanceProblem) else PortImpedanceProblem.from_mapping(value)
     ports = problem.port_groups()
+    # Edge strands start half a skin depth wide; across a sweep they are cut
+    # once, for the top frequency, so every frequency sees one mesh and the
+    # impedance is a smooth function of frequency (cut per frequency, the
+    # mesh changed under the refinement and it did not converge).
+    if settings.get("edge_strands", "auto") is not False and settings.get("edge_strand_first_um") is None:
+        top = max(problem.frequencies_hz)
+        if top > 0.0:
+            from electrical.sheet_peec.skin_filaments import skin_depth_m
+
+            resistivity = min(layer.resistivity_ohm_m for layer in problem.layers)
+            settings["edge_strand_first_um"] = 0.5e6 * skin_depth_m(top, resistivity)
     solve_arguments = {
         "tolerance": float(settings.get("relative_tolerance", 1e-9)),
         "max_iterations": int(settings.get("maximum_iterations", 200)),

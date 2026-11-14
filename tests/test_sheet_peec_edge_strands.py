@@ -188,3 +188,20 @@ def test_the_compact_correction_gives_the_same_bits_at_any_thread_count() -> Non
     results = [compact._native.apply(x, threads) for threads in (1, 2, 3, 8)]
     for other in results[1:]:
         assert other.tobytes() == results[0].tobytes()
+
+
+def test_edge_strands_are_cut_by_default_where_they_are_built() -> None:
+    """``edge_strands`` "auto": cut on the CPU above zero frequency, not at DC nor with the block preconditioner."""
+    def applied(frequency: float, **settings) -> bool:
+        problem = cfc.CurrentFieldProblem.from_mapping(_strip_pair(1.2, 4.0, 0.2, frequency))
+        _mesh, _operator, geometry = cfc._sheet_geometry(problem, {"maximum_filaments": 1, **settings})
+        return geometry.edge_strands
+
+    assert applied(3e7)
+    assert not applied(0.0)
+    assert not applied(3e7, preconditioner="block")
+    assert not applied(3e7, edge_strands=False)
+    result = cfc.solve_current_field_problem(_strip_pair(1.2, 4.0, 0.2, 3e7), {"maximum_filaments": 1})
+    assert result.metrics["edge_strands"] is True and result.metrics["face_coverage"] is False
+    with pytest.raises(ValueError, match="edge_strands"):
+        applied(3e7, edge_strands="yes")
