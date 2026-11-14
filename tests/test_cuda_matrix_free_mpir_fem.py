@@ -135,3 +135,33 @@ def test_cuda_dc_pcg_matches_cpu_solution() -> None:
         rtol=2.0e-8,
         atol=2.0e-10,
     )
+
+
+def test_the_cuda_inner_cycle_as_a_process_s_first_cuda_call_leaves_cublas_usable() -> None:
+    """A fresh process whose first device work is the MPIR solve multiplies matrices afterwards."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    _cuda_runtime()
+    script = (
+        "import numpy as np\n"
+        "import test_cuda_matrix_free_mpir_fem as t\n"
+        "from electrical.matrix_free_mpir_fem import MPIRConfig, solve_scalar_maxwell\n"
+        "config = MPIRConfig(relative_tolerance=1e-10, inner_relative_tolerance=2e-3, max_outer_iterations=12,\n"
+        "                    max_inner_iterations=300, gmres_restart=24)\n"
+        "result = solve_scalar_maxwell(t._problem(elements=32), config=config, backend='cuda')\n"
+        "assert result.solve.converged and result.solve.low_runtime == 'cupy-complex64'\n"
+        "import cupy as cp\n"
+        "for dtype in (np.float64, np.complex64, np.complex128):\n"
+        "    a = cp.ones((64, 3), dtype=dtype); b = cp.ones((3, 20), dtype=dtype)\n"
+        "    assert float(abs(cp.matmul(a, b)).sum()) == 64 * 20 * 3\n"
+    )
+    root = Path(__file__).resolve().parents[1]
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = os.pathsep.join(
+        [str(root / "src"), str(root / "tests"), environment.get("PYTHONPATH", "")]
+    )
+    done = subprocess.run([sys.executable, "-c", script], env=environment, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr[-2000:]
