@@ -19,8 +19,8 @@ Versions before 0.7.0 were not tagged; see the Git history.
   The metrics record `edge_strands` and `face_coverage`; a port-impedance
   sweep cuts its strands once, for its top frequency; the far-field dipoles
   of a stranded mesh sum each branch's strands.  Vias on the uniform grid
-  were checked against a 3D FEM: within -1.2..+1.4 % at 0.1 mm, DC-1 MHz
-  (docs/SHEET_PEEC.md).
+  were checked against a 3D FEM: within -1.14..+0.34 % at 0.1 mm, DC-1 MHz,
+  and a via array's current sharing within 3 % (docs/SHEET_PEEC.md).
 - Sheet solves can correct the two edge errors of the uniform grid, both
   off by default (docs/SHEET_PEEC.md, "Edges: strands and face coverage"):
   `edge_strands` cuts the branches along an edge across their width into
