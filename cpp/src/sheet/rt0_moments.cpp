@@ -166,3 +166,140 @@ std::vector<double> rt0_grid_moments(const std::int64_t* node_index_a, const dou
 }
 
 }  // namespace pcbcore::sheet
+
+namespace pcbcore::sheet {
+
+void rt0_near_pairs(const double* centroid_a, const double* diameter_a, const std::int64_t count_a,
+                    const double* centroid_b, const double* diameter_b, const std::int64_t count_b,
+                    const double factor, const double floor, const int threads, std::vector<std::int64_t>& pair_a,
+                    std::vector<std::int64_t>& pair_b) {
+    pair_a.clear();
+    pair_b.clear();
+    if (count_a <= 0 || count_b <= 0) {
+        return;
+    }
+    double max_diameter = 0.0;
+    for (std::int64_t i = 0; i < count_a; ++i) {
+        max_diameter = std::max(max_diameter, diameter_a[i]);
+    }
+    for (std::int64_t i = 0; i < count_b; ++i) {
+        max_diameter = std::max(max_diameter, diameter_b[i]);
+    }
+    const double cell = std::max(factor * max_diameter, floor);
+    if (!(cell > 0.0) || !std::isfinite(cell)) {
+        throw InvalidInput("the near reach must be positive and finite");
+    }
+    double x0 = centroid_b[0], y0 = centroid_b[1], x1 = x0, y1 = y0;
+    for (std::int64_t i = 0; i < count_b; ++i) {
+        x0 = std::min(x0, centroid_b[2 * i]);
+        x1 = std::max(x1, centroid_b[2 * i]);
+        y0 = std::min(y0, centroid_b[2 * i + 1]);
+        y1 = std::max(y1, centroid_b[2 * i + 1]);
+    }
+    const std::int64_t nx = static_cast<std::int64_t>((x1 - x0) / cell) + 1;
+    const std::int64_t ny = static_cast<std::int64_t>((y1 - y0) / cell) + 1;
+    // b's elements bucketed by cell, in index order within a cell (CSR)
+    std::vector<std::int64_t> start(static_cast<std::size_t>(nx * ny + 1), 0), member(static_cast<std::size_t>(count_b));
+    std::vector<std::int64_t> cell_of(static_cast<std::size_t>(count_b));
+    for (std::int64_t i = 0; i < count_b; ++i) {
+        const std::int64_t cx = std::min(nx - 1, static_cast<std::int64_t>((centroid_b[2 * i] - x0) / cell));
+        const std::int64_t cy = std::min(ny - 1, static_cast<std::int64_t>((centroid_b[2 * i + 1] - y0) / cell));
+        cell_of[i] = cx * ny + cy;
+        ++start[cell_of[i] + 1];
+    }
+    for (std::int64_t c = 0; c < nx * ny; ++c) {
+        start[c + 1] += start[c];
+    }
+    {
+        std::vector<std::int64_t> fill(start.begin(), start.end() - 1);
+        for (std::int64_t i = 0; i < count_b; ++i) {
+            member[fill[cell_of[i]]++] = i;
+        }
+    }
+    // each a's partners, found in parallel, then concatenated in a's order
+    std::vector<std::vector<std::int64_t>> found(static_cast<std::size_t>(count_a));
+#pragma omp parallel for schedule(dynamic, 256) num_threads(std::max(threads, 1)) if (threads > 1)
+    for (std::int64_t e = 0; e < count_a; ++e) {
+        const double ax = centroid_a[2 * e], ay = centroid_a[2 * e + 1];
+        const std::int64_t cx = static_cast<std::int64_t>(std::floor((ax - x0) / cell));
+        const std::int64_t cy = static_cast<std::int64_t>(std::floor((ay - y0) / cell));
+        std::vector<std::int64_t>& mine = found[static_cast<std::size_t>(e)];
+        for (std::int64_t i = std::max<std::int64_t>(cx - 1, 0); i <= std::min(cx + 1, nx - 1); ++i) {
+            for (std::int64_t j = std::max<std::int64_t>(cy - 1, 0); j <= std::min(cy + 1, ny - 1); ++j) {
+                const std::int64_t c = i * ny + j;
+                for (std::int64_t s = start[c]; s < start[c + 1]; ++s) {
+                    const std::int64_t f = member[s];
+                    const double reach = std::max(factor * std::max(diameter_a[e], diameter_b[f]), floor);
+                    const double dx = ax - centroid_b[2 * f], dy = ay - centroid_b[2 * f + 1];
+                    if (dx * dx + dy * dy < reach * reach) {
+                        mine.push_back(f);
+                    }
+                }
+            }
+        }
+        std::sort(mine.begin(), mine.end());
+    }
+    std::size_t total = 0;
+    for (const auto& v : found) {
+        total += v.size();
+    }
+    pair_a.reserve(total);
+    pair_b.reserve(total);
+    for (std::int64_t e = 0; e < count_a; ++e) {
+        for (const std::int64_t f : found[static_cast<std::size_t>(e)]) {
+            pair_a.push_back(e);
+            pair_b.push_back(f);
+        }
+    }
+}
+
+std::vector<double> rt0_point_moments(const double* points_a, const double* weights_a, const double* centroid_a,
+                                      const std::int64_t count_a, const int quadrature_a, const double* points_b,
+                                      const double* weights_b, const double* centroid_b, const std::int64_t count_b,
+                                      const int quadrature_b, const std::int64_t* pair_a, const std::int64_t* pair_b,
+                                      const std::int64_t pairs, const double* heights, const double* height_weights,
+                                      const int height_count, const int threads) {
+    for (std::int64_t p = 0; p < pairs; ++p) {
+        if (pair_a[p] < 0 || pair_a[p] >= count_a || pair_b[p] < 0 || pair_b[p] >= count_b) {
+            throw InvalidInput("a pair index is out of range");
+        }
+    }
+    const int qa = quadrature_a, qb = quadrature_b;
+    std::vector<double> out(static_cast<std::size_t>(pairs) * 9U, 0.0);
+#pragma omp parallel for schedule(dynamic, 256) num_threads(std::max(threads, 1)) if (threads > 1)
+    for (std::int64_t p = 0; p < pairs; ++p) {
+        const std::int64_t e = pair_a[p];
+        const std::int64_t f = pair_b[p];
+        double acc[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+        const double cax = centroid_a[2 * e], cay = centroid_a[2 * e + 1];
+        const double cbx = centroid_b[2 * f], cby = centroid_b[2 * f + 1];
+        for (int i = 0; i < qa; ++i) {
+            const double xi = points_a[2 * (e * qa + i)], yi = points_a[2 * (e * qa + i) + 1];
+            const double wi = weights_a[e * qa + i];
+            double t[3] = {0.0, 0.0, 0.0};  // sum_j g_ij fb_j
+            for (int j = 0; j < qb; ++j) {
+                const double xj = points_b[2 * (f * qb + j)], yj = points_b[2 * (f * qb + j) + 1];
+                const double dx = xi - xj, dy = yi - yj;
+                const double r2 = dx * dx + dy * dy;
+                double g = 0.0;
+                for (int k = 0; k < height_count; ++k) {
+                    g += height_weights[k] / std::sqrt(r2 + heights[k] * heights[k] + 1e-300);
+                }
+                g *= weights_b[f * qb + j];
+                t[0] += g;
+                t[1] += g * (xj - cbx);
+                t[2] += g * (yj - cby);
+            }
+            const double fa[3] = {wi, wi * (xi - cax), wi * (yi - cay)};
+            for (int a = 0; a < 3; ++a) {
+                for (int b = 0; b < 3; ++b) {
+                    acc[3 * a + b] += fa[a] * t[b];
+                }
+            }
+        }
+        std::copy(acc, acc + 9, out.begin() + 9 * p);
+    }
+    return out;
+}
+
+}  // namespace pcbcore::sheet

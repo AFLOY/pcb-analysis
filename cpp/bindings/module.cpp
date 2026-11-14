@@ -299,6 +299,56 @@ py::array_t<double> rt0_grid_moments(const Input<std::int64_t>& node_index_a, co
     return to_array(std::move(out), {pairs, 3, 3});
 }
 
+// Near element pairs by a cell list: see pcbcore/sheet/rt0_moments.hpp.
+py::tuple rt0_near_pairs(const Input<double>& centroid_a, const Input<double>& diameter_a,
+                         const Input<double>& centroid_b, const Input<double>& diameter_b, const double factor,
+                         const double floor, const int threads) {
+    const py::ssize_t ea = diameter_a.size(), eb = diameter_b.size();
+    std::vector<std::int64_t> pa, pb;
+    {
+        const double* ca = sized(centroid_a, ea * 2, "centroid_a");
+        const double* cb = sized(centroid_b, eb * 2, "centroid_b");
+        const double* da = diameter_a.data();
+        const double* db = diameter_b.data();
+        py::gil_scoped_release release;
+        pcbcore::sheet::rt0_near_pairs(ca, da, ea, cb, db, eb, factor, floor, threads, pa, pb);
+    }
+    const auto n = static_cast<py::ssize_t>(pa.size());
+    return py::make_tuple(to_array(std::move(pa), {n}), to_array(std::move(pb), {n}));
+}
+
+// Point-quadrature moments of RT0 element pairs: see pcbcore/sheet/rt0_moments.hpp.
+py::array_t<double> rt0_point_moments(const Input<double>& points_a, const Input<double>& weights_a,
+                                      const Input<double>& centroid_a, const Input<double>& points_b,
+                                      const Input<double>& weights_b, const Input<double>& centroid_b,
+                                      const Input<std::int64_t>& pair_a, const Input<std::int64_t>& pair_b,
+                                      const Input<double>& heights, const Input<double>& height_weights,
+                                      const int threads) {
+    if (points_a.ndim() != 3 || points_a.shape(2) != 2 || points_b.ndim() != 3 || points_b.shape(2) != 2) {
+        throw pcbcore::InvalidInput("points must be (E, q, 2)");
+    }
+    const py::ssize_t ea = points_a.shape(0), eb = points_b.shape(0);
+    const int qa = static_cast<int>(points_a.shape(1)), qb = static_cast<int>(points_b.shape(1));
+    const py::ssize_t pairs = pair_a.size();
+    std::vector<double> out;
+    {
+        const double* xa = points_a.data();
+        const double* wa = sized(weights_a, ea * qa, "weights_a");
+        const double* ca = sized(centroid_a, ea * 2, "centroid_a");
+        const double* xb = points_b.data();
+        const double* wb = sized(weights_b, eb * qb, "weights_b");
+        const double* cb = sized(centroid_b, eb * 2, "centroid_b");
+        const std::int64_t* pa = pair_a.data();
+        const std::int64_t* pb = sized(pair_b, pairs, "pair_b");
+        const double* h = heights.data();
+        const double* hw = sized(height_weights, heights.size(), "height_weights");
+        py::gil_scoped_release release;
+        out = pcbcore::sheet::rt0_point_moments(xa, wa, ca, ea, qa, xb, wb, cb, eb, qb, pa, pb, pairs, h, hw,
+                                                static_cast<int>(heights.size()), threads);
+    }
+    return to_array(std::move(out), {pairs, 3, 3});
+}
+
 py::array_t<double> build_vertical_kernel(const std::int64_t rows, const std::int64_t cols, const double pitch,
                                           const double span_a, const double span_b, const double center_separation,
                                           const int near_radius_cells, const int threads) {
@@ -665,6 +715,12 @@ PYBIND11_MODULE(_pcbcore, m) {
     sheet.def("rt0_grid_moments", &rt0_grid_moments, py::arg("node_index_a"), py::arg("node_moments_a"),
               py::arg("node_index_b"), py::arg("node_moments_b"), py::arg("origin_x"), py::arg("origin_y"),
               py::arg("pitch"), py::arg("columns"), py::arg("gap"), py::arg("pair_a"), py::arg("pair_b"),
+              py::arg("threads") = 1);
+    sheet.def("rt0_near_pairs", &rt0_near_pairs, py::arg("centroid_a"), py::arg("diameter_a"), py::arg("centroid_b"),
+              py::arg("diameter_b"), py::arg("factor"), py::arg("floor"), py::arg("threads") = 1);
+    sheet.def("rt0_point_moments", &rt0_point_moments, py::arg("points_a"), py::arg("weights_a"),
+              py::arg("centroid_a"), py::arg("points_b"), py::arg("weights_b"), py::arg("centroid_b"),
+              py::arg("pair_a"), py::arg("pair_b"), py::arg("heights"), py::arg("height_weights"),
               py::arg("threads") = 1);
     sheet.def("rt0_near_moments", &rt0_near_moments, py::arg("outer_points"), py::arg("outer_weights"),
               py::arg("outer_centroid"), py::arg("inner_polygons"), py::arg("inner_sides"), py::arg("inner_centroid"),

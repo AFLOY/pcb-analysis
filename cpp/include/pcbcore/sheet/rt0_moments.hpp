@@ -44,3 +44,23 @@ std::vector<double> rt0_grid_moments(const std::int64_t* node_index_a, const dou
                                      std::int64_t pairs, int threads);
 
 }  // namespace pcbcore::sheet
+
+namespace pcbcore::sheet {
+
+// Element pairs whose centroids lie closer than reach = max(factor * max(diameter_a, diameter_b), floor),
+// by a cell list (each pair once, ordered by a then b).  Returns the pairs as two equal-length vectors.
+void rt0_near_pairs(const double* centroid_a, const double* diameter_a, std::int64_t count_a,
+                    const double* centroid_b, const double* diameter_b, std::int64_t count_b, double factor,
+                    double floor, int threads, std::vector<std::int64_t>& pair_a, std::vector<std::int64_t>& pair_b);
+
+// Moments of element pairs by point quadrature on both elements, the kernel averaged over vertical
+// offsets: W = sum_k w_k sum_i sum_j (w_i [1; x_i - c_a]) (w_j [1; x_j - c_b])^T / sqrt(|x_i - x_j|^2 + h_k^2).
+// points (E, q, 2), weights (E, q), centroids (E, 2).  Returns (P, 3, 3) row-major.
+std::vector<double> rt0_point_moments(const double* points_a, const double* weights_a, const double* centroid_a,
+                                      std::int64_t count_a, int quadrature_a, const double* points_b,
+                                      const double* weights_b, const double* centroid_b, std::int64_t count_b,
+                                      int quadrature_b, const std::int64_t* pair_a, const std::int64_t* pair_b,
+                                      std::int64_t pairs, const double* heights, const double* height_weights,
+                                      int height_count, int threads);
+
+}  // namespace pcbcore::sheet

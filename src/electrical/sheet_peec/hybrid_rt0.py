@@ -226,13 +226,13 @@ class RT0Space:
         self.diameter = 2.0 * np.max(np.where(mask, np.linalg.norm(spread, axis=2), 0.0), axis=1)
 
         # Edges: an element's k-th edge runs from corner k to corner k+1.
-        local = []
-        for e in range(count):
-            n = sides[e]
-            for k in range(n):
-                a, b = self.corners[e, k], self.corners[e, (k + 1) % n]
-                local.append((min(a, b), max(a, b), e, k))
-        local = np.array(local, dtype=np.int64)
+        parts = []
+        for k in range(4):
+            e = np.flatnonzero(k < sides)
+            nxt = np.where(sides[e] == 3, (k + 1) % 3, (k + 1) % 4)
+            a, b = self.corners[e, k], self.corners[e, nxt]
+            parts.append(np.column_stack([np.minimum(a, b), np.maximum(a, b), e, np.full(len(e), k)]))
+        local = np.concatenate(parts).astype(np.int64)
         order = np.lexsort((local[:, 2], local[:, 1], local[:, 0]))
         local = local[order]
         key = local[:, 0] * (len(self.vertices) + 1) + local[:, 1]
@@ -297,32 +297,32 @@ class RT0Space:
         poly = self.polygons()
         for side in (0, 1):
             sign = 1.0 if side == 0 else -1.0  # outward from element [0], inward into [1]
-            elements = self.edge_elements[:, side]
-            k = self._edge_local[:, side]
-            for i, (e, kk) in enumerate(zip(elements, k)):
-                if e < 0:
-                    continue
-                c = self.centroid[e]
-                if self.kind[e] == 0:
-                    opposite = poly[e, (kk + 2) % 3]
-                    scale = sign / (2.0 * self.area[e])
-                    m = scale * np.eye(2)
-                    offset = m @ (c - opposite)
-                else:
-                    a, b = poly[e, kk], poly[e, (kk + 1) % 4]
-                    t = (b - a) / np.linalg.norm(b - a)
-                    n = np.array([t[1], -t[0]])  # outward
-                    opposite = poly[e, (kk + 2) % 4]
-                    m = sign / self.area[e] * np.outer(n, n)
-                    offset = m @ (c - opposite)
-                block = np.column_stack([offset, m])  # 2 x 3
-                for d in range(2):
-                    for j in range(3):
-                        if block[d, j] != 0.0:
-                            rows.append(2 * i + d)
-                            cols.append(3 * e + j)
-                            vals.append(block[d, j])
-        return sp.csr_matrix((vals, (rows, cols)), shape=(2 * self.size, 3 * len(self.kind)))
+            i = np.flatnonzero(self.edge_elements[:, side] >= 0)
+            e = self.edge_elements[i, side]
+            kk = self._edge_local[i, side]
+            c = self.centroid[e]
+            tri = self.kind[e] == 0
+            m = np.zeros((len(i), 2, 2))
+            opposite = np.where(tri[:, None], poly[e, (kk + 2) % 3], poly[e, (kk + 2) % 4])
+            scale = sign / (2.0 * self.area[e])
+            m[tri, 0, 0] = scale[tri]
+            m[tri, 1, 1] = scale[tri]
+            a, b = poly[e, kk], poly[e, (kk + 1) % 4]
+            t = (b - a) / np.linalg.norm(b - a, axis=1)[:, None]
+            n = np.column_stack([t[:, 1], -t[:, 0]])  # outward
+            rect = ~tri
+            m[rect] = (sign / self.area[e[rect]])[:, None, None] * (n[rect, :, None] * n[rect, None, :])
+            dc = c - opposite
+            offset = m[:, :, 0] * dc[:, None, 0] + m[:, :, 1] * dc[:, None, 1]
+            block = np.concatenate([offset[:, :, None], m], axis=2)  # (n, 2, 3)
+            r = 2 * i[:, None, None] + np.arange(2)[None, :, None] + np.zeros((1, 1, 3), dtype=np.int64)
+            q = 3 * e[:, None, None] + np.arange(3)[None, None, :] + np.zeros((1, 2, 1), dtype=np.int64)
+            nz = block != 0.0
+            rows.append(r[nz])
+            cols.append(q[nz])
+            vals.append(block[nz])
+        return sp.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
+                             shape=(2 * self.size, 3 * len(self.kind)))
 
     def component(self, d: int) -> sp.csr_matrix:
         """The (M, 3E) rows of the d-th component of every basis function."""
@@ -347,13 +347,21 @@ class RT0Space:
 
     def resistance(self, sheet_resistance: float) -> np.ndarray:
         """Dense (M, M) RT0 mass matrix times the sheet resistance rho / t."""
+        return self.resistance_sparse(sheet_resistance).toarray()
+
+    def resistance_sparse(self, sheet_resistance: float) -> sp.csr_matrix:
+        """The (M, M) RT0 mass matrix times the sheet resistance rho / t, sparse (dofs of one element couple)."""
         moments = self.mass_moments()
-        block = sp.block_diag(list(moments), format="csr")
-        total = np.zeros((self.size, self.size))
+        count = len(self.kind)
+        r = 3 * np.arange(count)[:, None, None] + np.arange(3)[None, :, None] + np.zeros((1, 1, 3), dtype=np.int64)
+        q = 3 * np.arange(count)[:, None, None] + np.arange(3)[None, None, :] + np.zeros((1, 3, 1), dtype=np.int64)
+        block = sp.csr_matrix((moments.ravel(), (r.ravel(), q.ravel())), shape=(3 * count, 3 * count))
+        total = None
         for d in range(2):
             c = self.component(d)
-            total += (c @ block @ c.T).toarray()
-        return sheet_resistance * total
+            term = c @ block @ c.T
+            total = term if total is None else total + term
+        return (sheet_resistance * total).tocsr()
 
 
 def kernel_moments(space: RT0Space, gap: float, near_factor: float = 2.5, other: RT0Space | None = None,
