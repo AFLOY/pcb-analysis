@@ -1753,6 +1753,9 @@ def _solve_group_cuda(
 
 # Device memory the lockstep Krylov basis may take, as a share of the free memory.
 LOCKSTEP_BASIS_SHARE = 0.5
+# What an excitation holds beside its basis, in vectors of its size (92 ports of 450 k unknowns
+# taken all at once for a ten-step cycle ran a 23 GB device out of memory without it).
+LOCKSTEP_WORKING_STEPS = 16
 
 
 def _lockstep_gmres(
@@ -1809,7 +1812,9 @@ def _lockstep_gmres(
         pool.free_all_blocks()
         free = int(cp.cuda.runtime.memGetInfo()[0])
         length = max(1, min(restart, 10 * 2 ** min(stage, 30)))
-        room = max(1, int(LOCKSTEP_BASIS_SHARE * free // (16 * size * (length + 1))))
+        # beside its basis an excitation holds its iterate, right-hand side and the products'
+        # and solves' work vectors: LOCKSTEP_WORKING_STEPS more of its size
+        room = max(1, int(LOCKSTEP_BASIS_SHARE * free // (16 * size * (length + 1 + LOCKSTEP_WORKING_STEPS))))
         active = waiting[cycles_of[waiting] == stage][:room]
         k = len(active)
         current = x[active]
