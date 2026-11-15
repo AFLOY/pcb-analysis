@@ -1778,6 +1778,21 @@ def _lockstep_gmres(
     """
     started = time.perf_counter()
     count = len(members)
+    # A basis too short for ``restart`` steps of all the excitations stalls every one of
+    # them (92 ports of 300 k unknowns on 40 GB: 33 steps, no convergence at 100 MHz).
+    # They are then taken in equal groups whose basis reaches ``restart``.
+    cp.get_default_memory_pool().free_all_blocks()
+    width = max(1, int(LOCKSTEP_BASIS_SHARE * int(cp.cuda.runtime.memGetInfo()[0]) // (16 * size * (restart + 1))))
+    if count > width:
+        groups = -(-count // width)
+        width = -(-count // groups)
+        for begin in range(0, count, width):
+            _lockstep_gmres(
+                cp, mesh, members[begin : begin + width], cases, given_list, saddle, saddle_many, factored,
+                active_branches, active_branches_device, keep, branches, unknowns, size, tolerance, max_iterations,
+                restart, floor, finish, factor_backend, prepare_ms,
+            )
+        return
     rhs = cp.empty((count, size), dtype=cp.complex128)
     rhs[:, :branches] = 0.0
     for row, index in enumerate(members):
@@ -1791,12 +1806,16 @@ def _lockstep_gmres(
     residual = cp.asnumpy(cp.linalg.norm(saddle_many(x) - rhs, axis=1) / rhs_norm)
     residual[cp.asnumpy(cp.linalg.norm(rhs, axis=1)) == 0.0] = 0.0
     steps = np.zeros(count, dtype=np.int64)
-    free = int(cp.cuda.runtime.memGetInfo()[0])
-    cap = max(2, int(LOCKSTEP_BASIS_SHARE * free // (16 * size * count)) - 1)
+    pool = cp.get_default_memory_pool()
     cycles = 0
     while (residual > tolerance).any() and cycles < max_iterations:
         active = np.flatnonzero(residual > tolerance)
         k = len(active)
+        # The last cycle's basis is gone (it is dropped below) and its blocks go back to the
+        # device before this one, longer, is sized against what is free now.
+        pool.free_all_blocks()
+        free = int(cp.cuda.runtime.memGetInfo()[0])
+        cap = max(2, int(LOCKSTEP_BASIS_SHARE * free // (16 * size * k)) - 1)
         length = max(1, min(restart, 10 * 2**cycles, cap))
         current = x[active]
         start = factored.solve_many(rhs[active] - saddle_many(current))
@@ -1818,7 +1837,8 @@ def _lockstep_gmres(
             w = factored.solve_many(saddle_many(basis[:, j]))
             column = cp.zeros((k, j + 1), dtype=cp.complex128)
             for _ in range(2):  # classical Gram-Schmidt, twice
-                h = cp.matmul(basis[:, : j + 1].conj(), w[:, :, None])[:, :, 0]
+                # conj(B) w = conj(B conj(w)): the conjugate of a step, not a copy of the basis
+                h = cp.matmul(basis[:, : j + 1], w.conj()[:, :, None])[:, :, 0].conj()
                 w = w - cp.matmul(h[:, None, :], basis[:, : j + 1])[:, 0]
                 column += h
             norm = cp.linalg.norm(w, axis=1)
@@ -1851,6 +1871,7 @@ def _lockstep_gmres(
             r = hessenberg[i, :done, :done]
             update[i] = np.linalg.solve(np.triu(r), g[i, :done]) if done else update[i]
         current = current + cp.matmul(cp.asarray(update)[:, None, :], basis[:, :done])[:, 0]
+        del basis
         x[active] = current
         cycles += 1
         residual[active] = cp.asnumpy(cp.linalg.norm(saddle_many(current) - rhs[active], axis=1) / rhs_norm[active])
