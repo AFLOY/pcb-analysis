@@ -1778,21 +1778,6 @@ def _lockstep_gmres(
     """
     started = time.perf_counter()
     count = len(members)
-    # A basis too short for ``restart`` steps of all the excitations stalls every one of
-    # them (92 ports of 300 k unknowns on 40 GB: 33 steps, no convergence at 100 MHz).
-    # They are then taken in equal groups whose basis reaches ``restart``.
-    cp.get_default_memory_pool().free_all_blocks()
-    width = max(1, int(LOCKSTEP_BASIS_SHARE * int(cp.cuda.runtime.memGetInfo()[0]) // (16 * size * (restart + 1))))
-    if count > width:
-        groups = -(-count // width)
-        width = -(-count // groups)
-        for begin in range(0, count, width):
-            _lockstep_gmres(
-                cp, mesh, members[begin : begin + width], cases, given_list, saddle, saddle_many, factored,
-                active_branches, active_branches_device, keep, branches, unknowns, size, tolerance, max_iterations,
-                restart, floor, finish, factor_backend, prepare_ms,
-            )
-        return
     rhs = cp.empty((count, size), dtype=cp.complex128)
     rhs[:, :branches] = 0.0
     for row, index in enumerate(members):
@@ -1807,16 +1792,26 @@ def _lockstep_gmres(
     residual[cp.asnumpy(cp.linalg.norm(rhs, axis=1)) == 0.0] = 0.0
     steps = np.zeros(count, dtype=np.int64)
     pool = cp.get_default_memory_pool()
-    cycles = 0
-    while (residual > tolerance).any() and cycles < max_iterations:
-        active = np.flatnonzero(residual > tolerance)
-        k = len(active)
+    # A cycle takes the excitations that have had the fewest cycles, as many as a basis of the
+    # length their next cycle wants leaves room for: all of them while the cycles are short,
+    # fewer as they lengthen, so that none is held to a basis shorter than ``restart`` (92 ports
+    # of 300 k unknowns on 40 GB capped to 33 steps did not converge at 100 MHz) and none waits
+    # in groups while a short cycle would do (groups of 8 on 23 GB: 12 times the factor reads).
+    cycles_of = np.zeros(count, dtype=np.int64)
+    given_up = np.zeros(count, dtype=bool)
+    while True:
+        waiting = np.flatnonzero((residual > tolerance) & ~given_up & (cycles_of < max_iterations))
+        if waiting.size == 0:
+            break
+        stage = int(cycles_of[waiting].min())
         # The last cycle's basis is gone (it is dropped below) and its blocks go back to the
-        # device before this one, longer, is sized against what is free now.
+        # device before this one is sized against what is free now.
         pool.free_all_blocks()
         free = int(cp.cuda.runtime.memGetInfo()[0])
-        cap = max(2, int(LOCKSTEP_BASIS_SHARE * free // (16 * size * k)) - 1)
-        length = max(1, min(restart, 10 * 2**cycles, cap))
+        length = max(1, min(restart, 10 * 2 ** min(stage, 30)))
+        room = max(1, int(LOCKSTEP_BASIS_SHARE * free // (16 * size * (length + 1))))
+        active = waiting[cycles_of[waiting] == stage][:room]
+        k = len(active)
         current = x[active]
         start = factored.solve_many(rhs[active] - saddle_many(current))
         beta = cp.linalg.norm(start, axis=1)
@@ -1824,7 +1819,8 @@ def _lockstep_gmres(
         # the preconditioned residual each excitation has to reach in this cycle
         target = 0.5 * tolerance * beta_host / np.maximum(residual[active], 1e-300)
         if (target < floor * np.maximum(beta_host, 1e-300)).all():
-            break
+            given_up[active] = True
+            continue
         basis = cp.empty((k, length + 1, size), dtype=cp.complex128)
         basis[:, 0] = start / cp.maximum(beta, 1e-300)[:, None]
         hessenberg = np.zeros((k, length + 1, length), dtype=np.complex128)
@@ -1873,7 +1869,7 @@ def _lockstep_gmres(
         current = current + cp.matmul(cp.asarray(update)[:, None, :], basis[:, :done])[:, 0]
         del basis
         x[active] = current
-        cycles += 1
+        cycles_of[active] += 1
         residual[active] = cp.asnumpy(cp.linalg.norm(saddle_many(current) - rhs[active], axis=1) / rhs_norm[active])
     for row, index in enumerate(members):
         current_device = cp.zeros(mesh.branch_count, dtype=cp.complex128)
