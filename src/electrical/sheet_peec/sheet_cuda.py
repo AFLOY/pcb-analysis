@@ -532,14 +532,22 @@ class CudssQuasiDefiniteNear:
     def solve_many(self, vectors: Any) -> Any:
         """``M^-1`` of each row of ``vectors`` (k, n), k up to ``columns``, in one solve.
 
-        The factors are read once for all the columns: the bytes a
-        triangular solve moves are the factors', whatever the column count.
+        A triangular solve's time goes with its columns (a 150 k matrix on an
+        L4: 179, 73, 18 and 5 ms for 92, 40, 8 and 1), and nvmath's solver
+        keeps the right-hand side's shape it was planned with.  Fewer rows
+        than ``columns`` are therefore solved through cuDSS itself, on the
+        planned solver's factors, with a right-hand side of their own width;
+        zero-filling the planned one cost the full width every time.
         """
         cp = self._cp
         count = vectors.shape[0]
         if count > self.columns:
             raise ValueError(f"{count} right-hand sides for factors planned with {self.columns}")
         stream = cp.cuda.get_current_stream()
+        if count < self.columns:
+            narrow = self._solve_narrow(vectors, stream)
+            if narrow is not None:
+                return narrow
         self._rhs[:, :count] = (vectors * self._sign[None, :]).T
         if count < self.columns:
             self._rhs[:, count:] = 0.0
@@ -548,6 +556,37 @@ class CudssQuasiDefiniteNear:
             solution = self._solver.solve(stream=stream)
         stream.synchronize()
         return cp.ascontiguousarray(solution[:, :count].T)
+
+    def _solve_narrow(self, vectors: Any, stream: Any) -> Any | None:
+        """The solve phase on the planned solver's handle and factors with ``vectors``' own
+        number of columns, or None when this nvmath does not show them."""
+        import nvmath.bindings.cudss as cudss_bindings
+
+        cp = self._cp
+        solver = self._solver
+        try:
+            handle, config, data, lhs = solver.handle, solver.config_ptr, solver.data_ptr, solver.a_ptr
+            value_type = int(solver.cuda_value_type)
+        except AttributeError:
+            return None
+        count, size = vectors.shape
+        with cp.cuda.using_allocator(self._pool.malloc):
+            right = cp.asfortranarray((vectors * self._sign[None, :]).T)
+            solution = cp.empty((size, count), dtype=cp.complex128, order="F")
+            layout = int(cudss_bindings.Layout.COL_MAJOR)
+            right_matrix = cudss_bindings.matrix_create_dn(size, count, size, right.data.ptr, value_type, layout)
+            solution_matrix = cudss_bindings.matrix_create_dn(size, count, size, solution.data.ptr, value_type, layout)
+            try:
+                stream.synchronize()
+                cudss_bindings.set_stream(handle, stream.ptr)
+                cudss_bindings.execute(
+                    handle, int(cudss_bindings.Phase.SOLVE), config, data, lhs, solution_matrix, right_matrix
+                )
+                stream.synchronize()
+            finally:
+                cudss_bindings.matrix_destroy(right_matrix)
+                cudss_bindings.matrix_destroy(solution_matrix)
+        return cp.ascontiguousarray(solution.T)
 
     def free(self) -> None:
         """Nothing to release: the plan and its factors stay cached for the next call."""
