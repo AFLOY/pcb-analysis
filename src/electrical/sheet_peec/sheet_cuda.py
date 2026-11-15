@@ -1585,6 +1585,10 @@ def _solve_group_cuda(
 
     def saddle_many(vectors: Any) -> Any:
         """``saddle`` of each row of ``vectors`` (k, size): one operator application for all."""
+        # A step of the Krylov basis is a strided view of an array that passes 2 GiB with
+        # many excitations, and CuPy 14 reads the real part of such a view out of bounds
+        # (CUDA_ERROR_ILLEGAL_ADDRESS): the parts are taken from a copy of the step.
+        vectors = cp.ascontiguousarray(vectors)
         currents = vectors[:, :branches]
         voltages = vectors[:, branches:]
         count = vectors.shape[0]
