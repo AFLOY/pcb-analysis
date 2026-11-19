@@ -366,6 +366,14 @@ def rasterize_board(
         from . import mesh as _mesh
 
         faces = bool(grid.is_uniform) and _mesh._native is not None
+        if grid.is_uniform and _mesh._native is None:
+            # Without the native extension the faces' coverage is not recorded
+            # and a 45-degree edge reads as its staircase (a strip's R 5 %
+            # high): say so rather than let the default change silently.
+            warnings.warn(
+                "rasterize_board: faces='auto' records no face coverage: the C++ geometry extension is not built "
+                "(pass faces=True to require it, faces=False to silence this)", RuntimeWarning, stacklevel=2,
+            )
     elif not isinstance(faces, bool):
         raise ValueError("faces must be 'auto', true or false")
     if faces and not grid.is_uniform:
