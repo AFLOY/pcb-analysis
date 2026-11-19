@@ -41,7 +41,9 @@ dependencies = [
 
 [project.optional-dependencies]
 # CuPy is the only optional runtime: it needs an NVIDIA driver and has no
-# macOS wheel.  Every CUDA path falls back to the CPU without it.
+# macOS wheel.  Without it the CUDA paths are unavailable and a solve asked
+# for `execution_backend="cuda"` is refused; nothing falls back to the CPU
+# implicitly (the caller chooses the backend).
 # nvmath-python brings cuDSS, which factors the sheet solve's near
 # preconditioner on the device; without it the factors are SuperLU's, on the
 # host.

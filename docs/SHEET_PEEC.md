@@ -1104,14 +1104,14 @@ converged).
   vertical operator, but as a column of the in-plane cell's cross-section rather
   than as a plated annulus, so it is understated in the same way its resistance
   once was.
-- Skin effect within a barrel is not modelled. A 0.3mm hole plated 25um thick
-  is thin against the skin depth at these frequencies, so the wall is uniform;
-  a thicker plating or a filled via would need the same treatment as the inlay.
-- In-plane current crowding at a conductor's edge is not resolved at the
-  optimizer's 0.2mm grid: the skin depth at 300kHz is 0.121mm, so current
-  hugging an inlay's vertical side wall falls inside one cell. Measured cost:
-  see the ceiling table above. This matters most for a bulk current density
-  percentile, which is exactly what the gate reads.
+- Skin effect within a barrel: since 0.13.0 a barrel's resistance follows its
+  skin depth at the solve frequency (`resistance_barrel`, the section's
+  Rac/Rdc); it was compared with a 3D FEM only up to 1 MHz, where the ratio is
+  about 1 (see "Vias against a 3D FEM").
+- In-plane current crowding at a conductor's edge: since 0.14.0 the uniform
+  grid's edge strands resolve it below a cell (see "Edges: strands and face
+  coverage"); a graded grid (pFFT operator) still has no strands, so there
+  the crowding inside one cell is not resolved.
 - The end-to-end solve has not been shown to reach its own ceiling. The
   excitation used so far fixes the end-face current density to the DC profile,
   which is a Neumann condition the bar then has to relax out of over an entry
@@ -1176,8 +1176,8 @@ driven copper induces: the open-port voltages a multi-port impedance across
 conductors (a commutation loop's go and return) is read from.  Every
 excitation that lists the same terminals keeps the same components, so the
 excitations of one port matrix solve in one lockstep group.  The default is
-off, and an undriven island is omitted as above.  The CUDA path does not
-take the option.
+off, and an undriven island is omitted as above.  The CUDA path takes the
+option too (`solve_sheet_cases_cuda`, since 0.12.0).
 
 Measured (`tests/test_sheet_peec.py::CrossConductorPortTests`): two 5 x 40
 cell strips (0.2 mm cells, 35 um copper) on F.Cu and on In1.Cu 0.2 mm below,
