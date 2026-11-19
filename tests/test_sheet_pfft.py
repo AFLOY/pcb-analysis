@@ -260,15 +260,14 @@ def test_cuda_pfft_solve_matches_the_cpu_solve_on_a_graded_grid() -> None:
         pytest.skip("no CUDA device")
     mesh, operator, terminals, context = build_current_field_sheet_inputs(_graded_problem(1.0e6))
     # The CUDA path runs GMRES one restart cycle at a time and stops on the
-    # public saddle-point residual, so the tolerance means what it does on the CPU.
-    # A residual of 1e-9 leaves this saddle point's currents ~4e-8 of their peak
-    # off (cuDSS's factors, a GB200: 3.4e-8 against a 1e-12 solve), so the two
-    # solves are compared at 1e-12, where they agree to 6e-13.
-    cpu = solve_sheet_case(mesh, operator, terminals, frequency_hz=1.0e6, tolerance=1e-12)
+    # weighted saddle-point residual, so the tolerance means what it does on the
+    # CPU: a bound on the currents' relative error.  (Unweighted, 1e-9 left the
+    # currents of cuDSS's factors 3.4e-8 of their peak off, a GB200.)
+    cpu = solve_sheet_case(mesh, operator, terminals, frequency_hz=1.0e6, tolerance=1e-9)
     gpu, telemetry = solve_sheet_case_cuda(
-        mesh, operator, terminals, frequency_hz=1.0e6, tolerance=1e-12, max_iterations=40, restart=60
+        mesh, operator, terminals, frequency_hz=1.0e6, tolerance=1e-9, max_iterations=40, restart=60
     )
-    assert cpu.converged and gpu.converged and gpu.residual <= 1e-12
+    assert cpu.converged and gpu.converged and gpu.residual <= 1e-9
     assert gpu.iterations <= 6  # restart cycles, not inner iterations
     scale = np.max(np.abs(cpu.branch_current))
     np.testing.assert_allclose(gpu.branch_current, cpu.branch_current, atol=1e-8 * scale)

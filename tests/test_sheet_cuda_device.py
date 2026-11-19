@@ -193,10 +193,11 @@ def test_a_second_frequency_reuses_the_near_plan_and_solves_as_a_fresh_plan_does
     pytest.importorskip("nvmath.sparse.advanced")
     from electrical.sheet_peec import sheet_cuda
 
-    # Solved two decades below the bound they are compared at: a cycle stops
-    # anywhere under its tolerance, and at 1e-9 the reused and the fresh
-    # solutions were once 1.4e-8 of the voltages apart (A100, whole suite).
-    common = {"relative_tolerance": 1e-11, "maximum_iterations": 240, "restart": 60, "execution_backend": "cuda",
+    # Solved to 1e-9 and compared at 1e-8: the tolerance bounds the currents'
+    # relative error since the KVL rows of the residual are weighted.  Unweighted,
+    # the reused and the fresh solutions were once 1.4e-8 of the voltages apart
+    # at 1e-9 (A100, whole suite) and this test was solved at 1e-11.
+    common = {"relative_tolerance": 1e-9, "maximum_iterations": 240, "restart": 60, "execution_backend": "cuda",
               "device_id": 0, "preconditioner": "near", "near_factorization": "cudss_quasi_definite",
               # strands are cut to the skin depth: each frequency's mesh, and its pattern, is its own
               "maximum_filaments": 1, "edge_strands": False}

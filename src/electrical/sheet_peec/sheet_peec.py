@@ -1190,15 +1190,22 @@ def _solve_ac(
             pool=pool, near_factorization=near_factorization, near_regularization=near_regularization,
             closers=closers, near_factor_threads=near_factor_threads,
         )
+        weights = _residual_weights(mesh, operator, resistance, active_branches, omega, unknowns)
 
         def solve_alone(injected: np.ndarray, given: SheetSolution | None = None) -> SheetSolution:
             right_hand_side = np.concatenate(
                 [np.zeros(branches, dtype=np.complex128), injected[keep]]
             )
             x0 = None if given is None else starts([given], right_hand_side[:, None])[:, 0]
-            system = spla.LinearOperator((size, size), matvec=saddle, dtype=np.complex128)
+            # GMRES sees the weighted system W A x = W b with M^-1 W^-1 as its
+            # preconditioner: the preconditioned operator is still M^-1 A, so
+            # the iterations are the same, and its restart test is on the
+            # weighted residual (_residual_weights).
+            system = spla.LinearOperator(
+                (size, size), matvec=lambda vector: weights * saddle(vector), dtype=np.complex128
+            )
             preconditioner = spla.LinearOperator(
-                (size, size), matvec=precondition, dtype=np.complex128
+                (size, size), matvec=lambda vector: precondition(vector / weights), dtype=np.complex128
             )
             counter = {"iterations": 0}
 
@@ -1207,7 +1214,7 @@ def _solve_ac(
 
             result, info = spla.gmres(
                 system,
-                right_hand_side,
+                weights * right_hand_side,
                 x0=x0,
                 M=preconditioner,
                 rtol=tolerance,
@@ -1221,8 +1228,8 @@ def _solve_ac(
             voltage = np.zeros(mesh.node_count, dtype=np.complex128)
             voltage[keep] = result[branches:]
             residual = float(
-                np.linalg.norm(saddle(result) - right_hand_side)
-                / max(np.linalg.norm(right_hand_side), 1e-30)
+                np.linalg.norm(weights * (saddle(result) - right_hand_side))
+                / max(np.linalg.norm(weights * right_hand_side), 1e-30)
             )
             return SheetSolution(
                 node_voltage=voltage,
@@ -1240,13 +1247,16 @@ def _solve_ac(
                 [np.concatenate([np.zeros(branches, dtype=np.complex128), injected[keep]]) for injected in chunk],
                 axis=1,
             )
+            column_weights = weights[:, None]
             results, infos, iterations = _gmres_lockstep(
-                saddle_block, precondition, right_hand_sides, tolerance, restart, max_iterations,
+                lambda block: column_weights * saddle_block(block),
+                lambda block: precondition(block / (column_weights if block.ndim == 2 else weights)),
+                column_weights * right_hand_sides, tolerance, restart, max_iterations,
                 x0=starts(given, right_hand_sides),
             )
-            residuals = np.linalg.norm(saddle_block(results) - right_hand_sides, axis=0) / np.maximum(
-                np.linalg.norm(right_hand_sides, axis=0), 1e-30
-            )
+            residuals = np.linalg.norm(
+                column_weights * (saddle_block(results) - right_hand_sides), axis=0
+            ) / np.maximum(np.linalg.norm(column_weights * right_hand_sides, axis=0), 1e-30)
             solutions = []
             for column in range(results.shape[1]):
                 current = np.zeros(mesh.branch_count, dtype=np.complex128)
@@ -1819,6 +1829,35 @@ def _build_preconditioner(
         return np.concatenate([current, node])
 
     return precondition
+
+
+def _residual_weights(
+    mesh: SheetMesh, operator: Any, resistance: np.ndarray, active_branches: np.ndarray, omega: float,
+    unknowns: int,
+) -> np.ndarray:
+    """Row weights that make the saddle-point residual a ratio of currents.
+
+    The right-hand side is the injected current, in amperes, on the KCL rows,
+    so the plain relative residual weighs a KVL row's volts against amperes.
+    A current error that keeps KCL -- a loop current, which is what the near
+    preconditioner leaves -- shows in it only as ``Z di``, about 1e-3 ohm of
+    it on a 0.1 mm grid at 1 MHz: stopped at 1e-9, a solve with cuDSS's
+    factors left its currents 3.4e-8 of their peak off (a GB200).  The KVL
+    rows are divided by an impedance scale, ``|R + j omega L|`` with the
+    median branch resistance and the median own partial inductance of the
+    grid's branches, so the weighted residual is in amperes over amperes and
+    ``tolerance`` bounds the currents' relative error.  Edge strands, whose
+    own impedance is above a grid branch's, are held tighter by the same scale.
+    """
+    own = np.concatenate([_inline_self_inductance(mesh, operator), _vertical_self_inductance(mesh, operator)])
+    inductance = float(np.median(own)) if own.size else 0.0
+    active_resistance = resistance[active_branches]
+    resistance_scale = float(np.median(active_resistance)) if active_resistance.size else 0.0
+    scale = abs(complex(resistance_scale, omega * inductance))
+    if not (math.isfinite(scale) and scale > 0.0):
+        scale = 1.0
+    branches = int(np.count_nonzero(active_branches))
+    return np.concatenate([np.full(branches, 1.0 / scale), np.ones(unknowns)])
 
 
 def _vertical_self_inductance(

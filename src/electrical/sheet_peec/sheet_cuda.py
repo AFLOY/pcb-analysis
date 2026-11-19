@@ -30,6 +30,7 @@ from .sheet_peec import (
     _near_impedance,
     _self_inductance,
     _reduce,
+    _residual_weights,
     _source_vector,
     _terminal_nodes,
     _vertical_self_inductance,
@@ -1709,6 +1710,8 @@ def _solve_group_cuda(
         return precondition(saddle(vector))
 
     linear_system = csl.LinearOperator((size, size), matvec=left_preconditioned_saddle, dtype=cp.complex128)
+    # the saddle-point residual is weighted to a ratio of currents (_residual_weights)
+    weights = cp.asarray(_residual_weights(mesh, operator, resistance, active_branches, omega, unknowns))
     cp.cuda.get_current_stream().synchronize()
     prepare_ms = shared_prepare_ms + (time.perf_counter() - group_started) * 1000.0
     effective_restart = min(restart, size)
@@ -1719,7 +1722,7 @@ def _solve_group_cuda(
             _lockstep_gmres(
                 cp, mesh, members, cases, given_list, saddle, saddle_many, factored, active_branches,
                 active_branches_device, keep, branches, unknowns, size, tolerance, max_iterations, effective_restart,
-                floor, finish, factor_backend, prepare_ms,
+                floor, finish, factor_backend, prepare_ms, weights,
             )
         finally:
             factored.free()
@@ -1734,11 +1737,11 @@ def _solve_group_cuda(
             def count(_value: Any) -> None:
                 counter["restarts"] += 1
 
-            rhs_norm = float(cp.linalg.norm(right_hand_side).get())
+            rhs_norm = float(cp.linalg.norm(weights * right_hand_side).get())
             given = given_list[index]
             if given is not None:
                 result = _cuda_start(cp, saddle, given, mesh, active_branches, keep, branches, unknowns, right_hand_side)
-                residual = float(cp.linalg.norm(saddle(result) - right_hand_side).get()) / max(rhs_norm, 1e-30)
+                residual = float(cp.linalg.norm(weights * (saddle(result) - right_hand_side)).get()) / max(rhs_norm, 1e-30)
             else:
                 result = cp.zeros(size, dtype=cp.complex128)
                 residual = 1.0 if rhs_norm > 0.0 else 0.0
@@ -1777,7 +1780,7 @@ def _solve_group_cuda(
                 )
                 result = result + correction
                 cycles += 1
-                residual = float((cp.linalg.norm(saddle(result) - right_hand_side)).get()) / max(rhs_norm, 1e-30)
+                residual = float((cp.linalg.norm(weights * (saddle(result) - right_hand_side))).get()) / max(rhs_norm, 1e-30)
             current_device = cp.zeros(mesh.branch_count, dtype=cp.complex128)
             current_device[active_branches_device] = result[:branches]
             voltage_device = cp.zeros(mesh.node_count, dtype=cp.complex128)
@@ -1801,7 +1804,7 @@ def _lockstep_gmres(
     cp: Any, mesh: SheetMesh, members: list[int], cases: list, given_list: list, saddle: Any, saddle_many: Any,
     factored: Any, active_branches: np.ndarray, active_branches_device: Any, keep: np.ndarray, branches: int,
     unknowns: int, size: int, tolerance: float, max_iterations: int, restart: int, floor: float, finish: Any,
-    factor_backend: str, prepare_ms: float,
+    factor_backend: str, prepare_ms: float, weights: Any,
 ) -> None:
     """Restarted, left-preconditioned GMRES for the excitations ``members``, all at once.
 
@@ -1829,8 +1832,8 @@ def _lockstep_gmres(
         given = given_list[index]
         if given is not None:
             x[row] = _cuda_start(cp, saddle, given, mesh, active_branches, keep, branches, unknowns, rhs[row])
-    rhs_norm = cp.maximum(cp.linalg.norm(rhs, axis=1), 1e-30)
-    residual = cp.asnumpy(cp.linalg.norm(saddle_many(x) - rhs, axis=1) / rhs_norm)
+    rhs_norm = cp.maximum(cp.linalg.norm(weights[None, :] * rhs, axis=1), 1e-30)
+    residual = cp.asnumpy(cp.linalg.norm(weights[None, :] * (saddle_many(x) - rhs), axis=1) / rhs_norm)
     residual[cp.asnumpy(cp.linalg.norm(rhs, axis=1)) == 0.0] = 0.0
     steps = np.zeros(count, dtype=np.int64)
     pool = cp.get_default_memory_pool()
@@ -1914,7 +1917,9 @@ def _lockstep_gmres(
         del basis
         x[active] = current
         cycles_of[active] += 1
-        residual[active] = cp.asnumpy(cp.linalg.norm(saddle_many(current) - rhs[active], axis=1) / rhs_norm[active])
+        residual[active] = cp.asnumpy(
+            cp.linalg.norm(weights[None, :] * (saddle_many(current) - rhs[active]), axis=1) / rhs_norm[active]
+        )
     for row, index in enumerate(members):
         current_device = cp.zeros(mesh.branch_count, dtype=cp.complex128)
         current_device[active_branches_device] = x[row, :branches]
