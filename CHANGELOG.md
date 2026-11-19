@@ -16,7 +16,8 @@ and the conductors of one call are solved side by side in processes.
   installed, `superlu` on the host otherwise; the `cuda` extra now installs
   `nvmath-python[cu13]`).  With the host's SuperLU factors a CUDA solve was
   slower than the CPU's (EVM-2L hot loop at 0.1 mm on a GB200: 80 to 586 s,
-  cuDSS 4 to 6 s, 36 CPU cores 61 to 240 s).  Results agree to the solver
+  cuDSS 4.0 to 7.5 s over two jobs, 36 CPU cores with SuperLU and no MUMPS
+  61 to 240 s; docs/SHEET_CUDA_CUDSS_DEFAULT_RESULTS.json).  Results agree to the solver
   tolerance; `preconditioner_factorization_backend` records which ran.
 - Fixed: a CUDA solve of one excitation with cuDSS factors could stay just
   above its tolerance for every cycle allowed (a real fill's VOUT at 0.1 mm
@@ -46,9 +47,13 @@ and the conductors of one call are solved side by side in processes.
   stranded mesh, and `rasterize_board(faces="auto")` records the faces' copper
   coverage on a uniform grid when the geometry native extension is built.
   Results above zero frequency change: a 1.2 mm strip pair at 0.1 mm was 22 %
-  (30 MHz) and 27 % (150 MHz) low without strands, a 45 degree strip 5 % high
-  even at 1 MHz without the faces; with both, within about 2 % of a 2D FEM
-  (45 degrees at 150 MHz: -4.8 %).
+  (30 MHz) and 27 % (150 MHz) low without strands (up to 31 % at 0.2-0.4 mm),
+  a 45 degree strip 5 % high at 1 MHz without the faces; with both, within
+  about 2 % of a 2D FEM (45 degrees at 150 MHz: -4.8 %;
+  docs/SHEET_EDGE_STRANDS_DEFAULT_RESULTS.json).  On a two-layer EVM's real
+  fill (stage-03 path, Flow2) the two defaults took the evaluation from 1497
+  to 1935 s (+29 %) at 20.8 / 20.9 GB peak memory, the loss moving by -0.67
+  to +0.20 % (docs/SHEET_EDGE_CORRECTIONS_REALFILL_COST_RESULTS.json).
   The metrics record `edge_strands` and `face_coverage`; a port-impedance
   sweep cuts its strands once, for its top frequency; the far-field dipoles
   of a stranded mesh sum each branch's strands.  Vias on the uniform grid
@@ -59,25 +64,27 @@ and the conductors of one call are solved side by side in processes.
   the device and the correction is a sparse product beside the convolution.
   A stranded mesh's near matrix is formed on the host and factored on the
   device.  On a GB200 the EVM-2L hot loop at 0.1 mm agreed with the CPU to
-  5e-5 in R and 1e-6 in L (214 kHz, 1 MHz, 30 MHz), in 5.2, 4.1 and 6.4 s
-  with the cuDSS near factors against 61, 73 and 240 s on 36 CPU cores.
+  2e-5 in R and 1.3e-6 in L (214 kHz, 1 MHz, 30 MHz), in 5.2, 4.1 and 6.4 s
+  with the cuDSS near factors against 61, 73 and 240 s on 36 CPU cores (the
+  CPU with SuperLU, no MUMPS).
 - How the two edge corrections work (docs/SHEET_PEEC.md, "Edges: strands and
   face coverage"; both can be switched off, `edge_strands=False` and
   `rasterize_board(faces=False)`):
   `edge_strands` cuts the branches along an edge across their width into
   strands graded from half a skin depth, kept as repeating blocks in the C++
   core (R of a strip pair within -2.7..+0.4 % of a 2D FEM at 30-150 MHz,
-  against 12-27 % low without); `rasterize_board(faces=True)` records each
+  against 12-27 % low without at 0.1 mm); `rasterize_board(faces=True)` records each
   grid face's copper coverage, which the problem carries as
   `copper_faces_by_layer` and the mesh uses to narrow branches (a 45 degree
-  strip's DC resistance +6.1 % -> -0.3 %).
+  strip's DC resistance at 0.1 mm +6.1 % -> +0.02 %;
+  docs/SHEET_FACE_COVERAGE_DEFAULT_RESULTS.json).
 - The AC `voltage_span_v` of a sheet solve is the largest phasor difference
   between two nodes, max |V_i - V_j| (the diameter of the phasors,
   `voltage_span_definition` `maximum_phasor_difference`), not the departure
   from the first node of the component in mesh order, which moved with the
   mesh: on a two-layer EVM's real fill a sliver cell moved the VIN and SW
   spans by +56 % and -35 % with the loss within 0.7 %; the diameter moved by
-  under 0.4 %.  An AC span is now at least the old one, so gates reading it
+  at most 0.5 % (0.01007 -> 0.01012 V).  An AC span is now at least the old one, so gates reading it
   see larger values.  DC keeps max - min.
 - Fixed: the FP32 inner PCG of the pure-Python matrix-free solves (no C++
   core) refused a well-posed system as not positive definite once the outer
@@ -124,7 +131,7 @@ install (the PyPI wheel) factors `near` by SuperLU and keeps `block` from
   bits move within the tolerance.  With SuperLU `auto` still takes `block`
   from 400,000.  On a filled two-layer board's ground conductor (1.05M branches,
   214 kHz) `near` with MUMPS took 84.5 s where `block` took 2,233.6 s and
-  SuperLU ran out of 86 GB (docs/SHEET_PEEC.md).
+  SuperLU ran out of memory (docs/SHEET_NEAR_MUMPS_DEFAULT_RESULTS.json).
 - The MUMPS factor runs on one thread unless `near_factor_threads` (an
   integer, or `"budget"`; solve functions, current-field and port-impedance
   settings) asks for more.  Results are now promised the same bits only at

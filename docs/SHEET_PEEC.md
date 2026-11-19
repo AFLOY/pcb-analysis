@@ -356,8 +356,9 @@ LM5145EVM-HD-20A-2L real fill):
 
 **Lateral crowding (`edge_strands`).**  Thickness filaments fix the current
 crowding toward the faces, but toward the edges a cell of 0.1 mm cannot hold
-a skin depth (12 um at 30 MHz): with filaments alone R per length was 12 to
-22 % low at 30 MHz and 15 to 27 % at 150 MHz (widths 4.8 and 1.2 mm), and it
+a skin depth (12 um at 30 MHz): with filaments alone R per length at 0.1 mm
+was 12 to 22 % low at 30 MHz and 15 to 27 % at 150 MHz (widths 4.8 and 1.2 mm;
+up to 31 % at 0.2 and 0.4 mm), and it
 converged with the pitch only logarithmically.  With the setting
 `edge_strands` the in-plane branches along an edge are cut across their width
 into strands graded from half a skin depth (`edge_strand_first_um`, growth
@@ -369,20 +370,28 @@ The corrections repeat along a straight edge, so they are kept as blocks per
 (`StrandCorrection`): 12 MB where the explicit entries took 187 MB.  R is
 then within -2.7..+0.4 % of the FEM at every width, pitch and frequency
 measured (most within 1.5 %) and L within 0.4 %; the 4.8 mm pair at 0.1 mm
-and 150 MHz took 3,084 s against 2,557 s without (8 threads).
+and 150 MHz took 3,084 s against 2,557 s without (8 threads).  These runs used
+the `exp/sheet-edge-strands` code; the released code was rerun without
+strands only (docs/SHEET_EDGE_STRANDS_DEFAULT_RESULTS.json).
 
 **Staircase (`copper_faces_by_layer`).**  A 45 degree edge on the grid is a
 staircase whose corner-touching cells carry nothing: the diagonal pair's DC
-resistance was +8.2 % (0.2 mm) and +6.1 % (0.1 mm) high, and L about +7 %.
+resistance was +6.1 % (0.1 mm) high and +5.0 % at 0.2 mm through
+`rasterize_board` (+8.2 % with a cell-centre raster), and L about +7 %.
 `rasterize_board(faces=True)` records how much of every grid face the copper
 covers (exact, from the section); the problem carries it as
 `copper_faces_by_layer`, every touched cell becomes a node (a cell cut in two
 by the edge excepted) and each branch is narrowed to its covered face, its
 partial width a strand of the edge correction.  The diagonal pair's DC error
-went to -0.3 %; at 30 MHz and 0.1 mm with strands too, R -2.3 % and L -0.7 %
-of the FEM.  On the EVM-2L real fill (214 kHz, ten cases) the loss moved by
-less than 1 % and the current density peaks by -3 to -19 %, for 30 % more
-time and twice the memory (17 to 34 GB for the whole evaluation).
+went to +0.02 % at 0.1 mm (-1.2 % at 0.2 mm), on the prototype tree; at
+30 MHz and 0.1 mm with strands too, R -2.3 % and L -0.7 % of the FEM
+(docs/SHEET_FACE_COVERAGE_DEFAULT_RESULTS.json).  On the EVM-2L real fill
+(214 kHz, the stage-03 path on Flow2, 2026-11-14, eight cases) both defaults
+moved the loss by -0.67 to +0.20 % and the current density peaks by -3 to
+-19 %, and took the evaluation from 1497 to 1935 s (+29 %) at 20.8 / 20.9 GB
+peak memory (docs/SHEET_EDGE_CORRECTIONS_REALFILL_COST_RESULTS.json).  An
+earlier run with face coverage alone on older code (2026-11-11) had taken
+30 % more time and twice the memory; that does not hold for the defaults.
 
 **Decision (2026-11-14): both on by default.**  `edge_strands` defaults to
 `"auto"`: strands are cut wherever they are built -- on the CPU or on CUDA,
@@ -406,7 +415,8 @@ L within 0.5 %.  The 45-degree staircase at 150 MHz is the largest error left
 (0 degrees: -1.4 %).
 
 **Vias against a 3D FEM.**  Five two-layer cases (Coulomb-gauged A-V FEM,
-NGSolve, second order, converged to 0.15 % at DC and 214 kHz): a via pair, the
+NGSolve, second order; two meshes within 0.2 % at DC and 214 kHz and 1.3 to
+2.3 % at 1 MHz; docs/SHEET_VIA_FEM3D_RESULTS.json): a via pair, the
 pair 0.27 mm from the plates' edge, a 3 x 2 array carrying all the current
 between layers, two vias in thermal reliefs, one 0.6 mm drill.  Laid on the
 grid as plane_opt lays them (the barrel's footprint filled copper, its
@@ -722,17 +732,17 @@ fill (`near_factorization="mumps_quasi_definite"`, `src/electrical/sheet_peec/ne
 `delta` = 1e-12 of the median `|Z_ii|`, threshold pivoting `CNTL(1)` = 0.01;
 a check solve refuses a factor whose own residual exceeds 1e-3).
 
-Flow2 t1-share, AMD EPYC 9965, AOCC build of the core and of MUMPS 5.9.1
+Flow2 t1-share, AMD EPYC 9965, gcc build of the core and of MUMPS 5.9.1
 with a single-threaded OpenBLAS, tolerance 1e-9, restart 120, each line one
 process.  The real-fill PGND baseline (two excitations, 214,358 Hz, one
-filament, 1,050,851 branches and 425,678 nodes; 48 cores, 86 GB job limit,
-thread budget 48):
+filament, 1,050,851 branches and 425,678 nodes; 48 cores, one NUMA node,
+thread budget 48; docs/SHEET_NEAR_MUMPS_DEFAULT_RESULTS.json):
 
 | Preconditioner | GMRES iterations | Wall (s) | Note |
 |---|---:|---:|---|
 | block (what `auto` took) | 1,523 / 1,714 | 2,233.6 | |
-| near, MUMPS | 43 / 43 | 84.5 | loss and span agree with block to 1e-11 |
-| near, SuperLU | — | — | killed at the 86 GB limit |
+| near, MUMPS | 43 / 43 | 84.5 | loss and span agree with block to 3e-11 |
+| near, SuperLU | — | — | killed for memory (PBS, numa=1) |
 
 At 30 MHz, with the conductors cut into filaments (192 cores, thread budget
 48, MUMPS with its L0 tree parallelism as it then ran):
@@ -741,9 +751,9 @@ At 30 MHz, with the conductors cut into filaments (192 cores, thread budget
 |---|---:|---|---:|---:|---:|
 | EVM hot loop, 0.1 mm | 294,468 / 147,810 | near, MUMPS | 395 | 96.7 | 2.84 |
 | EVM hot loop, 0.1 mm | 294,468 / 147,810 | near, SuperLU | 395 | 159.5 | 4.65 |
-| EVM hot loop, 0.1 mm | 294,468 / 147,810 | block | — | > 5,400 | stopped unfinished |
+| EVM hot loop, 0.1 mm | 294,468 / 147,810 | block | — | > 5,400 | stopped by the 5,400 s timeout (no result line) |
 | real-fill PGND, 7 filaments a layer | 1,814,730 / 640,094 | near, MUMPS | 470 / 518 | 1,849.0 | 55.7 |
-| real-fill PGND, 7 filaments a layer | 1,814,730 / 640,094 | block | — | > 5,400 | stopped unfinished |
+| real-fill PGND, 7 filaments a layer | 1,814,730 / 640,094 | block | — | > 5,400 | stopped by the 5,400 s timeout (no result line) |
 
 MUMPS's peak is about 23 KB per saddle unknown with seven filaments and
 6.4 KB with one, against the 8 to 10 KB the SuperLU factor took on the small
@@ -774,7 +784,7 @@ superLU+near, superLU+block(40万未知数以上の大規模), scipy"):
 
 In 0.14.0 a mesh with edge strands or face coverage always took near, so
 without MUMPS a solve above 400,000 unknowns factored near by SuperLU, the
-path that ran out of 86 GB on a filled board's PGND, and the 0.13 fallback
+path that ran out of memory on a filled board's PGND, and the 0.13 fallback
 held only at DC.  `current_field_contract.solver_path` now decides the path
 once, from the mesh's branches and nodes (an upper bound of the solve's
 unknowns) before the branches are cut, and the solve takes it; the metrics
@@ -785,7 +795,8 @@ The device chooses for itself (cuDSS or SuperLU near).
 **Threads and bits.** MUMPS's OpenMP factorization sums in an order its team
 sets.  With its L0 tree parallelism (`ICNTL(48)`, on by default) the bits
 changed from run to run at a fixed thread count (three runs of the hot loop
-at 0.2 mm on 8 threads: three digests).  With it off (`ICNTL(48)` = 0, as
+at 0.2 mm on 8 threads: three digests, as reported at the time; the raw
+output was not kept).  With it off (`ICNTL(48)` = 0, as
 set) a count gives the same bits run after run, but counts differ from one
 another, and the speed is much the same (8 threads, L0 off against on: 0.90
 of the time on the hot loop at 0.2 mm, 0.96 at 0.1 mm, 1.32 on the
@@ -1143,7 +1154,7 @@ with `near_factorization="superlu"`, SciPy SuperLU factors on the host and
 CuPy performs each triangular solve on the device, recorded as
 `scipy_superlu_factor_cupy_triangular_solve`; the host factorization then
 sets the time (EVM-2L hot loop at 0.1 mm on a GB200: 80 to 586 s against 4 to
-6 s with cuDSS and 61 to 240 s on 36 CPU cores).
+7.5 s with cuDSS and 61 to 240 s on 36 CPU cores with SuperLU, no MUMPS).
 Each restart cycle solves for the correction of the current residual,
 `M^-1 A d = M^-1 (b - A x)` from zero, so the error of factors that were not
 pivoted does not stay in the answer: restarting from `x` on

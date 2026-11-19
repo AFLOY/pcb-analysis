@@ -138,7 +138,7 @@ def test_a_45_degree_strip_has_its_dc_resistance_with_face_coverage() -> None:
     whole_cells = _dc_resistance_per_mm(0.1, faces=False)
     covered = _dc_resistance_per_mm(0.1, faces=True)
     assert whole_cells > exact * 1.03  # the staircase's dead teeth
-    assert covered == pytest.approx(exact, rel=0.005)  # -0.3 %: the coverage is quantised to 1/64 of a cell
+    assert covered == pytest.approx(exact, rel=0.005)  # the coverage is quantised to 1/64 of a cell
 
 
 def test_a_clearance_narrower_than_a_cell_is_not_bridged() -> None:
