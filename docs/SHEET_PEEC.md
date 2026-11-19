@@ -1138,6 +1138,36 @@ converged).
   mutual inductance in half lets reactive power exchange across the cut appear
   in the real part.
 
+## What the tolerance bounds (0.14.1)
+
+The right-hand side of the saddle-point system is the injected current on
+the KCL rows, in amperes; the KVL rows' residual is in volts.  Until 0.14.1
+the tolerance was on `|b - A x| / |b|` as it stands, and a current error
+that keeps KCL -- a loop current, which is what the near preconditioner
+leaves -- showed in it only as `Z di`, about 1e-3 ohm of it on a 0.1 mm grid
+at 1 MHz.  On the graded test strip (474 branches, 1 MHz) the CPU near solve
+stopped at a residual of 3.6e-11 with its currents 5.1e-10 of their peak off
+(the loop part of the error 3.1e-10, its KCL part 2e-12), and a CUDA solve
+with cuDSS's factors stopped after one cycle at 2.5e-10 with its currents
+1.7e-8 to 3.4e-8 off (a GB200; the cuDSS factors solve the matrix
+regularized by 1e-8, and one cycle reached the tolerance).  Block and
+diagonal leave a KCL error, which the residual sees: their currents were
+0.3 to 1 times the residual off.
+
+Both paths now divide the KVL rows by an impedance scale,
+`|R + j omega L|` with the median branch resistance and the median own
+partial inductance of the grid's branches, so the residual is a ratio of
+currents and `tolerance` bounds the currents' relative error (to their
+injected current).  The CPU gives SciPy's GMRES the weighted system `W A`,
+`W b` with `M^-1 W^-1` as its preconditioner: the preconditioned operator is
+still `M^-1 A`, so the iterations are the same and only the restart test
+changes.  On the strip every preconditioner's current error is now below
+its residual (near: 5e-13 at tolerance 1e-9, four iterations where it took
+three).  The weighted residual cannot go below about 6e-14 (`Z i` in
+double precision), so a tolerance of 1e-14 does not converge.  The figures
+measured before 0.14.1 in this document were solved to the unweighted
+residual.
+
 ## CUDA execution
 
 `sheet_cuda.py` uses the same mesh and closed-form kernels as the CPU solver.
@@ -1162,16 +1192,15 @@ pivoted does not stay in the answer: restarting from `x` on
 0.2 mm, 30 MHz, A100, tolerance 1e-11: 8.6e-10 after 30 cycles that way,
 1.5e-12 after 10 this way).
 `max_iterations` means restart cycles on both paths. The CUDA adapter runs
-CuPy's GMRES one restart cycle at a time and checks the public saddle-point
-residual between cycles: CuPy judges the left-preconditioned residual, whose
-norm differs from the public one by a problem-dependent factor, so each
-cycle's internal target is the tolerance scaled by the current ratio of the
-two residuals (halved), and the loop stops when the public residual meets
-the tolerance or when that target falls below `100 eps`. Before this the
-adapter aimed three decades below the tolerance, ran every solve to its
-iteration cap and reported `converged=False` with residuals well inside the
-tolerance; at `1e-9` it now converges in three cycles on the test problems,
-matching the CPU currents to `1e-10`.
+CuPy's GMRES one restart cycle at a time and checks the weighted saddle-point
+residual ("What the tolerance bounds") between cycles: CuPy judges the left-preconditioned
+residual, whose norm differs from the weighted one by a problem-dependent
+factor, so each cycle's internal target is the tolerance scaled by the
+current ratio of the two residuals (halved), and the loop stops when the
+weighted residual meets the tolerance or when that target falls below
+`100 eps`. Before this the adapter aimed three decades below the tolerance,
+ran every solve to its iteration cap and reported `converged=False` with
+residuals well inside the tolerance.
 
 An undriven copper island is omitted as both nodes and branches. Omitting only
 its KCL columns while retaining its KVL rows allows the dense inductance
@@ -1273,7 +1302,8 @@ pads, ports and frequencies, so a caller never builds a `SheetMesh`:
 `BoardNetwork` takes as its copper, and `to_mapping()` /
 `from_mapping()` for `port-impedance-result/v1` (`z_ohm` as `real` and `imag`
 rows; JSON round-trips the bits).  Settings are the current-field contract's
-keys and defaults (`relative_tolerance` 1e-9, `maximum_iterations` 200,
+keys and defaults (`relative_tolerance` 1e-9, the currents' relative error
+as in "What the tolerance bounds", `maximum_iterations` 200,
 `restart` 120, `preconditioner`, `near_tiles`, `maximum_filaments`,
 `cells_per_skin_depth`, `operator`, `pfft_*`), plus `warm_start` (on) and
 `execution_backend` (`cpu`, or `cuda` with `device_id`; no fallback).

@@ -6,9 +6,30 @@ Versions before 0.7.0 were not tagged; see the Git history.
 
 ## 0.14.1
 
-A CPU sheet solve left on `preconditioner="auto"` takes its path in a fixed
-order, and a large one without MUMPS gives different results than in 0.14.0.
+The sheet solve's tolerance bounds the currents' relative error, on the CPU
+and on CUDA, and its iterations and bits change with it.  A CPU sheet solve
+left on `preconditioner="auto"` takes its path in a fixed order, and a large
+one without MUMPS gives different results than in 0.14.0.
 
+- The saddle-point residual's KVL rows are divided by an impedance scale
+  (`|R + j omega L|` of the median branch), so `tolerance` and the reported
+  `residual` are a ratio of currents.  Before, the KVL rows' volts were
+  weighed against the injected amperes, and a loop current, the error the
+  near preconditioner leaves, showed in the residual only as `Z di`: on a
+  graded test strip at 1 MHz the CPU near solve's currents were 14 times its
+  residual off, and a CUDA solve with cuDSS's factors stopped after one cycle
+  at 2.5e-10 with its currents 1.7e-8 to 3.4e-8 of their peak off (GB200).
+  Now every preconditioner's current error is below its residual (cuDSS:
+  2 cycles, 1e-15).  On a real fill (GB200): the stage-03 replay's device
+  calls take up to 30 % longer on the small conductors and 3 % on the
+  ten-conductor call (59.7 to 61.5 s), its CPU VOUT 541 to 606 iterations
+  (206 to 222 s), and its device results move by at most 1.7e-9 (VSUP's
+  current density); 92 ports at
+  1 MHz and tolerance 1e-6 take up to 53 iterations on the device and 56 on
+  the CPU where both took 35 (device 4.9 to 5.6 s, CPU 135 to 191 s), and the device and the CPU now agree to 4.7e-10 where they
+  agreed to 7.1e-7.  The weighted residual cannot go below about 6e-14, so
+  a tolerance of 1e-14 does not converge (the defaults are 1e-10 and 1e-9).
+  docs/SHEET_PEEC.md, "What the tolerance bounds".
 - The CPU path is chosen once per conductor, from the mesh's unknowns, in
   this order: MUMPS with the near preconditioner at every size; SuperLU with
   near below 400,000 unknowns (`AUTO_BLOCK_FROM_UNKNOWNS`); SuperLU with the
@@ -22,7 +43,7 @@ order, and a large one without MUMPS gives different results than in 0.14.0.
   keeps its own choice.
 - Results change on the SuperLU+block path: the strands and faces are not
   modelled there (a real fill's VOUT at 0.1 mm, 558,702 unknowns, a GB200's
-  CPU without MUMPS: 541 iterations, 206 s, peak current density 24.5 % off
+  CPU without MUMPS: 606 iterations, 222 s, peak current density 24.5 % off
   the device's solve with strands and faces).  Build the core with MUMPS for
   the 0.14.0 model at that size.
 - A named `block` or `diagonal` preconditioner leaves face coverage out with
@@ -36,17 +57,18 @@ order, and a large one without MUMPS gives different results than in 0.14.0.
   factors for every planned column (92 ports at 1 MHz on a 23 GB device:
   363 s before, 305 s of it in triangular solves).  The cuDSS near factor
   solves as many columns as it is given.  92 ports of a real fill at 1 MHz
-  on a GB200: 4.9 s on the device, 135 s on its CPU, largest relative
-  difference 7.1e-7.
+  on a GB200: 5.6 s on the device, 191 s on its CPU.
 - Checked on a GB200: the stage-03 replay's nine calls converge on the
-  device (the VOUT call at 0.1 mm: 3 cycles, residual 3e-14, 4.5 s).
+  device (the VOUT call at 0.1 mm: 3 cycles, 4.6 s).
 - Records: the 0.13.0 and 0.14.0 notes and docs/SHEET_PEEC.md follow the
   benchmark records, now added as docs/*_RESULTS.json (near with MUMPS, edge
   strands, face coverage, via FEM, the cuDSS default, the real fill's edge
   correction cost).
-- Test: the CUDA and CPU pfft solves of the graded grid are compared at
-  1e-12; at the 1e-9 the test used, cuDSS's factors leave the currents
-  3.4e-8 of their peak off, and it failed on 0.14.0 on a device.
+- Tests: the CUDA and CPU pfft solves of the graded grid, which failed on
+  0.14.0 on a device, pass at their 1e-9 again, and a reused near plan is
+  compared with a fresh one at 1e-9 where it had been moved to 1e-11; the
+  residual is checked to bound the currents' error for near, block and
+  diagonal.
 
 ## 0.14.0
 
