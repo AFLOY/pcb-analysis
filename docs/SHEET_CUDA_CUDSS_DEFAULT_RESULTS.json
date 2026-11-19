@@ -1,0 +1,462 @@
+{
+ "benchmark": "CUDA sheet solve with the near preconditioner factored by cuDSS (quasi-definite LDL^T) against host SuperLU factors and the CPU (0.14.0 CUDA near_factorization='auto' default)",
+ "measured_utc": "GB200: 2026-11-14 jobs 116967 (started 12:55:54 JST) and 117043 (started 14:34:34 JST); A100: 2026-11-14T16:12Z-16:17Z (Colab)",
+ "record_written_utc": "2026-11-20, transcribed from the raw outputs below; nothing re-run",
+ "environment": {
+  "gb200": {
+   "host": "Flow2 t2-share, PBS select=1:ngpus=1 (nodes t2043 for 116967, t2040 for 117043), aarch64",
+   "device": "NVIDIA GB200, 189471 MiB, driver 610.57.04",
+   "cupy": "14.2.0",
+   "nvmath": "1.0.0",
+   "numpy": "2.5.4",
+   "scipy": "1.18.1",
+   "cuda_runtime": "13020 (modules cuda/13.3, gcc-toolset/15)",
+   "cpu": "not printed (Grace, aarch64)",
+   "cpu_threads": "--threads 36 for the CPU rows",
+   "openblas": "OPENBLAS_NUM_THREADS=1",
+   "mumps": "not linked (cmake without -DPCB_NATIVE_MUMPS): the CPU rows factor near by SuperLU",
+   "cudss": "via nvmath-python 1.0.0",
+   "pcb_analysis": "e28933e (job 116967: CPU, CUDA+SuperLU, CUDA+cuDSS), 4108f2b (job 117043: CUDA+cuDSS); the CPU code did not change between them (tag work/cuda-edge-strands)"
+  },
+  "a100": {
+   "host": "Google Colab",
+   "device": "NVIDIA A100-SXM4-40GB, driver 580.82.07",
+   "cupy": "14.0.1 (cuda13x)",
+   "nvmath": "1.0.0",
+   "cuda_runtime": "13.0",
+   "numpy_scipy": "not recorded",
+   "pcb_analysis": "e064641 ('before') and 3263e66 ('after') with fix/cuda-mpir-cublas-load merged on top",
+   "source": "tag work/cuda-cudss-default (2026-11-15 01:47 +0900)"
+  }
+ },
+ "settings": {
+  "fixture": "EVM-2L hot loop (pcb-analysis experiments/sheet_cuda_hot_loop_benchmark.py, LM5145 two-layer EVM), edge strands on by default, the benchmark's default filaments (one a layer per the 2026-11-14 memory note; 64 only in the separate 0p2mm_f64 rows, not recorded here)",
+  "resolution_mm": 0.1,
+  "frequencies_hz": [
+   214358.0,
+   1000000.0,
+   30000000.0
+  ],
+  "tolerance": "benchmark default (residuals recorded per row)",
+  "preconditioner": "near",
+  "factorization": {
+   "cpu": "superlu",
+   "cuda_superlu": "scipy_superlu_factor_cupy_triangular_solve",
+   "cuda_cudss": "cudss_quasi_definite_ldlt_host_near (near matrix formed on the host for a stranded mesh)"
+  }
+ },
+ "gb200_hot_loop_0p1mm": {
+  "cpu_36_threads": {
+   "R_mohm": [
+    3.2187163194194595,
+    4.839140307579591,
+    14.151342405505943
+   ],
+   "L_nh": [
+    4.928324147035145,
+    4.2861451651914635,
+    3.9549400663305465
+   ],
+   "solve_s": [
+    60.79311360907741,
+    73.05195708596148,
+    239.6081478111446
+   ],
+   "iterations": [
+    28,
+    42,
+    391
+   ],
+   "residual": [
+    1.6292851207153413e-08,
+    2.337992763103527e-08,
+    9.503014106583552e-07
+   ],
+   "near_factorization": "superlu",
+   "source": "transcript 93d4c06b-e874-4323-b1e5-cf55fcbd3d45 (Kicad_PowerOpt), tool result L578 (job 116967 at e28933e, 2026-11-14T05:27Z), row 0p1mm_cpu"
+  },
+  "cuda_superlu": {
+   "R_mohm": [
+    3.2187176757568268,
+    4.839139500016612,
+    14.151574265324486
+   ],
+   "L_nh": [
+    4.928325144409944,
+    4.28614507845258,
+    3.9549398519008827
+   ],
+   "solve_s": [
+    79.6095327869989,
+    114.79972008406185,
+    585.6258681719191
+   ],
+   "iterations": [
+    2,
+    3,
+    7
+   ],
+   "cuda_prepare_ms": [
+    50377.27937079035,
+    56733.402609825134,
+    71904.74620228633
+   ],
+   "cuda_solve_ms": [
+    25940.515890019014,
+    55635.59164199978,
+    511123.4518222045
+   ],
+   "backend": "scipy_superlu_factor_cupy_triangular_solve",
+   "source": "transcript 93d4c06b-e874-4323-b1e5-cf55fcbd3d45 (Kicad_PowerOpt), tool result L578, row 0p1mm_cuda_superlu",
+   "relative_to_cpu": {
+    "R": [
+     4.2139077582881157e-07,
+     -1.668814969546517e-07,
+     1.6384298527905017e-05
+    ],
+    "L": [
+     2.023760550251552e-07,
+     -2.023703826736778e-08,
+     -5.421818283224411e-08
+    ]
+   }
+  },
+  "cuda_cudss_job_116967": {
+   "R_mohm": [
+    3.2187239855502976,
+    4.839139493480834,
+    14.15156372780892
+   ],
+   "L_nh": [
+    4.928330303194694,
+    4.2861450784244095,
+    3.9549401477808743
+   ],
+   "solve_s": [
+    7.4749698380474,
+    4.002572540193796,
+    6.249666592804715
+   ],
+   "iterations": [
+    2,
+    3,
+    7
+   ],
+   "backend": "cudss_quasi_definite_ldlt_host_near",
+   "source": "transcript 93d4c06b-e874-4323-b1e5-cf55fcbd3d45 (Kicad_PowerOpt), tool result L578 (job 116967 at e28933e), row 0p1mm_cuda_cudss",
+   "relative_to_cpu": {
+    "R": [
+     2.3817354737332153e-06,
+     -1.6823210413630107e-07,
+     1.563966842410558e-05
+    ],
+    "L": [
+     1.2491385237289876e-06,
+     -2.0243610676651258e-08,
+     2.0594579597243978e-08
+    ]
+   }
+  },
+  "cuda_cudss_job_117043": {
+   "R_mohm": [
+    3.218723978731727,
+    4.8391394875998905,
+    14.151563732375152
+   ],
+   "L_nh": [
+    4.928330303198629,
+    4.286145078422252,
+    3.9549401478475112
+   ],
+   "solve_s": [
+    5.217305470025167,
+    4.074236800894141,
+    6.385760023025796
+   ],
+   "iterations": [
+    2,
+    3,
+    7
+   ],
+   "cuda_memory_pool_peak_bytes": [
+    645996544,
+    943246848,
+    2449218048
+   ],
+   "backend": "cudss_quasi_definite_ldlt_host_near",
+   "source": "transcript 93d4c06b-e874-4323-b1e5-cf55fcbd3d45 (Kicad_PowerOpt), tool result L769 (job 117043 at 4108f2b, 2026-11-14T05:49Z), row 0p1mm_cuda_cudss",
+   "relative_to_cpu": {
+    "R": [
+     2.3796170607326417e-06,
+     -1.694473911184602e-07,
+     1.5639991095328654e-05
+    ],
+    "L": [
+     1.2491393219793423e-06,
+     -2.0244114051770623e-08,
+     2.0611428563910295e-08
+    ]
+   }
+  },
+  "largest_relative_difference_cudss_117043_vs_cpu": {
+   "R": 1.5639991095328654e-05,
+   "L": 1.2491393219793423e-06
+  }
+ },
+ "gb200_stage03_vout_stall": {
+  "call": 5,
+  "roles": [
+   "VOUT"
+  ],
+  "cells": [
+   80073
+  ],
+  "solve_s": 224.58,
+  "solver_iterations": 200,
+  "solver_relative_residual": 1.0416464264891062e-09,
+  "converged": false,
+  "backend": "cudss_quasi_definite_ldlt_host_near",
+  "source": "transcript f7d3f69d-98db-4e5f-8203-7364f4e44d8f (Kicad_PowerOpt), tool result L302 (2026-11-14T08:59:14Z), replay of the recorded stage-03 calls on a GB200 before the restart fix"
+ },
+ "a100_restart_fix_9_cases": {
+  "rows": [
+   {
+    "resolution": "0p2mm",
+    "freq_hz": 30000000.0,
+    "near_regularization": "default",
+    "tolerance": 1e-09,
+    "before_e064641": {
+     "cycles": 11,
+     "residual": 9.02e-10,
+     "converged": true,
+     "solve_ms": 10967,
+     "R_mohm": 11.367809921841976,
+     "L_nh": 4.341789968080883
+    },
+    "after_3263e66": {
+     "cycles": 8,
+     "residual": 8.1e-10,
+     "converged": true,
+     "solve_ms": 3747,
+     "R_mohm": 11.367809867994152,
+     "L_nh": 4.34178996886958
+    }
+   },
+   {
+    "resolution": "0p2mm",
+    "freq_hz": 30000000.0,
+    "near_regularization": "default",
+    "tolerance": 1e-11,
+    "before_e064641": {
+     "cycles": 30,
+     "residual": 8.57e-10,
+     "converged": false,
+     "solve_ms": 18173,
+     "R_mohm": 11.367810024114304,
+     "L_nh": 4.341789968193608
+    },
+    "after_3263e66": {
+     "cycles": 10,
+     "residual": 1.54e-12,
+     "converged": true,
+     "solve_ms": 5039,
+     "R_mohm": 11.367810164541368,
+     "L_nh": 4.341789968083523
+    }
+   },
+   {
+    "resolution": "0p2mm",
+    "freq_hz": 30000000.0,
+    "near_regularization": "1e-10",
+    "tolerance": 1e-09,
+    "before_e064641": {
+     "cycles": 30,
+     "residual": 1.06e-07,
+     "converged": false,
+     "solve_ms": 18257,
+     "R_mohm": 11.367816431433278,
+     "L_nh": 4.341789967535973
+    },
+    "after_3263e66": {
+     "cycles": 8,
+     "residual": 7.7e-10,
+     "converged": true,
+     "solve_ms": 3709,
+     "R_mohm": 11.367809988812965,
+     "L_nh": 4.3417899689526145
+    }
+   },
+   {
+    "resolution": "0p2mm",
+    "freq_hz": 214358.0,
+    "near_regularization": "default",
+    "tolerance": 1e-09,
+    "before_e064641": {
+     "cycles": 3,
+     "residual": 1.46e-11,
+     "converged": true,
+     "solve_ms": 607,
+     "R_mohm": 2.9941071758566897,
+     "L_nh": 5.164513057626178
+    },
+    "after_3263e66": {
+     "cycles": 3,
+     "residual": 1.28e-16,
+     "converged": true,
+     "solve_ms": 608,
+     "R_mohm": 2.9941071744091903,
+     "L_nh": 5.164513057677025
+    }
+   },
+   {
+    "resolution": "0p2mm",
+    "freq_hz": 214358.0,
+    "near_regularization": "default",
+    "tolerance": 1e-11,
+    "before_e064641": {
+     "cycles": 30,
+     "residual": 1.28e-11,
+     "converged": false,
+     "solve_ms": 17889,
+     "R_mohm": 2.9941071767112604,
+     "L_nh": 5.164513057675112
+    },
+    "after_3263e66": {
+     "cycles": 3,
+     "residual": 1.37e-16,
+     "converged": true,
+     "solve_ms": 615,
+     "R_mohm": 2.99410717440919,
+     "L_nh": 5.164513057677025
+    }
+   },
+   {
+    "resolution": "0p2mm",
+    "freq_hz": 214358.0,
+    "near_regularization": "1e-10",
+    "tolerance": 1e-09,
+    "before_e064641": {
+     "cycles": 30,
+     "residual": 1.29e-09,
+     "converged": false,
+     "solve_ms": 17985,
+     "R_mohm": 2.994107655470354,
+     "L_nh": 5.1645130574799785
+    },
+    "after_3263e66": {
+     "cycles": 3,
+     "residual": 8.92e-16,
+     "converged": true,
+     "solve_ms": 618,
+     "R_mohm": 2.9941071744092005,
+     "L_nh": 5.164513057677023
+    }
+   },
+   {
+    "resolution": "0p1mm",
+    "freq_hz": 30000000.0,
+    "near_regularization": "default",
+    "tolerance": 1e-09,
+    "before_e064641": {
+     "cycles": 9,
+     "residual": 8.95e-10,
+     "converged": true,
+     "solve_ms": 7026,
+     "R_mohm": 14.15153993111183,
+     "L_nh": 3.954940124684558
+    },
+    "after_3263e66": {
+     "cycles": 9,
+     "residual": 8.2e-10,
+     "converged": true,
+     "solve_ms": 7003,
+     "R_mohm": 14.151539930723622,
+     "L_nh": 3.9549401247967793
+    }
+   },
+   {
+    "resolution": "0p1mm",
+    "freq_hz": 30000000.0,
+    "near_regularization": "default",
+    "tolerance": 1e-11,
+    "before_e064641": {
+     "cycles": 30,
+     "residual": 3.99e-10,
+     "converged": false,
+     "solve_ms": 29597,
+     "R_mohm": 14.151539759912156,
+     "L_nh": 3.954940124159732
+    },
+    "after_3263e66": {
+     "cycles": 11,
+     "residual": 4.38e-12,
+     "converged": true,
+     "solve_ms": 9152,
+     "R_mohm": 14.151539812189503,
+     "L_nh": 3.9549401241555255
+    }
+   },
+   {
+    "resolution": "0p1mm",
+    "freq_hz": 30000000.0,
+    "near_regularization": "1e-10",
+    "tolerance": 1e-09,
+    "before_e064641": {
+     "cycles": 30,
+     "residual": 3.24e-08,
+     "converged": false,
+     "solve_ms": 29586,
+     "R_mohm": 14.151555966180446,
+     "L_nh": 3.954940124373462
+    },
+    "after_3263e66": {
+     "cycles": 9,
+     "residual": 6.11e-10,
+     "converged": true,
+     "solve_ms": 7003,
+     "R_mohm": 14.151539928106947,
+     "L_nh": 3.9549401246905997
+    }
+   }
+  ],
+  "unconverged_before": 6,
+  "unconverged_after": 0,
+  "source": "transcript f7d3f69d-98db-4e5f-8203-7364f4e44d8f (Kicad_PowerOpt), Colab task output in the user turn L662 (2026-11-14T16:17:21Z)"
+ },
+ "decision": {
+  "adopted": true,
+  "what": "0.14.0: on CUDA near_factorization='auto' is cudss_quasi_definite where nvmath-python imports, host SuperLU otherwise; the cuda extra installs nvmath-python[cu13]; each restart cycle of one excitation solves for the residual's correction (30a237a)",
+  "by": "the user, 2026-11-14",
+  "user_words": [
+   {
+    "utc": "2026-11-14T16:01:29Z",
+    "text": "superluだと遅いし意味ないからcudaはcudssを規定にしたいけど，cudssと残差の問題って実際なんなの？",
+    "source": "transcript f7d3f69d-98db-4e5f-8203-7364f4e44d8f (Kicad_PowerOpt) L473"
+   },
+   {
+    "utc": "2026-11-14T18:32:30Z",
+    "text": "mainに早送りしてリリース公開して",
+    "source": "transcript f7d3f69d-98db-4e5f-8203-7364f4e44d8f (Kicad_PowerOpt) L984"
+   }
+  ],
+  "commits": "d512039 (cuDSS by default), 30a237a (restart correction), 06a4e9a (docs), c3ee178 (release 0.14.0); tags work/cuda-cudss-default, work/release-0.14.0"
+ },
+ "not_measured": [
+  "No GB200 run of the released code (after 3263e66/d512039); the stage-03 VOUT replay was not repeated after the fix (tag work/release-0.14.0).",
+  "The CPU rows on the GB200 host without MUMPS only; no MUMPS CPU reference on that host.",
+  "auto without nvmath-python on a device."
+ ],
+ "unsupported_figures": [],
+ "discrepancies": [
+  {
+   "cited": "'agreed with the CPU to 5e-5 in R and 1e-6 in L' (CHANGELOG 0.14.0, tag work/cuda-edge-strands)",
+   "supported": "R within 1.56e-5, L within 1.25e-6 (214 kHz: L 4.928330303 against 4.928324147)",
+   "note": "the L bound is exceeded by 25 %; '2e-6' would hold"
+  },
+  {
+   "cited": "'cuDSS 4 to 6 s' (CHANGELOG, SHEET_PEEC.md, commit d512039)",
+   "supported": "job 117043: 5.22 / 4.07 / 6.39 s; job 116967: 7.47 / 4.00 / 6.25 s",
+   "note": "4 to 6 s holds for 117043 only if 6.39 s is rounded down; 116967's 214 kHz call took 7.5 s"
+  }
+ ]
+}

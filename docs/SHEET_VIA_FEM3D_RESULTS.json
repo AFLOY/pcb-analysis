@@ -1,0 +1,1153 @@
+{
+ "benchmark": "vias on the uniform sheet grid (0.14.0 defaults: edge strands and face coverage) against a 3D A-V eddy-current FEM of five two-layer via cases",
+ "measured_utc": "FEM 2026-11-13 (Flow2), uniform grid 2026-11-14T03:00Z-03:06Z (local; uniform_final.jsonl mtime 2026-11-14 12:05 +0900)",
+ "record_written_utc": "2026-11-20, computed from the raw outputs below; nothing re-run",
+ "environment": {
+  "fem": {
+   "host": "Flow2 (Nagoya U.) t1-share node, PBS job",
+   "cpu": "AMD EPYC 9965 192-Core Processor (lscpu line of the job logs that printed it)",
+   "node_memory": "754 GB total (free -g in the job logs that printed it)",
+   "python_numpy_scipy": "not recorded (Flow2 venv ~/powerOpt/env)",
+   "device": "CPU",
+   "solver": "NGSolve, Coulomb-gauged A-V, second order (pair DC first order), UMFPACK; ~/powerOpt/fem-env (versions not recorded)",
+   "jobs": "work/via_ref/fem3d_job_*.sh (PBS numa=4, NGS_THREADS=48)"
+  },
+  "uniform": {
+   "host": "local workstation, AMD Ryzen 7 9700X 8-Core (lscpu at 2026-11-20)",
+   "python": "/home/hyamada/pcb-analysis/.venv (Python 3.12.14, NumPy 2.3.5, SciPy 1.17.1 at 2026-11-20; versions at measurement not recorded)",
+   "pcb_analysis": "~/pcb-analysis-uniacc at a2899c9 (exp/uniform-edge-via-accuracy) with work/via_ref/uniform_case.py --faces (production-style face raster), per the memory note of 2026-11-14",
+   "threads": "6 for the sharing run (set_thread_budget(6)); the case runs: not recorded",
+   "mumps": "not recorded",
+   "device": "CPU"
+  }
+ },
+ "settings": {
+  "cases": "pair, pair_edge (0.27 mm from the plates' edge), cluster (3 x 2 array carrying all the current), relief (two vias in thermal reliefs), big (one 0.6 mm drill); work/via_ref/via_cases.py",
+  "via_model": "barrel footprint filled copper, resistance rho * D / A over the wall cells by their share of the circumference (as plane_opt lays them); barrel length D",
+  "pitches_mm": [
+   0.1,
+   0.05
+  ],
+  "frequencies_hz": [
+   0.0,
+   214358.0,
+   1000000.0
+  ],
+  "fem_reference": "fem_ref.json (4 significant digits of the finest FEM mesh of each case)",
+  "uniform_solve": "maximum_iterations 400, relative_tolerance 1e-10 (sharing run)"
+ },
+ "fem_reference": {
+  "rounded": {
+   "pair": {
+    "0": 0.5899,
+    "214358": 0.736,
+    "1000000": 0.953
+   },
+   "pair_edge": {
+    "0": 0.5909,
+    "214358": 0.7316,
+    "1000000": 0.943
+   },
+   "cluster": {
+    "0": 0.8477,
+    "214358": 0.9405,
+    "1000000": 1.1668
+   },
+   "relief": {
+    "0": 1.3922,
+    "214358": 1.4776,
+    "1000000": 1.6659
+   },
+   "big": {
+    "0": 1.1714,
+    "214358": 1.2585,
+    "1000000": 1.4433
+   }
+  },
+  "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_ref.json",
+  "raw": [
+   {
+    "case": "pair_edge",
+    "freq_hz": 1.0,
+    "order": 2,
+    "h_cu_um": 300.0,
+    "h_barrel_um": 60.0,
+    "ndof": 499580,
+    "R_mohm": 0.5908908986593288,
+    "L_nh": 3.2364793748122755,
+    "solve_s": 440.2,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 1"
+   },
+   {
+    "case": "pair_edge",
+    "freq_hz": 214358.0,
+    "order": 2,
+    "h_cu_um": 300.0,
+    "h_barrel_um": 60.0,
+    "ndof": 499580,
+    "R_mohm": 0.7329696857717852,
+    "L_nh": 3.0980536581081455,
+    "solve_s": 505.4,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 2"
+   },
+   {
+    "case": "pair_edge",
+    "freq_hz": 1000000.0,
+    "order": 2,
+    "h_cu_um": 300.0,
+    "h_barrel_um": 60.0,
+    "ndof": 499580,
+    "R_mohm": 0.96490308339496,
+    "L_nh": 3.007918045537046,
+    "solve_s": 917.3,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 3"
+   },
+   {
+    "case": "pair_edge",
+    "freq_hz": 1.0,
+    "order": 2,
+    "h_cu_um": 150.0,
+    "h_barrel_um": 40.0,
+    "ndof": 1099227,
+    "R_mohm": 0.5909251933078692,
+    "L_nh": 3.2372913770815153,
+    "solve_s": 3718.6,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 5"
+   },
+   {
+    "case": "pair_edge",
+    "freq_hz": 214358.0,
+    "order": 2,
+    "h_cu_um": 150.0,
+    "h_barrel_um": 40.0,
+    "ndof": 1099227,
+    "R_mohm": 0.731605294775947,
+    "L_nh": 3.0991702335702547,
+    "solve_s": 3694.3,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 6"
+   },
+   {
+    "case": "pair_edge",
+    "freq_hz": 1000000.0,
+    "order": 2,
+    "h_cu_um": 150.0,
+    "h_barrel_um": 40.0,
+    "ndof": 1099227,
+    "R_mohm": 0.9429990880424651,
+    "L_nh": 3.010630491959661,
+    "solve_s": 4097.6,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 7"
+   },
+   {
+    "case": "cluster",
+    "freq_hz": 1.0,
+    "order": 2,
+    "h_cu_um": 300.0,
+    "h_barrel_um": 60.0,
+    "ndof": 678263,
+    "R_mohm": 0.8475255353803282,
+    "L_nh": 3.5093662736162883,
+    "solve_s": 1205.0,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 9"
+   },
+   {
+    "case": "cluster",
+    "freq_hz": 214358.0,
+    "order": 2,
+    "h_cu_um": 300.0,
+    "h_barrel_um": 60.0,
+    "ndof": 678263,
+    "R_mohm": 0.9417013138479302,
+    "L_nh": 3.4244450710977077,
+    "solve_s": 1380.6,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 10"
+   },
+   {
+    "case": "cluster",
+    "freq_hz": 1000000.0,
+    "order": 2,
+    "h_cu_um": 300.0,
+    "h_barrel_um": 60.0,
+    "ndof": 678263,
+    "R_mohm": 1.183291010948564,
+    "L_nh": 3.3564190490354866,
+    "solve_s": 1851.8,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 11"
+   },
+   {
+    "case": "cluster",
+    "freq_hz": 1.0,
+    "order": 2,
+    "h_cu_um": 200.0,
+    "h_barrel_um": 50.0,
+    "ndof": 927555,
+    "R_mohm": 0.8476505115184516,
+    "L_nh": 3.5114724851841594,
+    "solve_s": 3686.7,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 13"
+   },
+   {
+    "case": "cluster",
+    "freq_hz": 214358.0,
+    "order": 2,
+    "h_cu_um": 200.0,
+    "h_barrel_um": 50.0,
+    "ndof": 927555,
+    "R_mohm": 0.9404997114309047,
+    "L_nh": 3.4268066311192302,
+    "solve_s": 2967.3,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 14"
+   },
+   {
+    "case": "cluster",
+    "freq_hz": 1000000.0,
+    "order": 2,
+    "h_cu_um": 200.0,
+    "h_barrel_um": 50.0,
+    "ndof": 927555,
+    "R_mohm": 1.1667984145622272,
+    "L_nh": 3.3605034130819185,
+    "solve_s": 3492.7,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 15"
+   },
+   {
+    "case": "relief",
+    "freq_hz": 1.0,
+    "order": 2,
+    "h_cu_um": 300.0,
+    "h_barrel_um": 60.0,
+    "ndof": 483664,
+    "R_mohm": 1.3907137407725474,
+    "L_nh": 3.646480553118936,
+    "solve_s": 520.8,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 18"
+   },
+   {
+    "case": "relief",
+    "freq_hz": 214358.0,
+    "order": 2,
+    "h_cu_um": 300.0,
+    "h_barrel_um": 60.0,
+    "ndof": 483664,
+    "R_mohm": 1.4778992739355956,
+    "L_nh": 3.566362841319264,
+    "solve_s": 495.8,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 19"
+   },
+   {
+    "case": "relief",
+    "freq_hz": 1000000.0,
+    "order": 2,
+    "h_cu_um": 300.0,
+    "h_barrel_um": 60.0,
+    "ndof": 483664,
+    "R_mohm": 1.6881331023491375,
+    "L_nh": 3.5061525500046504,
+    "solve_s": 891.1,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 20"
+   },
+   {
+    "case": "relief",
+    "freq_hz": 1.0,
+    "order": 2,
+    "h_cu_um": 150.0,
+    "h_barrel_um": 40.0,
+    "ndof": 875283,
+    "R_mohm": 1.392221823346048,
+    "L_nh": 3.647717845245499,
+    "solve_s": 1898.4,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 22"
+   },
+   {
+    "case": "relief",
+    "freq_hz": 214358.0,
+    "order": 2,
+    "h_cu_um": 150.0,
+    "h_barrel_um": 40.0,
+    "ndof": 875283,
+    "R_mohm": 1.477578686642922,
+    "L_nh": 3.5679538837844467,
+    "solve_s": 1916.3,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 23"
+   },
+   {
+    "case": "relief",
+    "freq_hz": 1000000.0,
+    "order": 2,
+    "h_cu_um": 150.0,
+    "h_barrel_um": 40.0,
+    "ndof": 875283,
+    "R_mohm": 1.6659387980592162,
+    "L_nh": 3.5100324787489003,
+    "solve_s": 2037.5,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 24"
+   },
+   {
+    "case": "big",
+    "freq_hz": 1.0,
+    "order": 2,
+    "h_cu_um": 300.0,
+    "h_barrel_um": 60.0,
+    "ndof": 438257,
+    "R_mohm": 1.170385547469347,
+    "L_nh": 3.690800449918856,
+    "solve_s": 474.2,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 26"
+   },
+   {
+    "case": "big",
+    "freq_hz": 214358.0,
+    "order": 2,
+    "h_cu_um": 300.0,
+    "h_barrel_um": 60.0,
+    "ndof": 438257,
+    "R_mohm": 1.2593938642993914,
+    "L_nh": 3.607853609291988,
+    "solve_s": 463.8,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 27"
+   },
+   {
+    "case": "big",
+    "freq_hz": 1000000.0,
+    "order": 2,
+    "h_cu_um": 300.0,
+    "h_barrel_um": 60.0,
+    "ndof": 438257,
+    "R_mohm": 1.4664429685555669,
+    "L_nh": 3.54730820381114,
+    "solve_s": 806.3,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 28"
+   },
+   {
+    "case": "big",
+    "freq_hz": 1.0,
+    "order": 2,
+    "h_cu_um": 150.0,
+    "h_barrel_um": 40.0,
+    "ndof": 890453,
+    "R_mohm": 1.1714137725643687,
+    "L_nh": 3.692707202311223,
+    "solve_s": 2697.1,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 30"
+   },
+   {
+    "case": "big",
+    "freq_hz": 214358.0,
+    "order": 2,
+    "h_cu_um": 150.0,
+    "h_barrel_um": 40.0,
+    "ndof": 890453,
+    "R_mohm": 1.2585383171154583,
+    "L_nh": 3.6101523266722757,
+    "solve_s": 2576.9,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 31"
+   },
+   {
+    "case": "big",
+    "freq_hz": 1000000.0,
+    "order": 2,
+    "h_cu_um": 150.0,
+    "h_barrel_um": 40.0,
+    "ndof": 890453,
+    "R_mohm": 1.443342934623396,
+    "L_nh": 3.5519097349994264,
+    "solve_s": 3070.8,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_cases.jsonl line 32"
+   },
+   {
+    "case": "pair",
+    "freq_hz": 1.0,
+    "order": 1,
+    "h_cu_um": 600.0,
+    "h_barrel_um": 120.0,
+    "ndof": 103846,
+    "R_mohm": 0.5899696139419531,
+    "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L18246 (2026-11-13T07:43:59Z), Flow2 fem3d_case.py"
+   },
+   {
+    "case": "pair",
+    "freq_hz": 214358.0,
+    "order": 2,
+    "h_cu_um": 150.0,
+    "h_barrel_um": 40.0,
+    "ndof": 1089960,
+    "R_mohm": 0.7360315057010758,
+    "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L17728 (2026-11-13T05:50:12Z), Flow2 fem3d_via_pair.py"
+   },
+   {
+    "case": "pair",
+    "freq_hz": 1000000.0,
+    "order": 2,
+    "h_cu_um": 150.0,
+    "h_barrel_um": 40.0,
+    "ndof": 1089960,
+    "R_mohm": 0.9530233679907318,
+    "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L17728"
+   }
+  ]
+ },
+ "uniform_final": [
+  {
+   "case": "pair",
+   "freq_hz": 0.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 0.5834082657900789,
+   "edge_strands": false,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 15744,
+   "iterations": 1,
+   "wall_cells": 24,
+   "fem_R_mohm": 0.5899,
+   "R_vs_fem_pct": -1.1005,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 1"
+  },
+  {
+   "case": "pair",
+   "freq_hz": 214358.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 0.7325453529588698,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 15744,
+   "iterations": 19,
+   "wall_cells": 24,
+   "fem_R_mohm": 0.736,
+   "R_vs_fem_pct": -0.4694,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 2"
+  },
+  {
+   "case": "pair",
+   "freq_hz": 1000000.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 0.954239219876696,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 3,
+    "B.Cu": 3
+   },
+   "branches": 64840,
+   "iterations": 31,
+   "wall_cells": 24,
+   "fem_R_mohm": 0.953,
+   "R_vs_fem_pct": 0.13,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 3"
+  },
+  {
+   "case": "pair",
+   "freq_hz": 0.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 0.5865492368586706,
+   "edge_strands": false,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 63480,
+   "iterations": 1,
+   "wall_cells": 40,
+   "fem_R_mohm": 0.5899,
+   "R_vs_fem_pct": -0.568,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 4"
+  },
+  {
+   "case": "pair",
+   "freq_hz": 214358.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 0.7334141462239117,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 63480,
+   "iterations": 22,
+   "wall_cells": 40,
+   "fem_R_mohm": 0.736,
+   "R_vs_fem_pct": -0.3513,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 5"
+  },
+  {
+   "case": "pair",
+   "freq_hz": 1000000.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 0.944209237985675,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 3,
+    "B.Cu": 3
+   },
+   "branches": 254360,
+   "iterations": 38,
+   "wall_cells": 40,
+   "fem_R_mohm": 0.953,
+   "R_vs_fem_pct": -0.9224,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 6"
+  },
+  {
+   "case": "pair_edge",
+   "freq_hz": 0.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 0.5841680310748332,
+   "edge_strands": false,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 15744,
+   "iterations": 1,
+   "wall_cells": 24,
+   "fem_R_mohm": 0.5909,
+   "R_vs_fem_pct": -1.1393,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 7"
+  },
+  {
+   "case": "pair_edge",
+   "freq_hz": 214358.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 0.725442197427013,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 15744,
+   "iterations": 21,
+   "wall_cells": 24,
+   "fem_R_mohm": 0.7316,
+   "R_vs_fem_pct": -0.8417,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 8"
+  },
+  {
+   "case": "pair_edge",
+   "freq_hz": 1000000.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 0.9368645418045913,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 3,
+    "B.Cu": 3
+   },
+   "branches": 64840,
+   "iterations": 31,
+   "wall_cells": 24,
+   "fem_R_mohm": 0.943,
+   "R_vs_fem_pct": -0.6506,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 9"
+  },
+  {
+   "case": "pair_edge",
+   "freq_hz": 0.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 0.5872991960795572,
+   "edge_strands": false,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 63480,
+   "iterations": 1,
+   "wall_cells": 40,
+   "fem_R_mohm": 0.5909,
+   "R_vs_fem_pct": -0.6094,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 10"
+  },
+  {
+   "case": "pair_edge",
+   "freq_hz": 214358.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 0.7269135518202441,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 63480,
+   "iterations": 23,
+   "wall_cells": 40,
+   "fem_R_mohm": 0.7316,
+   "R_vs_fem_pct": -0.6406,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 11"
+  },
+  {
+   "case": "pair_edge",
+   "freq_hz": 1000000.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 0.9296564277536951,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 3,
+    "B.Cu": 3
+   },
+   "branches": 254360,
+   "iterations": 40,
+   "wall_cells": 40,
+   "fem_R_mohm": 0.943,
+   "R_vs_fem_pct": -1.415,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 12"
+  },
+  {
+   "case": "cluster",
+   "freq_hz": 0.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 0.8436791100077902,
+   "edge_strands": false,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 9472,
+   "iterations": 1,
+   "wall_cells": 72,
+   "fem_R_mohm": 0.8477,
+   "R_vs_fem_pct": -0.4743,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 13"
+  },
+  {
+   "case": "cluster",
+   "freq_hz": 214358.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 0.9340321471776405,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 9472,
+   "iterations": 17,
+   "wall_cells": 72,
+   "fem_R_mohm": 0.9405,
+   "R_vs_fem_pct": -0.6877,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 14"
+  },
+  {
+   "case": "cluster",
+   "freq_hz": 1000000.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 1.156894902821632,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 3,
+    "B.Cu": 3
+   },
+   "branches": 39048,
+   "iterations": 29,
+   "wall_cells": 72,
+   "fem_R_mohm": 1.1668,
+   "R_vs_fem_pct": -0.8489,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 15"
+  },
+  {
+   "case": "cluster",
+   "freq_hz": 0.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 0.8485554725842686,
+   "edge_strands": false,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 38120,
+   "iterations": 1,
+   "wall_cells": 120,
+   "fem_R_mohm": 0.8477,
+   "R_vs_fem_pct": 0.1009,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 16"
+  },
+  {
+   "case": "cluster",
+   "freq_hz": 214358.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 0.9389914358353859,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 38120,
+   "iterations": 19,
+   "wall_cells": 120,
+   "fem_R_mohm": 0.9405,
+   "R_vs_fem_pct": -0.1604,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 17"
+  },
+  {
+   "case": "cluster",
+   "freq_hz": 1000000.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 1.143159092566253,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 3,
+    "B.Cu": 3
+   },
+   "branches": 152520,
+   "iterations": 36,
+   "wall_cells": 120,
+   "fem_R_mohm": 1.1668,
+   "R_vs_fem_pct": -2.0261,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 18"
+  },
+  {
+   "case": "relief",
+   "freq_hz": 0.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 1.3901495903518861,
+   "edge_strands": false,
+   "face_coverage": true,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 9292,
+   "iterations": 1,
+   "wall_cells": 24,
+   "fem_R_mohm": 1.3922,
+   "R_vs_fem_pct": -0.1473,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 19"
+  },
+  {
+   "case": "relief",
+   "freq_hz": 214358.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 1.472258156585039,
+   "edge_strands": true,
+   "face_coverage": true,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 9292,
+   "iterations": 19,
+   "wall_cells": 24,
+   "fem_R_mohm": 1.4776,
+   "R_vs_fem_pct": -0.3615,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 20"
+  },
+  {
+   "case": "relief",
+   "freq_hz": 1000000.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 1.6541680310112203,
+   "edge_strands": true,
+   "face_coverage": true,
+   "filaments": {
+    "F.Cu": 3,
+    "B.Cu": 3
+   },
+   "branches": 38856,
+   "iterations": 29,
+   "wall_cells": 24,
+   "fem_R_mohm": 1.6659,
+   "R_vs_fem_pct": -0.7042,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 21"
+  },
+  {
+   "case": "relief",
+   "freq_hz": 0.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 1.4036960169818546,
+   "edge_strands": false,
+   "face_coverage": true,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 37544,
+   "iterations": 1,
+   "wall_cells": 40,
+   "fem_R_mohm": 1.3922,
+   "R_vs_fem_pct": 0.8257,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 22"
+  },
+  {
+   "case": "relief",
+   "freq_hz": 214358.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 1.486070630435334,
+   "edge_strands": true,
+   "face_coverage": true,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 37544,
+   "iterations": 21,
+   "wall_cells": 40,
+   "fem_R_mohm": 1.4776,
+   "R_vs_fem_pct": 0.5733,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 23"
+  },
+  {
+   "case": "relief",
+   "freq_hz": 1000000.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 1.6565654216952572,
+   "edge_strands": true,
+   "face_coverage": true,
+   "filaments": {
+    "F.Cu": 3,
+    "B.Cu": 3
+   },
+   "branches": 150568,
+   "iterations": 36,
+   "wall_cells": 40,
+   "fem_R_mohm": 1.6659,
+   "R_vs_fem_pct": -0.5603,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 24"
+  },
+  {
+   "case": "big",
+   "freq_hz": 0.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 1.1754102931473591,
+   "edge_strands": false,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 9428,
+   "iterations": 1,
+   "wall_cells": 28,
+   "fem_R_mohm": 1.1714,
+   "R_vs_fem_pct": 0.3424,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 25"
+  },
+  {
+   "case": "big",
+   "freq_hz": 214358.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 1.2601987365374105,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 9428,
+   "iterations": 16,
+   "wall_cells": 28,
+   "fem_R_mohm": 1.2585,
+   "R_vs_fem_pct": 0.135,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 26"
+  },
+  {
+   "case": "big",
+   "freq_hz": 1000000.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 1.4349598849971505,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 3,
+    "B.Cu": 3
+   },
+   "branches": 39004,
+   "iterations": 27,
+   "wall_cells": 28,
+   "fem_R_mohm": 1.4433,
+   "R_vs_fem_pct": -0.5779,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 27"
+  },
+  {
+   "case": "big",
+   "freq_hz": 0.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 1.1802630005522314,
+   "edge_strands": false,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 38052,
+   "iterations": 1,
+   "wall_cells": 52,
+   "fem_R_mohm": 1.1714,
+   "R_vs_fem_pct": 0.7566,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 28"
+  },
+  {
+   "case": "big",
+   "freq_hz": 214358.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 1.2654739390363647,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 38052,
+   "iterations": 19,
+   "wall_cells": 52,
+   "fem_R_mohm": 1.2585,
+   "R_vs_fem_pct": 0.5541,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 29"
+  },
+  {
+   "case": "big",
+   "freq_hz": 1000000.0,
+   "pitch_mm": 0.05,
+   "R_mohm": 1.4302911688271935,
+   "edge_strands": true,
+   "face_coverage": false,
+   "filaments": {
+    "F.Cu": 3,
+    "B.Cu": 3
+   },
+   "branches": 152452,
+   "iterations": 34,
+   "wall_cells": 52,
+   "fem_R_mohm": 1.4433,
+   "R_vs_fem_pct": -0.9013,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_final.jsonl line 30"
+  }
+ ],
+ "uniform_final_range_pct": {
+  "0.1": [
+   -1.1393,
+   0.3424
+  ],
+  "0.05": [
+   -2.0261,
+   0.8257
+  ]
+ },
+ "relief_without_faces_0p1mm": [
+  {
+   "case": "relief",
+   "freq_hz": 0.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 1.411792697073159,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 9216,
+   "iterations": 1,
+   "wall_cells": 24,
+   "bl": "D",
+   "fem_R_mohm": 1.3922,
+   "R_vs_fem_pct": 1.4073,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_cases_filled.jsonl line 19"
+  },
+  {
+   "case": "relief",
+   "freq_hz": 214358.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 1.492669148785232,
+   "filaments": {
+    "F.Cu": 1,
+    "B.Cu": 1
+   },
+   "branches": 9216,
+   "iterations": 18,
+   "wall_cells": 24,
+   "bl": "D",
+   "fem_R_mohm": 1.4776,
+   "R_vs_fem_pct": 1.0198,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_cases_filled.jsonl line 20"
+  },
+  {
+   "case": "relief",
+   "freq_hz": 1000000.0,
+   "pitch_mm": 0.1,
+   "R_mohm": 1.6747045217592642,
+   "filaments": {
+    "F.Cu": 3,
+    "B.Cu": 3
+   },
+   "branches": 38712,
+   "iterations": 28,
+   "wall_cells": 24,
+   "bl": "D",
+   "fem_R_mohm": 1.6659,
+   "R_vs_fem_pct": 0.5285,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_cases_filled.jsonl line 21"
+  }
+ ],
+ "relief_0p2mm_without_corrections": {
+  "rows": [
+   {
+    "case": "relief",
+    "freq_hz": 0.0,
+    "pitch_mm": 0.2,
+    "R_mohm": 2.447384837973477,
+    "filaments": {
+     "F.Cu": 1,
+     "B.Cu": 1
+    },
+    "branches": 2240,
+    "iterations": 1,
+    "wall_cells": 8,
+    "fem_R_mohm": 1.3922,
+    "R_vs_fem_pct": 75.7926,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_cases.jsonl line 28"
+   },
+   {
+    "case": "relief",
+    "freq_hz": 214358.0,
+    "pitch_mm": 0.2,
+    "R_mohm": 2.533072001348919,
+    "filaments": {
+     "F.Cu": 1,
+     "B.Cu": 1
+    },
+    "branches": 2240,
+    "iterations": 16,
+    "wall_cells": 8,
+    "fem_R_mohm": 1.4776,
+    "R_vs_fem_pct": 71.4315,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_cases.jsonl line 29"
+   },
+   {
+    "case": "relief",
+    "freq_hz": 1000000.0,
+    "pitch_mm": 0.2,
+    "R_mohm": 2.688851838058717,
+    "filaments": {
+     "F.Cu": 3,
+     "B.Cu": 3
+    },
+    "branches": 9060,
+    "iterations": 25,
+    "wall_cells": 8,
+    "fem_R_mohm": 1.6659,
+    "R_vs_fem_pct": 61.4054,
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/uniform_cases.jsonl line 30"
+   }
+  ],
+  "range_pct": [
+   61.4054,
+   75.7926
+  ]
+ },
+ "cluster_current_sharing": {
+  "quantity": "|via current| / port current, vias 0..5 (0, 1, 4, 5 outer; 2, 3 inner)",
+  "fem": {
+   "1": {
+    "via_over_port_abs": [
+     0.1701,
+     0.1701,
+     0.1598,
+     0.1598,
+     0.17,
+     0.17
+    ],
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_and_hyb.jsonl line 10 (h_cu 200 um, h_barrel 50 um, order 2)"
+   },
+   "214358": {
+    "via_over_port_abs": [
+     0.175,
+     0.175,
+     0.1529,
+     0.1528,
+     0.1749,
+     0.1749
+    ],
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_and_hyb.jsonl line 11 (h_cu 200 um, h_barrel 50 um, order 2)"
+   },
+   "1000000": {
+    "via_over_port_abs": [
+     0.1996,
+     0.1997,
+     0.1064,
+     0.1064,
+     0.1995,
+     0.1996
+    ],
+    "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/fem_and_hyb.jsonl line 12 (h_cu 200 um, h_barrel 50 um, order 2)"
+   }
+  },
+  "uniform_0p1mm": {
+   "values": {
+    "0": [
+     0.1697,
+     0.1697,
+     0.1605,
+     0.1605,
+     0.1697,
+     0.1697
+    ],
+    "214358": [
+     0.1741,
+     0.1741,
+     0.1549,
+     0.1549,
+     0.1741,
+     0.1741
+    ],
+    "1000000": [
+     0.2025,
+     0.2025,
+     0.105,
+     0.105,
+     0.2029,
+     0.2029
+    ]
+   },
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L20664 (2026-11-14T03:06:28Z), uniform_case.problem('cluster', faces=True), metrics via_current_a_by_connection"
+  }
+ },
+ "decision": {
+  "adopted": true,
+  "what": "no via-specific default changed; the check validated the 0.14.0 defaults (edge strands + faces) for vias on the uniform grid, kept the barrel length D (D - T/2 not better overall) and recorded that thermal reliefs need 0.1 mm or less",
+  "by": "the user, 2026-11-14",
+  "user_words": [
+   {
+    "utc": "2026-11-12T22:28:05Z",
+    "text": "一様格子だと小さいVIAでの電流の動きをかなり近似することになって十分に再現しきれないから信用しきれないんだよね。メッシュ切りから調査してほしい",
+    "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt) L16292"
+   },
+   {
+    "utc": "2026-11-12T23:49:16Z",
+    "text": "ほとんどの商用ソフトはそこら辺近似してるから3dFEMで基準解を作るしかないと思う。",
+    "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt) L16609"
+   },
+   {
+    "utc": "2026-11-14T03:03:08Z",
+    "text": "ハイブリッド実装のときの3DFEM解析結果を利用して評価してほしい。",
+    "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt) L20617"
+   }
+  ],
+  "commits": "3fcbf95, ae95a6b (docs); exp/uniform-edge-via-accuracy ca0770e"
+ },
+ "not_measured": [
+  "Vias above 1 MHz (the 3D FEM did not converge there).",
+  "The FEM's own mesh convergence at 1 MHz: the two meshes differ by 1.3 to 2.3 % (pair_edge 0.96490 vs 0.94300, relief 1.68813 vs 1.66594), which the reference inherits.",
+  "The sharing at 0.05 mm."
+ ],
+ "unsupported_figures": [],
+ "discrepancies": [
+  {
+   "cited": "'converged to 0.15 % at DC and 214 kHz' (docs/SHEET_PEEC.md 'Vias against a 3D FEM')",
+   "supported": "coarse vs fine FEM mesh (fem_cases.jsonl): DC within 0.11 %, 214 kHz within 0.19 % (pair_edge 0.73297 vs 0.73161; cluster 0.13 %, others under 0.07 %); the pair case has no second mesh in the files found",
+   "note": "checked against fem_cases.jsonl; 0.15 % is slightly low for pair_edge at 214 kHz"
+  }
+ ]
+}

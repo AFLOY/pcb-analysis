@@ -1,0 +1,801 @@
+{
+ "benchmark": "uniform sheet grid with and without edge strands against a 2D eddy-current FEM of a go/return strip pair (0.14.0 edge_strands='auto' default)",
+ "measured_utc": "2026-11-11 (FEM and no-strand runs), 2026-11-11T22:57Z..2026-11-12 (strand runs, job finished before the file's mtime 2026-11-12 00:49 local), 2026-11-14 (45 degree runs, local)",
+ "record_written_utc": "2026-11-20, transcribed and computed from the raw outputs below; nothing re-run",
+ "environment": {
+  "fem": {
+   "host": "Flow2 (Nagoya U.) t1-share node, PBS job",
+   "cpu": "AMD EPYC 9965 192-Core Processor (lscpu line of the job logs that printed it)",
+   "node_memory": "754 GB total (free -g in the job logs that printed it)",
+   "python_numpy_scipy": "not recorded (Flow2 venv ~/powerOpt/env)",
+   "device": "CPU",
+   "solver": "NGSolve 2D A_z eddy current, order 4, copper mesh h 6 and 4 um (~/powerOpt/fem-env, versions not recorded)",
+   "job": "work/skin_ref/fem2d.sh (PBS numa=1, NGS_THREADS=48)"
+  },
+  "peec_flow2": {
+   "host": "Flow2 (Nagoya U.) t1-share node, PBS job",
+   "cpu": "AMD EPYC 9965 192-Core Processor (lscpu line of the job logs that printed it)",
+   "node_memory": "754 GB total (free -g in the job logs that printed it)",
+   "python_numpy_scipy": "not recorded (Flow2 venv ~/powerOpt/env)",
+   "device": "CPU",
+   "no_strands": "work/skin_ref/flow2_skin_mumps.sh: PBS numa=1, --threads 8, near_factorization mumps_quasi_definite, pcb-analysis ~/powerOpt/pca-mumps (exp/sheet-mumps-near line, commit not printed); 4.8 mm 30 MHz row from work/skin_ref/peec.sh (exp/sheet-cuda-cudss, SuperLU, --threads 48)",
+   "strands": "work/skin_ref/flow2_skin_strands.sh: PBS numa=1, --threads 8, mumps_quasi_definite, --edge-strands, pcb-analysis exp/sheet-edge-strands (the 2026-11-12 implementation, before StrandCorrection compaction and a2899c9; commit not printed)",
+   "mumps": "5.9.1, linked"
+  },
+  "peec_local_45deg": {
+   "host": "local workstation, AMD Ryzen 7 9700X 8-Core (lscpu at 2026-11-20)",
+   "python": "/home/hyamada/pcb-analysis/.venv (Python 3.12.14, NumPy 2.3.5, SciPy 1.17.1 at 2026-11-20; versions at measurement not recorded)",
+   "pcb_analysis": "worktree ~/pcb-analysis-uniacc, exp/uniform-edge-via-accuracy at or after 2fedfe7 (exact working-tree state not recorded); OMP_NUM_THREADS=1, MKL_THREADING_LAYER=SEQUENTIAL",
+   "faces": "peec_strip_pair45.py builds copper_faces_by_layer with shapely (not rasterize_board)",
+   "mumps": "not recorded"
+  },
+  "cudss": "not applicable (CPU)"
+ },
+ "settings": {
+  "fixture": "go/return strip pair, 71.12 um copper, centres 1.48336 mm apart (LM5145EVM-2L), widths 1.2 and 4.8 mm; R and L per mm from two lengths",
+  "pitches_mm": [
+   0.4,
+   0.2,
+   0.1
+  ],
+  "frequencies_hz": [
+   1000000.0,
+   30000000.0,
+   150000000.0
+  ],
+  "maximum_filaments": 64,
+  "edge_strands": "edge_strand_first_um = half a skin depth, growth 2, radius 2 cells",
+  "fem_reference": "the h_cu = 4 um FEM row (the 6 um row differs in the sixth digit)",
+  "preconditioner": "near"
+ },
+ "fem_reference": {
+  "1.2mm_1e+06Hz": {
+   "R_mohm_per_mm": 0.5065350156455147,
+   "L_nh_per_mm": 0.6553794096643099,
+   "Rdc_mohm_per_mm": 0.40401199850018754,
+   "h_cu_um": 4.0,
+   "order": 4,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/fem2d_flow2_results.txt line 24"
+  },
+  "1.2mm_3e+07Hz": {
+   "R_mohm_per_mm": 1.8020815574241325,
+   "L_nh_per_mm": 0.6301559998571746,
+   "Rdc_mohm_per_mm": 0.40401199850018754,
+   "h_cu_um": 4.0,
+   "order": 4,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/fem2d_flow2_results.txt line 25"
+  },
+  "1.2mm_1.5e+08Hz": {
+   "R_mohm_per_mm": 3.9948260464686696,
+   "L_nh_per_mm": 0.6249545998161935,
+   "Rdc_mohm_per_mm": 0.40401199850018754,
+   "h_cu_um": 4.0,
+   "order": 4,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/fem2d_flow2_results.txt line 26"
+  },
+  "4.8mm_1e+06Hz": {
+   "R_mohm_per_mm": 0.12750016764179517,
+   "L_nh_per_mm": 0.2677646368196611,
+   "Rdc_mohm_per_mm": 0.10100299962504689,
+   "h_cu_um": 4.0,
+   "order": 4,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/fem2d_flow2_results.txt line 18"
+  },
+  "4.8mm_3e+07Hz": {
+   "R_mohm_per_mm": 0.5014817992031898,
+   "L_nh_per_mm": 0.26092120270313307,
+   "Rdc_mohm_per_mm": 0.10100299962504689,
+   "h_cu_um": 4.0,
+   "order": 4,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/fem2d_flow2_results.txt line 19"
+  },
+  "4.8mm_1.5e+08Hz": {
+   "R_mohm_per_mm": 1.118824742838778,
+   "L_nh_per_mm": 0.2594535482923072,
+   "Rdc_mohm_per_mm": 0.10100299962504689,
+   "h_cu_um": 4.0,
+   "order": 4,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/fem2d_flow2_results.txt line 20"
+  }
+ },
+ "zero_degree_without_strands": [
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.4,
+   "filaments": 1,
+   "freq_hz": 1000000.0,
+   "R_mohm_per_mm": 0.44040056575230474,
+   "L_nh_per_mm": 0.6677797158185045,
+   "seconds": 0.7403590679168701,
+   "edge_strands": false,
+   "R_vs_fem_pct": -13.0562,
+   "L_vs_fem_pct": 1.8921,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 1"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.4,
+   "filaments": 1,
+   "freq_hz": 30000000.0,
+   "R_mohm_per_mm": 0.4494683877636814,
+   "L_nh_per_mm": 0.664890682976849,
+   "seconds": 0.03844809532165527,
+   "edge_strands": false,
+   "R_vs_fem_pct": -75.0584,
+   "L_vs_fem_pct": 5.5121,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 2"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.4,
+   "filaments": 1,
+   "freq_hz": 150000000.0,
+   "R_mohm_per_mm": 0.44948048624648945,
+   "L_nh_per_mm": 0.6648868281359631,
+   "seconds": 0.03897595405578613,
+   "edge_strands": false,
+   "R_vs_fem_pct": -88.7484,
+   "L_vs_fem_pct": 6.3896,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 3"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.4,
+   "filaments": 64,
+   "freq_hz": 1000000.0,
+   "R_mohm_per_mm": 0.4442361793560535,
+   "L_nh_per_mm": 0.6677171427478304,
+   "seconds": 0.10949468612670898,
+   "edge_strands": false,
+   "R_vs_fem_pct": -12.299,
+   "L_vs_fem_pct": 1.8825,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 4"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.4,
+   "filaments": 64,
+   "freq_hz": 30000000.0,
+   "R_mohm_per_mm": 1.247525625811053,
+   "L_nh_per_mm": 0.6579544449154664,
+   "seconds": 0.46912503242492676,
+   "edge_strands": false,
+   "R_vs_fem_pct": -30.7731,
+   "L_vs_fem_pct": 4.4114,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 5"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.4,
+   "filaments": 64,
+   "freq_hz": 150000000.0,
+   "error": "partial inductance lost its precision to cancellation: only 2.9e-12 of the summed magnitude survives. The closed form is for cells near each other; use mutual_partial_inductance, which switches to the",
+   "edge_strands": false,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 6"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.2,
+   "filaments": 1,
+   "freq_hz": 1000000.0,
+   "R_mohm_per_mm": 0.4725927950370034,
+   "L_nh_per_mm": 0.6583027474681177,
+   "seconds": 0.1240544319152832,
+   "edge_strands": false,
+   "R_vs_fem_pct": -6.7009,
+   "L_vs_fem_pct": 0.4461,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 7"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.2,
+   "filaments": 1,
+   "freq_hz": 30000000.0,
+   "R_mohm_per_mm": 0.5032705598540632,
+   "L_nh_per_mm": 0.6517128039839953,
+   "seconds": 0.4445772171020508,
+   "edge_strands": false,
+   "R_vs_fem_pct": -72.0728,
+   "L_vs_fem_pct": 3.4209,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 8"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.2,
+   "filaments": 1,
+   "freq_hz": 150000000.0,
+   "R_mohm_per_mm": 0.5033323760379679,
+   "L_nh_per_mm": 0.651701133690155,
+   "seconds": 0.8913934230804443,
+   "edge_strands": false,
+   "R_vs_fem_pct": -87.4004,
+   "L_vs_fem_pct": 4.2798,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 9"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.2,
+   "filaments": 64,
+   "freq_hz": 1000000.0,
+   "R_mohm_per_mm": 0.4763731675023173,
+   "L_nh_per_mm": 0.6582409724239764,
+   "seconds": 0.47524166107177734,
+   "edge_strands": false,
+   "R_vs_fem_pct": -5.9545,
+   "L_vs_fem_pct": 0.4366,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 10"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.2,
+   "filaments": 64,
+   "freq_hz": 30000000.0,
+   "R_mohm_per_mm": 1.3155528075328613,
+   "L_nh_per_mm": 0.6447756510627671,
+   "seconds": 5.109522104263306,
+   "edge_strands": false,
+   "R_vs_fem_pct": -26.9982,
+   "L_vs_fem_pct": 2.32,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 11"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.2,
+   "filaments": 64,
+   "freq_hz": 150000000.0,
+   "R_mohm_per_mm": 2.797021631755935,
+   "L_nh_per_mm": 0.6410841287628085,
+   "seconds": 10.59082555770874,
+   "edge_strands": false,
+   "R_vs_fem_pct": -29.9839,
+   "L_vs_fem_pct": 2.5809,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 12"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "filaments": 1,
+   "freq_hz": 1000000.0,
+   "R_mohm_per_mm": 0.4920673925285466,
+   "L_nh_per_mm": 0.6554093660258934,
+   "seconds": 0.4163079261779785,
+   "edge_strands": false,
+   "R_vs_fem_pct": -2.8562,
+   "L_vs_fem_pct": 0.0046,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 13"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "filaments": 1,
+   "freq_hz": 30000000.0,
+   "R_mohm_per_mm": 0.5910252940956638,
+   "L_nh_per_mm": 0.6436364504226021,
+   "seconds": 2.570664882659912,
+   "edge_strands": false,
+   "R_vs_fem_pct": -67.2032,
+   "L_vs_fem_pct": 2.1392,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 14"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "filaments": 1,
+   "freq_hz": 150000000.0,
+   "R_mohm_per_mm": 0.5916371468804192,
+   "L_nh_per_mm": 0.6435911423154284,
+   "seconds": 20.428635120391846,
+   "edge_strands": false,
+   "R_vs_fem_pct": -85.1899,
+   "L_vs_fem_pct": 2.9821,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 15"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "filaments": 64,
+   "freq_hz": 1000000.0,
+   "R_mohm_per_mm": 0.49580954703128727,
+   "L_nh_per_mm": 0.6553362201970955,
+   "seconds": 2.2165474891662598,
+   "edge_strands": false,
+   "R_vs_fem_pct": -2.1174,
+   "L_vs_fem_pct": -0.0066,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 16"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "filaments": 64,
+   "freq_hz": 30000000.0,
+   "R_mohm_per_mm": 1.4063956926081498,
+   "L_nh_per_mm": 0.6367957014739833,
+   "seconds": 28.776545524597168,
+   "edge_strands": false,
+   "R_vs_fem_pct": -21.9572,
+   "L_vs_fem_pct": 1.0537,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 17"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "filaments": 64,
+   "freq_hz": 150000000.0,
+   "R_mohm_per_mm": 2.9252455690104298,
+   "L_nh_per_mm": 0.6329961860623982,
+   "seconds": 151.91296768188477,
+   "edge_strands": false,
+   "R_vs_fem_pct": -26.7741,
+   "L_vs_fem_pct": 1.2867,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 18"
+  },
+  {
+   "width_mm": 4.8,
+   "pitch_mm": 0.1,
+   "filaments": 64,
+   "freq_hz": 150000000.0,
+   "R_mohm_per_mm": 0.9559570528203356,
+   "L_nh_per_mm": 0.259730307948821,
+   "seconds": 2557.225499391556,
+   "edge_strands": false,
+   "R_vs_fem_pct": -14.557,
+   "L_vs_fem_pct": 0.1067,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_mumps_flow2_2026-11-11.jsonl line 19"
+  },
+  {
+   "width_mm": 4.8,
+   "pitch_mm": 0.1,
+   "filaments": 64,
+   "freq_hz": 30000000.0,
+   "edge_strands": false,
+   "R_mohm_per_mm": 0.4410936140846835,
+   "L_nh_per_mm": 0.26099175533864477,
+   "seconds": 7066.588809728622,
+   "R_vs_fem_pct": -12.0419,
+   "L_vs_fem_pct": 0.027,
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L8961 (2026-11-11T08:25:17Z), Flow2 peec_strip_pair.py job (work/skin_ref/peec.sh: exp/sheet-cuda-cudss, SuperLU, 48 threads)"
+  }
+ ],
+ "zero_degree_with_strands": [
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.4,
+   "filaments": 64,
+   "freq_hz": 1000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 0.5051903057994932,
+   "L_nh_per_mm": 0.6550113088783722,
+   "seconds": 2.607886791229248,
+   "R_vs_fem_pct": -0.2655,
+   "L_vs_fem_pct": -0.0562,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 1"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.4,
+   "filaments": 64,
+   "freq_hz": 30000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 1.8099355301130151,
+   "L_nh_per_mm": 0.6295505614090231,
+   "seconds": 17.66289234161377,
+   "R_vs_fem_pct": 0.4358,
+   "L_vs_fem_pct": -0.0961,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 2"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.4,
+   "filaments": 64,
+   "freq_hz": 150000000.0,
+   "error": "partial inductance lost its precision to cancellation: only 2.9e-12 of the summed magnitude survives. The closed form is for cells near each other; use mutual_partial_inductance, which switches to the",
+   "edge_strands": false,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 3"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.2,
+   "filaments": 64,
+   "freq_hz": 1000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 0.5012737565464902,
+   "L_nh_per_mm": 0.6560747186232891,
+   "seconds": 2.013974905014038,
+   "R_vs_fem_pct": -1.0387,
+   "L_vs_fem_pct": 0.1061,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 4"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.2,
+   "filaments": 64,
+   "freq_hz": 30000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 1.7571522512227502,
+   "L_nh_per_mm": 0.6322292643663617,
+   "seconds": 24.185210704803467,
+   "R_vs_fem_pct": -2.4932,
+   "L_vs_fem_pct": 0.329,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 5"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.2,
+   "filaments": 64,
+   "freq_hz": 150000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 3.8859011469887355,
+   "L_nh_per_mm": 0.6270067253228028,
+   "seconds": 48.01068472862244,
+   "R_vs_fem_pct": -2.7266,
+   "L_vs_fem_pct": 0.3284,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 6"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "filaments": 64,
+   "freq_hz": 1000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 0.5036653728179195,
+   "L_nh_per_mm": 0.6551393906162484,
+   "seconds": 4.287230491638184,
+   "R_vs_fem_pct": -0.5665,
+   "L_vs_fem_pct": -0.0366,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 7"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "filaments": 64,
+   "freq_hz": 30000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 1.7820971231329261,
+   "L_nh_per_mm": 0.63035435847475,
+   "seconds": 63.02065682411194,
+   "R_vs_fem_pct": -1.109,
+   "L_vs_fem_pct": 0.0315,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 8"
+  },
+  {
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "filaments": 64,
+   "freq_hz": 150000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 3.939226991805213,
+   "L_nh_per_mm": 0.6250764005339486,
+   "seconds": 327.32031202316284,
+   "R_vs_fem_pct": -1.3918,
+   "L_vs_fem_pct": 0.0195,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 9"
+  },
+  {
+   "width_mm": 4.8,
+   "pitch_mm": 0.4,
+   "filaments": 64,
+   "freq_hz": 1000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 0.12518190889429676,
+   "L_nh_per_mm": 0.26741415259509577,
+   "seconds": 2.1397554874420166,
+   "R_vs_fem_pct": -1.8182,
+   "L_vs_fem_pct": -0.1309,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 10"
+  },
+  {
+   "width_mm": 4.8,
+   "pitch_mm": 0.4,
+   "filaments": 64,
+   "freq_hz": 30000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 0.49304899545755876,
+   "L_nh_per_mm": 0.26084052969237226,
+   "seconds": 23.792890548706055,
+   "R_vs_fem_pct": -1.6816,
+   "L_vs_fem_pct": -0.0309,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 11"
+  },
+  {
+   "width_mm": 4.8,
+   "pitch_mm": 0.4,
+   "filaments": 64,
+   "freq_hz": 150000000.0,
+   "error": "partial inductance lost its precision to cancellation: only 2.9e-12 of the summed magnitude survives. The closed form is for cells near each other; use mutual_partial_inductance, which switches to the",
+   "edge_strands": false,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 12"
+  },
+  {
+   "width_mm": 4.8,
+   "pitch_mm": 0.2,
+   "filaments": 64,
+   "freq_hz": 1000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 0.1261721823989245,
+   "L_nh_per_mm": 0.266914712802266,
+   "seconds": 5.388383865356445,
+   "R_vs_fem_pct": -1.0416,
+   "L_vs_fem_pct": -0.3174,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 13"
+  },
+  {
+   "width_mm": 4.8,
+   "pitch_mm": 0.2,
+   "filaments": 64,
+   "freq_hz": 30000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 0.49682551093623983,
+   "L_nh_per_mm": 0.2602398708042297,
+   "seconds": 100.05290389060974,
+   "R_vs_fem_pct": -0.9285,
+   "L_vs_fem_pct": -0.2611,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 14"
+  },
+  {
+   "width_mm": 4.8,
+   "pitch_mm": 0.2,
+   "filaments": 64,
+   "freq_hz": 150000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 1.1087996305577494,
+   "L_nh_per_mm": 0.25875253443014823,
+   "seconds": 547.6576290130615,
+   "R_vs_fem_pct": -0.896,
+   "L_vs_fem_pct": -0.2702,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 15"
+  },
+  {
+   "width_mm": 4.8,
+   "pitch_mm": 0.1,
+   "filaments": 64,
+   "freq_hz": 1000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 0.126474546312758,
+   "L_nh_per_mm": 0.266809479337551,
+   "seconds": 21.688363552093506,
+   "R_vs_fem_pct": -0.8044,
+   "L_vs_fem_pct": -0.3567,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 16"
+  },
+  {
+   "width_mm": 4.8,
+   "pitch_mm": 0.1,
+   "filaments": 64,
+   "freq_hz": 30000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 0.49946147272554714,
+   "L_nh_per_mm": 0.2600196747365709,
+   "seconds": 527.3366796970367,
+   "R_vs_fem_pct": -0.4029,
+   "L_vs_fem_pct": -0.3455,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 17"
+  },
+  {
+   "width_mm": 4.8,
+   "pitch_mm": 0.1,
+   "filaments": 64,
+   "freq_hz": 150000000.0,
+   "edge_strands": true,
+   "R_mohm_per_mm": 1.1141073006250255,
+   "L_nh_per_mm": 0.2585271128529915,
+   "seconds": 3083.7605443000793,
+   "R_vs_fem_pct": -0.4216,
+   "L_vs_fem_pct": -0.3571,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/peec_strands_flow2_2026-11-12.jsonl line 18"
+  }
+ ],
+ "zero_degree_with_strands_range_pct": {
+  "R": [
+   -2.7266,
+   0.4358
+  ],
+  "L": [
+   -0.3571,
+   0.329
+  ]
+ },
+ "rerun_on_final_code_without_strands": {
+  "rows": [
+   {
+    "width_mm": 1.2,
+    "pitch_mm": 0.2,
+    "freq_hz": 1000000.0,
+    "R_vs_fem_pct": -5.96,
+    "L_vs_fem_pct": 0.44
+   },
+   {
+    "width_mm": 1.2,
+    "pitch_mm": 0.2,
+    "freq_hz": 30000000.0,
+    "R_vs_fem_pct": -27.0,
+    "L_vs_fem_pct": 2.32
+   },
+   {
+    "width_mm": 1.2,
+    "pitch_mm": 0.2,
+    "freq_hz": 150000000.0,
+    "R_vs_fem_pct": -29.98,
+    "L_vs_fem_pct": 2.58
+   },
+   {
+    "width_mm": 1.2,
+    "pitch_mm": 0.1,
+    "freq_hz": 1000000.0,
+    "R_vs_fem_pct": -2.12,
+    "L_vs_fem_pct": -0.01
+   },
+   {
+    "width_mm": 1.2,
+    "pitch_mm": 0.1,
+    "freq_hz": 30000000.0,
+    "R_vs_fem_pct": -21.96,
+    "L_vs_fem_pct": 1.05
+   },
+   {
+    "width_mm": 1.2,
+    "pitch_mm": 0.1,
+    "freq_hz": 150000000.0,
+    "R_vs_fem_pct": -26.77,
+    "L_vs_fem_pct": 1.29
+   }
+  ],
+  "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L19890 (2026-11-14T01:22:06Z), Flow2 job 116861 (work/via_ref/uni_strips.sh, pcb-analysis 2fedfe7, mumps_quasi_definite, 8 threads)",
+  "note": "the job's 4.8 mm rows and its with-strands rows were not captured in any transcript or local file"
+ },
+ "forty_five_degrees": [
+  {
+   "angle_deg": 45,
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "faces": false,
+   "edge_strands": false,
+   "freq_hz": 1000000.0,
+   "R_vs_fem_pct": 5.07,
+   "L_vs_fem_pct": 2.68,
+   "R_mohm_per_mm": 0.5322,
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L19821 (2026-11-14T01:15Z), work/skin_ref/peec_strip_pair45.py (printed rounded)"
+  },
+  {
+   "angle_deg": 45,
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "faces": false,
+   "edge_strands": false,
+   "freq_hz": 30000000.0,
+   "R_vs_fem_pct": -13.0,
+   "L_vs_fem_pct": 3.12,
+   "R_mohm_per_mm": 1.5678,
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L19821"
+  },
+  {
+   "angle_deg": 45,
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "faces": false,
+   "edge_strands": true,
+   "freq_hz": 1000000.0,
+   "R_vs_fem_pct": 5.81,
+   "L_vs_fem_pct": 2.68,
+   "R_mohm_per_mm": 0.53597,
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L19821"
+  },
+  {
+   "angle_deg": 45,
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "faces": true,
+   "edge_strands": false,
+   "freq_hz": 1000000.0,
+   "R_vs_fem_pct": -0.02,
+   "L_vs_fem_pct": -0.4,
+   "R_mohm_per_mm": 0.50642,
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L19876"
+  },
+  {
+   "angle_deg": 45,
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "faces": false,
+   "edge_strands": true,
+   "freq_hz": 30000000.0,
+   "R_vs_fem_pct": 2.66,
+   "L_vs_fem_pct": 2.48,
+   "R_mohm_per_mm": 1.85005,
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L19821"
+  },
+  {
+   "angle_deg": 45,
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "faces": true,
+   "edge_strands": true,
+   "freq_hz": 1000000.0,
+   "R_vs_fem_pct": -0.02,
+   "L_vs_fem_pct": -0.4,
+   "R_mohm_per_mm": 0.50642,
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L19876 (2026-11-14T01:19Z)"
+  },
+  {
+   "angle_deg": 45,
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "faces": true,
+   "edge_strands": false,
+   "freq_hz": 30000000.0,
+   "R_vs_fem_pct": -12.03,
+   "L_vs_fem_pct": -0.27,
+   "R_mohm_per_mm": 1.58529,
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L19876"
+  },
+  {
+   "angle_deg": 45,
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "faces": true,
+   "edge_strands": true,
+   "freq_hz": 30000000.0,
+   "R_vs_fem_pct": -2.14,
+   "L_vs_fem_pct": -0.47,
+   "R_mohm_per_mm": 1.76355,
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L19876"
+  },
+  {
+   "angle_deg": 45,
+   "width_mm": 1.2,
+   "pitch_mm": 0.1,
+   "faces": true,
+   "edge_strands": true,
+   "freq_hz": 150000000.0,
+   "R_mohm_per_mm": 3.804791659265334,
+   "L_nh_per_mm": 0.6221777759678123,
+   "seconds": 505.6,
+   "R_vs_fem_pct": -4.757,
+   "L_vs_fem_pct": -0.4443,
+   "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/s45_150.jsonl line 1 (2026-11-14, local, peec_strip_pair45.py --faces --edge-strands)"
+  }
+ ],
+ "cost": {
+  "pair_4p8mm_0p1mm_150MHz_seconds": {
+   "with_strands": 3083.7605443000793,
+   "without": 2557.225499391556
+  },
+  "threads": 8,
+  "source": "last lines of the two Flow2 JSONL files above"
+ },
+ "decision": {
+  "adopted": true,
+  "what": "0.14.0: edge_strands defaults to 'auto' (cut on CPU and CUDA with the uniform operator and the near preconditioner, above zero frequency); auto preconditioner takes near for a stranded mesh",
+  "by": "the user, 2026-11-14",
+  "user_words": [
+   {
+    "utc": "2026-11-14T01:04:35Z",
+    "text": "現在の状態でブランチを保持して，MAINから新規作成exp/ブランチで均一格子の縁，ビア周辺の精度をFEM解析結果と比較して検証修正しよう。ハイブリッド方式は現実的じゃなかったね。",
+    "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt) L19535"
+   },
+   {
+    "utc": "2026-11-14T01:23:45Z",
+    "text": "その順番で進めて",
+    "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt) L19911, reply to the proposal at L19908: '1. Turn edge strands and face coverage on by default in pcb-analysis ... 3. Run the board's 03 real-fill path with them on'"
+   },
+   {
+    "utc": "2026-11-14T18:32:30Z",
+    "text": "mainに早送りしてリリース公開して",
+    "source": "transcript f7d3f69d-98db-4e5f-8203-7364f4e44d8f (Kicad_PowerOpt) L984 (release 0.14.0)"
+   }
+  ],
+  "commits": "185a245 (edge strands by default), d812387 (faces by default), 3fcbf95/ae95a6b (docs), 680b013 (CUDA strands and faces), c3ee178 (release 0.14.0); tag work/release-0.14.0"
+ },
+ "not_measured": [
+  "With-strands strip pairs on the code that was released (the 2026-11-12 runs used exp/sheet-edge-strands; job 116861's with-strands rows were not kept).",
+  "0.4 mm at 150 MHz: refused by the closed-form partial inductance ('lost its precision to cancellation').",
+  "45 degrees at 150 MHz without strands or without faces."
+ ],
+ "unsupported_figures": [],
+ "discrepancies": [
+  {
+   "cited": "'12-27 % low without' (CHANGELOG 0.14.0) / '12 to 22 % low at 30 MHz and 15 to 27 % at 150 MHz' (docs/SHEET_PEEC.md)",
+   "supported": "0.1 mm, 64 filaments: 1.2 mm -21.96 % (30 MHz), -26.77 % (150 MHz); 4.8 mm -12.04 % (30 MHz), -14.56 % (150 MHz). At 0.2/0.4 mm the error is larger (to -30.8 %).",
+   "note": "the cited ranges hold for 0.1 mm only"
+  }
+ ]
+}

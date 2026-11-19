@@ -1,0 +1,293 @@
+{
+ "benchmark": "face coverage (rasterize_board(faces=...), copper_faces_by_layer) on a 45 degree strip pair against the FEM / exact resistance (0.14.0 faces='auto' default)",
+ "measured_utc": "2026-11-11T19:31Z-20:07Z (DC and 30 MHz, local), 2026-11-14T01:15Z-01:32Z (1 MHz-150 MHz, local), 2026-11-14 GB200 jobs 116967/117043 (CPU against CUDA)",
+ "record_written_utc": "2026-11-20, transcribed from the raw outputs below; nothing re-run",
+ "environment": {
+  "local": {
+   "host": "local workstation, AMD Ryzen 7 9700X 8-Core (lscpu at 2026-11-20)",
+   "python": "/home/hyamada/pcb-analysis/.venv (Python 3.12.14, NumPy 2.3.5, SciPy 1.17.1 at 2026-11-20; versions at measurement not recorded)",
+   "pcb_analysis_2026_11_11": "working tree ~/pcb-analysis-cuda with the face-coverage prototype being patched in (exp/sheet-face-coverage under development; later committed as 9ddd994/6cee6b5 per the session); OMP_NUM_THREADS=1",
+   "pcb_analysis_2026_11_14": "worktree ~/pcb-analysis-uniacc (exp/uniform-edge-via-accuracy at or after 2fedfe7)",
+   "mumps": "not recorded",
+   "device": "CPU"
+  },
+  "gb200": {
+   "host": "Flow2 t2-share, NVIDIA GB200 189471 MiB, driver 610.57.04, aarch64",
+   "cupy": "14.2.0",
+   "nvmath": "1.0.0",
+   "numpy": "2.5.4",
+   "scipy": "1.18.1",
+   "cuda_runtime": "13020",
+   "pcb_analysis": "e28933e (job 116967), 4108f2b (job 117043)",
+   "mumps": "not linked (cmake without -DPCB_NATIVE_MUMPS)"
+  }
+ },
+ "settings": {
+  "fixture": "1.2 mm go/return strip pair, 71.12 um copper, 1.48336 mm apart, laid at 45 degrees on the grid; R per mm from two lengths",
+  "reference": {
+   "Rdc_mohm_per_mm": 0.40401199850018754,
+   "R_30MHz_mohm_per_mm": 1.8020815574241325,
+   "L_30MHz_nh_per_mm": 0.6301559998571746,
+   "source": "/home/hyamada/Kicad_PowerOpt/work/skin_ref/fem2d_flow2_results.txt lines 24 and 25 (2D FEM, h_cu 4 um, order 4; Rdc = rho / (w t))"
+  },
+  "harnesses": {
+   "cell_centre": "work/skin_ref/peec_strip_diagonal.py: a cell is copper when its centre lies within the strip (1 kHz stands for DC)",
+   "dc_prototype": "face_coverage_dc.py (job scratch, not kept): every touched cell a node, conductance scaled by covered face length",
+   "step": "work/skin_ref/peec_strip_diagonal_step.py: OpenCASCADE solids at 45 degrees through rasterize_board(method='section', faces=...) and current_field_problem_mapping, as plane_opt does",
+   "pair45": "work/skin_ref/peec_strip_pair45.py: cells at least half covered (3 x 3 samples), faces from shapely"
+  }
+ },
+ "dc": {
+  "cell_centre_1khz": {
+   "rows": [
+    {
+     "pitch_mm": 0.2,
+     "R_mohm_per_mm": 0.43708971759772147,
+     "R_vs_fem_dc_pct": 8.1873
+    },
+    {
+     "pitch_mm": 0.1,
+     "R_mohm_per_mm": 0.4285198355041858,
+     "R_vs_fem_dc_pct": 6.0661
+    }
+   ],
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L11056 (2026-11-11T19:31:47Z)"
+  },
+  "dc_prototype": {
+   "rows": [
+    {
+     "pitch_mm": 0.2,
+     "mode": "cells",
+     "R_mohm_per_mm": 0.43708938271906184,
+     "R_vs_fem_dc_pct": 8.1872
+    },
+    {
+     "pitch_mm": 0.2,
+     "mode": "faces",
+     "R_mohm_per_mm": 0.4118438443549104,
+     "R_vs_fem_dc_pct": 1.9385
+    },
+    {
+     "pitch_mm": 0.1,
+     "mode": "cells",
+     "R_mohm_per_mm": 0.42851943572148776,
+     "R_vs_fem_dc_pct": 6.066
+    },
+    {
+     "pitch_mm": 0.1,
+     "mode": "faces",
+     "R_mohm_per_mm": 0.40401199849149816,
+     "R_vs_fem_dc_pct": -0.0
+    },
+    {
+     "pitch_mm": 0.05,
+     "mode": "cells",
+     "R_mohm_per_mm": 0.4285194357545381,
+     "R_vs_fem_dc_pct": 6.066
+    },
+    {
+     "pitch_mm": 0.05,
+     "mode": "faces",
+     "R_mohm_per_mm": 0.4040119985661403,
+     "R_vs_fem_dc_pct": 0.0
+    }
+   ],
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L11182 (2026-11-11T19:44:23Z)"
+  },
+  "step_raster": {
+   "rows": [
+    {
+     "pitch_mm": 0.2,
+     "faces": false,
+     "R_mohm_per_mm": 0.4242121522016644,
+     "R_vs_fem_dc_pct": 4.9999
+    },
+    {
+     "pitch_mm": 0.1,
+     "faces": false,
+     "R_mohm_per_mm": 0.4285414099583451,
+     "R_vs_fem_dc_pct": 6.0715
+    },
+    {
+     "pitch_mm": 0.2,
+     "faces": true,
+     "R_mohm_per_mm": 0.3992587186295657,
+     "R_vs_fem_dc_pct": -1.1765
+    },
+    {
+     "pitch_mm": 0.1,
+     "faces": true,
+     "R_mohm_per_mm": 0.40407577614671275,
+     "R_vs_fem_dc_pct": 0.0158
+    },
+    {
+     "pitch_mm": 0.05,
+     "faces": true,
+     "R_mohm_per_mm": 0.4040757730390069,
+     "R_vs_fem_dc_pct": 0.0158
+    },
+    {
+     "pitch_mm": 0.1,
+     "faces": true,
+     "lengths_mm": [
+      7.0710678,
+      14.1421356
+     ],
+     "R_mohm_per_mm": 0.4040551592529274,
+     "R_vs_fem_dc_pct": 0.0107
+    },
+    {
+     "pitch_mm": 0.05,
+     "faces": true,
+     "lengths_mm": [
+      7.0710678,
+      14.1421356
+     ],
+     "R_mohm_per_mm": 0.404055159229416,
+     "R_vs_fem_dc_pct": 0.0107
+    }
+   ],
+   "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool results L11348 (2026-11-11T19:55:39Z), L11441 (20:05:58Z), L11492 (20:07:25Z)"
+  }
+ },
+ "ac_30mhz_step_raster": {
+  "rows": [
+   {
+    "pitch_mm": 0.2,
+    "faces": true,
+    "edge_strands": false,
+    "R_mohm_per_mm": 1.4868953744624065,
+    "L_nh_per_mm": 0.6238036624598602,
+    "R_vs_fem_pct": -17.4901,
+    "L_vs_fem_pct": -1.0081,
+    "seconds": 14.6
+   },
+   {
+    "pitch_mm": 0.1,
+    "faces": true,
+    "edge_strands": false,
+    "R_mohm_per_mm": 1.5840422092860542,
+    "L_nh_per_mm": 0.6268855314745662,
+    "R_vs_fem_pct": -12.0993,
+    "L_vs_fem_pct": -0.519,
+    "seconds": 94.9
+   },
+   {
+    "pitch_mm": 0.2,
+    "faces": true,
+    "edge_strands": true,
+    "R_mohm_per_mm": 1.6826596001902956,
+    "L_nh_per_mm": 0.622113001963201,
+    "R_vs_fem_pct": -6.6269,
+    "L_vs_fem_pct": -1.2764,
+    "seconds": 21.7
+   },
+   {
+    "pitch_mm": 0.1,
+    "faces": true,
+    "edge_strands": true,
+    "R_mohm_per_mm": 1.7614498003259114,
+    "L_nh_per_mm": 0.6256111026535711,
+    "R_vs_fem_pct": -2.2547,
+    "L_vs_fem_pct": -0.7212,
+    "seconds": 120.9
+   },
+   {
+    "pitch_mm": 0.2,
+    "faces": false,
+    "edge_strands": true,
+    "R_mohm_per_mm": 1.7798657535002762,
+    "L_nh_per_mm": 0.6352202260379552,
+    "R_vs_fem_pct": -1.2328,
+    "L_vs_fem_pct": 0.8036,
+    "seconds": 18.3
+   },
+   {
+    "pitch_mm": 0.1,
+    "faces": false,
+    "edge_strands": true,
+    "R_mohm_per_mm": 1.8429647525424318,
+    "L_nh_per_mm": 0.647142054405435,
+    "R_vs_fem_pct": 2.2687,
+    "L_vs_fem_pct": 2.6955,
+    "seconds": 92.0
+   }
+  ],
+  "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L11361 (2026-11-11T19:55:46Z)"
+ },
+ "pair45_1mhz_to_150mhz": "see SHEET_EDGE_STRANDS_DEFAULT_RESULTS.json 'forty_five_degrees' (1 MHz without faces +5.07 % R, +2.68 % L; with faces -0.02 % R, -0.40 % L)",
+ "cpu_against_cuda_gb200": {
+  "fixture": "the 45 degree strip at 0.1 mm with face coverage, relative_tolerance 1e-9 (faces_compare.py); relative difference of the terminal impedance to the CPU's",
+  "job_117043_4108f2b": [
+   {
+    "freq_hz": 0.0,
+    "Z_mohm": "2.836488+0.000000j",
+    "cuda_superlu": 1.63e-12,
+    "cuda_cudss": 1.63e-12
+   },
+   {
+    "freq_hz": 1000000.0,
+    "Z_mohm": "3.651458+62.661414j",
+    "cuda_superlu": 8.28e-10,
+    "cuda_cudss": 2.48e-11,
+    "cudss_iterations": 200
+   },
+   {
+    "freq_hz": 30000000.0,
+    "Z_mohm": "12.526618+1844.621906j",
+    "cuda_superlu": 1.96e-11,
+    "cuda_cudss": 1.46e-11,
+    "cudss_iterations": 200
+   }
+  ],
+  "source": "transcript 93d4c06b-e874-4323-b1e5-cf55fcbd3d45 (Kicad_PowerOpt), tool results L578 (job 116967, 2026-11-14T05:27Z) and L769 (job 117043, 05:49Z)",
+  "note": "cuDSS ran to its 200-cycle cap at 1 MHz and 30 MHz (the restart floor fixed later by 30a237a, see SHEET_CUDA_CUDSS_DEFAULT_RESULTS.json)"
+ },
+ "real_fill": "see SHEET_EDGE_CORRECTIONS_REALFILL_COST_RESULTS.json",
+ "decision": {
+  "adopted": true,
+  "what": "0.14.0: rasterize_board(faces='auto') records the faces' copper coverage on a uniform grid when the geometry native extension is built; True refuses a graded grid",
+  "by": "the user, 2026-11-14",
+  "user_words": [
+   {
+    "utc": "2026-11-14T01:23:45Z",
+    "text": "その順番で進めて",
+    "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt) L19911, reply to the proposal (L19908) to turn edge strands and face coverage on by default"
+   },
+   {
+    "utc": "2026-11-14T03:50:25Z",
+    "text": "CUDAにも縁ストランドと面被覆率を実装して",
+    "source": "transcript 93d4c06b-e874-4323-b1e5-cf55fcbd3d45 (Kicad_PowerOpt) L372"
+   },
+   {
+    "utc": "2026-11-14T18:32:30Z",
+    "text": "mainに早送りしてリリース公開して",
+    "source": "transcript f7d3f69d-98db-4e5f-8203-7364f4e44d8f (Kicad_PowerOpt) L984"
+   }
+  ],
+  "commits": "d812387 (faces='auto'), 680b013 (CUDA), c3ee178 (release 0.14.0)"
+ },
+ "not_measured": [
+  "A DC 45 degree strip on the released code: the DC figures above are from the 2026-11-11 prototype tree.",
+  "The face-coverage test's own figure (tests/test_face_coverage.py, 'covered == approx(exact, rel=0.005)  # -0.3 %'): its output was not found in any transcript."
+ ],
+ "unsupported_figures": [
+  {
+   "figure": "DC error with faces '-0.3 %'",
+   "cited_in": "CHANGELOG.md 0.14.0 ('+6.1 % -> -0.3 %'), docs/SHEET_PEEC.md 'Staircase', tests/test_face_coverage.py comment, assistant summary L11735 ('-0.3 %, +0.01 % on the long strip')",
+   "raw_data": "the only DC runs with faces at 0.1 mm give +0.0158 % (0.40407578) and, with lengths of whole diagonal steps, +0.0107 % (0.40405516); the DC prototype -4e-7 %; at 0.2 mm -1.18 %. No -0.3 % value was found."
+  }
+ ],
+ "discrepancies": [
+  {
+   "cited": "'+8.2 % (0.2 mm) and +6.1 % (0.1 mm)' DC without faces (docs/SHEET_PEEC.md)",
+   "supported": "+8.19 % / +6.07 % with the cell-centre raster and the DC prototype; through rasterize_board (the production raster) +5.00 % (0.2 mm) and +6.07 % (0.1 mm)",
+   "note": "+8.2 % is not the production raster's figure"
+  },
+  {
+   "cited": "'+5.1 % -> -0.02 %' for the 45 degree strip (commit d812387, docs/SHEET_PEEC.md 'Rechecked')",
+   "supported": "+5.07 % -> -0.02 % R (L +2.68 % -> -0.40 %) at 1 MHz, not DC",
+   "note": "CHANGELOG pairs '+6.1 %' (DC) with '-0.3 %' (no raw source) and elsewhere calls +5 % a 1 MHz figure; the two series are different harnesses (rasterize_board vs peec_strip_pair45.py)"
+  }
+ ]
+}

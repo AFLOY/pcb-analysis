@@ -1,0 +1,866 @@
+{
+ "benchmark": "cost and result change of the 0.14.0 edge strands + face coverage defaults on Kicad_PowerOpt's full stage-03 real-fill evaluation of LM5145EVM-HD-20A-2L",
+ "measured_utc": "2026-11-14T01:52Z-02:51Z (Flow2 job 116884, edge03b)",
+ "record_written_utc": "2026-11-20, computed from the raw outputs below; nothing re-run",
+ "environment": {
+  "host": "Flow2 (Nagoya U.) t1-share node, PBS job",
+  "cpu": "AMD EPYC 9965 192-Core Processor (lscpu line of the job logs that printed it)",
+  "node_memory": "754 GB total (free -g in the job logs that printed it)",
+  "python_numpy_scipy": "not recorded (Flow2 venv ~/powerOpt/env)",
+  "device": "CPU",
+  "job": "PBS t1-share numa=4 (192 cores), walltime 10 h, job 116884 (edge03b.sh); the two variants ran one after the other in the same job; hostname/lscpu lines of this job were not captured (the other t1 jobs of these days print EPYC 9965)",
+  "threads": "--threads 192",
+  "pcb_analysis": {
+   "off": "2fedfe7 (feature/edge-strands-faces: edge corrections present, off by default)",
+   "on": "a2899c9 (exp/uniform-edge-via-accuracy: edge_strands 'auto', faces 'auto')"
+  },
+  "plane_opt": "feature/edge-face-coverage c74f11e (both variants), driven by realfill_profile_uni.py (stage and solve-call profiling), no baseline cache",
+  "mumps": "5.9.1 linked (core built with -DPCB_NATIVE_MUMPS=ON, MUMPS_ROOT ~/opt/mumps-gcc), near_factorization mumps_quasi_definite, near_factor_threads 1 (calls.json)",
+  "cudss": "not applicable (CPU)"
+ },
+ "settings": {
+  "fixture": "LM5145EVM-HD-20A-2L, evaluate-board through 03 (real KiCad fill), grid 0.1 mm, 214,358 Hz cases; hot-loop report at 150 MHz",
+  "preconditioner": "auto (near)",
+  "tolerance": "plane_opt defaults"
+ },
+ "elapsed": {
+  "off_s": 1497.25,
+  "on_s": 1935.19,
+  "change_pct": 29.2496,
+  "maxrss_kb": {
+   "off": 20844124,
+   "on": 20891816
+  },
+  "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt), tool result L20582 (2026-11-14T02:52:04Z), Flow2 ~/powerOpt/p1/run5/edge03b.log 'elapsed ... maxrss' lines"
+ },
+ "solve_calls": {
+  "off": {
+   "count": 9,
+   "seconds": 726.78,
+   "per_call": [
+    {
+     "where": "evaluation",
+     "roles": [
+      "PGND",
+      "SW",
+      "VIN",
+      "VOUT",
+      "VSUP"
+     ],
+     "count": 10,
+     "seconds": 528.36,
+     "edge_strands": [
+      "None"
+     ],
+     "face_coverage": [
+      "None"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "PGND"
+     ],
+     "count": 1,
+     "seconds": 44.57,
+     "edge_strands": [
+      "None"
+     ],
+     "face_coverage": [
+      "None"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "PGND"
+     ],
+     "count": 1,
+     "seconds": 39.91,
+     "edge_strands": [
+      "None"
+     ],
+     "face_coverage": [
+      "None"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "SW"
+     ],
+     "count": 1,
+     "seconds": 6.11,
+     "edge_strands": [
+      "None"
+     ],
+     "face_coverage": [
+      "None"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "SW"
+     ],
+     "count": 1,
+     "seconds": 5.38,
+     "edge_strands": [
+      "None"
+     ],
+     "face_coverage": [
+      "None"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "VOUT"
+     ],
+     "count": 1,
+     "seconds": 40.85,
+     "edge_strands": [
+      "None"
+     ],
+     "face_coverage": [
+      "None"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "VOUT"
+     ],
+     "count": 1,
+     "seconds": 36.34,
+     "edge_strands": [
+      "None"
+     ],
+     "face_coverage": [
+      "None"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "VSUP"
+     ],
+     "count": 1,
+     "seconds": 13.31,
+     "edge_strands": [
+      "None"
+     ],
+     "face_coverage": [
+      "None"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "VSUP"
+     ],
+     "count": 1,
+     "seconds": 11.95,
+     "edge_strands": [
+      "None"
+     ],
+     "face_coverage": [
+      "None"
+     ]
+    }
+   ]
+  },
+  "on": {
+   "count": 9,
+   "seconds": 788.95,
+   "per_call": [
+    {
+     "where": "evaluation",
+     "roles": [
+      "PGND",
+      "SW",
+      "VIN",
+      "VOUT",
+      "VSUP"
+     ],
+     "count": 10,
+     "seconds": 559.38,
+     "edge_strands": [
+      "True"
+     ],
+     "face_coverage": [
+      "False"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "PGND"
+     ],
+     "count": 1,
+     "seconds": 51.87,
+     "edge_strands": [
+      "True"
+     ],
+     "face_coverage": [
+      "True"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "PGND"
+     ],
+     "count": 1,
+     "seconds": 46.55,
+     "edge_strands": [
+      "True"
+     ],
+     "face_coverage": [
+      "True"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "SW"
+     ],
+     "count": 1,
+     "seconds": 8.43,
+     "edge_strands": [
+      "True"
+     ],
+     "face_coverage": [
+      "True"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "SW"
+     ],
+     "count": 1,
+     "seconds": 7.52,
+     "edge_strands": [
+      "True"
+     ],
+     "face_coverage": [
+      "True"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "VOUT"
+     ],
+     "count": 1,
+     "seconds": 45.0,
+     "edge_strands": [
+      "True"
+     ],
+     "face_coverage": [
+      "True"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "VOUT"
+     ],
+     "count": 1,
+     "seconds": 40.41,
+     "edge_strands": [
+      "True"
+     ],
+     "face_coverage": [
+      "True"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "VSUP"
+     ],
+     "count": 1,
+     "seconds": 15.32,
+     "edge_strands": [
+      "True"
+     ],
+     "face_coverage": [
+      "True"
+     ]
+    },
+    {
+     "where": "filled_evaluation",
+     "roles": [
+      "VSUP"
+     ],
+     "count": 1,
+     "seconds": 14.47,
+     "edge_strands": [
+      "True"
+     ],
+     "face_coverage": [
+      "True"
+     ]
+    }
+   ]
+  },
+  "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/run5/profile_off/calls.json, /home/hyamada/.claude/jobs/e7af5d69/tmp/run5/profile_on/calls.json (copied from Flow2 run5 at 2026-11-14T02:52Z)"
+ },
+ "real_fill_cases": [
+  {
+   "name": "pgnd_hs_on",
+   "role": "PGND",
+   "i2r_loss_w": [
+    0.12029176435981688,
+    0.12053419371308186
+   ],
+   "i2r_loss_w_change_pct": 0.2015,
+   "max_current_density_a_per_mm2": [
+    87.86620551651984,
+    75.28899706283505
+   ],
+   "max_current_density_a_per_mm2_change_pct": -14.314,
+   "bulk_p99_current_density_a_per_mm2": [
+    41.04993731734721,
+    38.35988477303937
+   ],
+   "bulk_p99_current_density_a_per_mm2_change_pct": -6.5531,
+   "voltage_span_v": [
+    0.27031938719883686,
+    0.27098159836208685
+   ],
+   "voltage_span_v_change_pct": 0.245
+  },
+  {
+   "name": "pgnd_hs_off",
+   "role": "PGND",
+   "i2r_loss_w": [
+    0.22570659140344823,
+    0.22548260858125055
+   ],
+   "i2r_loss_w_change_pct": -0.0992,
+   "max_current_density_a_per_mm2": [
+    244.14911954220702,
+    202.10340714492926
+   ],
+   "max_current_density_a_per_mm2_change_pct": -17.2213,
+   "bulk_p99_current_density_a_per_mm2": [
+    49.31768382861019,
+    47.37820659472076
+   ],
+   "bulk_p99_current_density_a_per_mm2_change_pct": -3.9326,
+   "voltage_span_v": [
+    0.3621391411721323,
+    0.36297265672019213
+   ],
+   "voltage_span_v_change_pct": 0.2302
+  },
+  {
+   "name": "sw_hs_on",
+   "role": "SW",
+   "i2r_loss_w": [
+    0.28361257980591237,
+    0.2817006707133985
+   ],
+   "i2r_loss_w_change_pct": -0.6741,
+   "max_current_density_a_per_mm2": [
+    256.1888930234031,
+    227.17384323754715
+   ],
+   "max_current_density_a_per_mm2_change_pct": -11.3256,
+   "bulk_p99_current_density_a_per_mm2": [
+    152.10078147573086,
+    143.48815424553655
+   ],
+   "bulk_p99_current_density_a_per_mm2_change_pct": -5.6624,
+   "voltage_span_v": [
+    0.15288197114137084,
+    0.1529332066273825
+   ],
+   "voltage_span_v_change_pct": 0.0335
+  },
+  {
+   "name": "sw_hs_off",
+   "role": "SW",
+   "i2r_loss_w": [
+    0.18511668837926082,
+    0.1845061997732778
+   ],
+   "i2r_loss_w_change_pct": -0.3298,
+   "max_current_density_a_per_mm2": [
+    207.0099529899876,
+    166.78386729128093
+   ],
+   "max_current_density_a_per_mm2_change_pct": -19.432,
+   "bulk_p99_current_density_a_per_mm2": [
+    109.11534858671817,
+    102.32362682740582
+   ],
+   "bulk_p99_current_density_a_per_mm2_change_pct": -6.2244,
+   "voltage_span_v": [
+    0.13428537547375524,
+    0.13465374509535827
+   ],
+   "voltage_span_v_change_pct": 0.2743
+  },
+  {
+   "name": "vout_hs_on",
+   "role": "VOUT",
+   "i2r_loss_w": [
+    0.3981978320296076,
+    0.398673499146667
+   ],
+   "i2r_loss_w_change_pct": 0.1195,
+   "max_current_density_a_per_mm2": [
+    125.69058515825029,
+    112.3635432777345
+   ],
+   "max_current_density_a_per_mm2_change_pct": -10.6031,
+   "bulk_p99_current_density_a_per_mm2": [
+    62.62472198308073,
+    58.47990289353595
+   ],
+   "bulk_p99_current_density_a_per_mm2_change_pct": -6.6185,
+   "voltage_span_v": [
+    0.645371418330841,
+    0.6493548048154243
+   ],
+   "voltage_span_v_change_pct": 0.6172
+  },
+  {
+   "name": "vout_hs_off",
+   "role": "VOUT",
+   "i2r_loss_w": [
+    0.40899761543583574,
+    0.4094952191812653
+   ],
+   "i2r_loss_w_change_pct": 0.1217,
+   "max_current_density_a_per_mm2": [
+    125.63504659481906,
+    112.30737805488944
+   ],
+   "max_current_density_a_per_mm2_change_pct": -10.6082,
+   "bulk_p99_current_density_a_per_mm2": [
+    65.20049442075732,
+    59.47689697870949
+   ],
+   "bulk_p99_current_density_a_per_mm2_change_pct": -8.7785,
+   "voltage_span_v": [
+    0.6548162256189929,
+    0.6588485353753033
+   ],
+   "voltage_span_v_change_pct": 0.6158
+  },
+  {
+   "name": "vsup_hs_on",
+   "role": "VSUP",
+   "i2r_loss_w": [
+    0.0019744965834665924,
+    0.001973413823416606
+   ],
+   "i2r_loss_w_change_pct": -0.0548,
+   "max_current_density_a_per_mm2": [
+    14.085469167343657,
+    13.637522728421622
+   ],
+   "max_current_density_a_per_mm2_change_pct": -3.1802,
+   "bulk_p99_current_density_a_per_mm2": [
+    8.064905185292611,
+    7.71264473435939
+   ],
+   "bulk_p99_current_density_a_per_mm2_change_pct": -4.3678,
+   "voltage_span_v": [
+    0.015511815957336852,
+    0.015621593313779073
+   ],
+   "voltage_span_v_change_pct": 0.7077
+  },
+  {
+   "name": "vsup_hs_off",
+   "role": "VSUP",
+   "i2r_loss_w": [
+    0.0019891433513891154,
+    0.0019879568287980895
+   ],
+   "i2r_loss_w_change_pct": -0.0596,
+   "max_current_density_a_per_mm2": [
+    14.019723686358574,
+    13.591204433460412
+   ],
+   "max_current_density_a_per_mm2_change_pct": -3.0565,
+   "bulk_p99_current_density_a_per_mm2": [
+    8.186646257461634,
+    7.807926862310789
+   ],
+   "bulk_p99_current_density_a_per_mm2_change_pct": -4.6261,
+   "voltage_span_v": [
+    0.015519881320685528,
+    0.015630162784193605
+   ],
+   "voltage_span_v_change_pct": 0.7106
+  }
+ ],
+ "real_fill_change_range_pct": {
+  "i2r_loss_w": [
+   -0.6741,
+   0.2015
+  ],
+  "max_current_density": [
+   -19.432,
+   -3.0565
+  ],
+  "bulk_p99_current_density": [
+   -8.7785,
+   -3.9326
+  ]
+ },
+ "real_fill_maximum_ratio": [
+  3.497457782088769,
+  3.299416063708256
+ ],
+ "all_case_physics_gate_passed": [
+  false,
+  false
+ ],
+ "hot_loop": {
+  "evaluation_frequency_hz": 150000000.0,
+  "resistance_mohm": [
+   3.7434491465149704,
+   6.275406196653346
+  ],
+  "inductance_nh": [
+   1.6716498289459762,
+   1.610981367484537
+  ]
+ },
+ "drc": {
+  "violations": [
+   146,
+   146
+  ],
+  "unconnected": [
+   0,
+   0
+  ]
+ },
+ "source": "/home/hyamada/.claude/jobs/e7af5d69/tmp/run5/out_off/evaluation.json and /home/hyamada/.claude/jobs/e7af5d69/tmp/run5/out_on/evaluation.json (copied from Flow2 ~/powerOpt/p1/run5 at 2026-11-14T02:52Z)",
+ "earlier_faces_only_run_2026_11_11": {
+  "label": "faces only, older code: not the 0.14.0 defaults (no edge strands; block preconditioner for the large conductors)",
+  "measured_utc": "2026-11-11T20:22Z-21:38Z (jobs finished 06:21 and 06:38 JST on 2026-11-12)",
+  "environment": "Flow2 t1-share numa=4, nodes t1006 (off) / t1026 (on), AMD EPYC 9965; pcb-analysis run/faces-flow2 9cae0cf (MUMPS 5.9.1 linked, auto preconditioner of the time); plane_opt run/faces-after 712cb95; geometry_interface.raster.faces off / on; --threads 192",
+  "elapsed_s": [
+   3461.14,
+   4492.37
+  ],
+  "elapsed_change_pct": 29.7945,
+  "maxrss_kb": [
+   16664076,
+   33952948
+  ],
+  "elapsed_source": "/home/hyamada/Kicad_PowerOpt/work/p1/run3/off.log, /home/hyamada/Kicad_PowerOpt/work/p1/run3/on.log (copied from Flow2)",
+  "cases": [
+   {
+    "name": "vin_hs_on",
+    "role": "VIN",
+    "i2r_loss_w": [
+     0.08384842071428321,
+     0.08351658792099675
+    ],
+    "i2r_loss_w_change_pct": -0.3958,
+    "max_current_density_a_per_mm2": [
+     88.03037423172336,
+     76.57946133787546
+    ],
+    "max_current_density_a_per_mm2_change_pct": -13.0079,
+    "bulk_p99_current_density_a_per_mm2": [
+     40.81754093908309,
+     39.948271130437305
+    ],
+    "bulk_p99_current_density_a_per_mm2_change_pct": -2.1296,
+    "voltage_span_v": [
+     0.08531939434156899,
+     0.13344906071588172
+    ],
+    "voltage_span_v_change_pct": 56.4112
+   },
+   {
+    "name": "vin_hs_off",
+    "role": "VIN",
+    "i2r_loss_w": [
+     0.0011311627794541336,
+     0.0011295564306369127
+    ],
+    "i2r_loss_w_change_pct": -0.142,
+    "max_current_density_a_per_mm2": [
+     11.850442039432565,
+     11.6683385764083
+    ],
+    "max_current_density_a_per_mm2_change_pct": -1.5367,
+    "bulk_p99_current_density_a_per_mm2": [
+     5.813060235794924,
+     5.785532247541608
+    ],
+    "bulk_p99_current_density_a_per_mm2_change_pct": -0.4736,
+    "voltage_span_v": [
+     0.008571758041655091,
+     0.006402908159310482
+    ],
+    "voltage_span_v_change_pct": -25.3023
+   },
+   {
+    "name": "pgnd_hs_on",
+    "role": "PGND",
+    "i2r_loss_w": [
+     0.12029176435924605,
+     0.12053419371303785
+    ],
+    "i2r_loss_w_change_pct": 0.2015,
+    "max_current_density_a_per_mm2": [
+     87.8662055142133,
+     75.2889970628009
+    ],
+    "max_current_density_a_per_mm2_change_pct": -14.314,
+    "bulk_p99_current_density_a_per_mm2": [
+     41.04993731651926,
+     38.35988477282802
+    ],
+    "bulk_p99_current_density_a_per_mm2_change_pct": -6.5531,
+    "voltage_span_v": [
+     0.23832320328198237,
+     0.23925136047115717
+    ],
+    "voltage_span_v_change_pct": 0.3895
+   },
+   {
+    "name": "pgnd_hs_off",
+    "role": "PGND",
+    "i2r_loss_w": [
+     0.22570659139754987,
+     0.2254826085813127
+    ],
+    "i2r_loss_w_change_pct": -0.0992,
+    "max_current_density_a_per_mm2": [
+     244.1491195219191,
+     202.1034071450054
+    ],
+    "max_current_density_a_per_mm2_change_pct": -17.2213,
+    "bulk_p99_current_density_a_per_mm2": [
+     49.317683821969986,
+     47.37820659481088
+    ],
+    "bulk_p99_current_density_a_per_mm2_change_pct": -3.9326,
+    "voltage_span_v": [
+     0.32172091137923464,
+     0.32300741343849443
+    ],
+    "voltage_span_v_change_pct": 0.3999
+   },
+   {
+    "name": "sw_hs_on",
+    "role": "SW",
+    "i2r_loss_w": [
+     0.28361257980596366,
+     0.281700670713396
+    ],
+    "i2r_loss_w_change_pct": -0.6741,
+    "max_current_density_a_per_mm2": [
+     256.1888930235615,
+     227.17384323754231
+    ],
+    "max_current_density_a_per_mm2_change_pct": -11.3256,
+    "bulk_p99_current_density_a_per_mm2": [
+     152.10078147575845,
+     143.4881542455411
+    ],
+    "bulk_p99_current_density_a_per_mm2_change_pct": -5.6624,
+    "voltage_span_v": [
+     0.13303396342813692,
+     0.08644972197805931
+    ],
+    "voltage_span_v_change_pct": -35.0168
+   },
+   {
+    "name": "sw_hs_off",
+    "role": "SW",
+    "i2r_loss_w": [
+     0.18511668837925924,
+     0.18450619977327798
+    ],
+    "i2r_loss_w_change_pct": -0.3298,
+    "max_current_density_a_per_mm2": [
+     207.009952989976,
+     166.78386729131014
+    ],
+    "max_current_density_a_per_mm2_change_pct": -19.432,
+    "bulk_p99_current_density_a_per_mm2": [
+     109.11534858672756,
+     102.32362682740846
+    ],
+    "bulk_p99_current_density_a_per_mm2_change_pct": -6.2244,
+    "voltage_span_v": [
+     0.10770117994898332,
+     0.09627058716252489
+    ],
+    "voltage_span_v_change_pct": -10.6132
+   },
+   {
+    "name": "vout_hs_on",
+    "role": "VOUT",
+    "i2r_loss_w": [
+     0.39819783201984804,
+     0.39867349914639283
+    ],
+    "i2r_loss_w_change_pct": 0.1195,
+    "max_current_density_a_per_mm2": [
+     125.69058514592827,
+     112.3635432777817
+    ],
+    "max_current_density_a_per_mm2_change_pct": -10.6031,
+    "bulk_p99_current_density_a_per_mm2": [
+     62.624721987261296,
+     58.47990289304285
+    ],
+    "bulk_p99_current_density_a_per_mm2_change_pct": -6.6185,
+    "voltage_span_v": [
+     0.6146958351085836,
+     0.6163136540627979
+    ],
+    "voltage_span_v_change_pct": 0.2632
+   },
+   {
+    "name": "vout_hs_off",
+    "role": "VOUT",
+    "i2r_loss_w": [
+     0.4089976154261702,
+     0.4094952191812786
+    ],
+    "i2r_loss_w_change_pct": 0.1217,
+    "max_current_density_a_per_mm2": [
+     125.63504658271292,
+     112.30737805491499
+    ],
+    "max_current_density_a_per_mm2_change_pct": -10.6082,
+    "bulk_p99_current_density_a_per_mm2": [
+     65.20049441753135,
+     59.476896978569854
+    ],
+    "bulk_p99_current_density_a_per_mm2_change_pct": -8.7785,
+    "voltage_span_v": [
+     0.6238984574435986,
+     0.6255359811483561
+    ],
+    "voltage_span_v_change_pct": 0.2625
+   },
+   {
+    "name": "vsup_hs_on",
+    "role": "VSUP",
+    "i2r_loss_w": [
+     0.001974496583466644,
+     0.0019734138234165735
+    ],
+    "i2r_loss_w_change_pct": -0.0548,
+    "max_current_density_a_per_mm2": [
+     14.085469167340088,
+     13.637522728421457
+    ],
+    "max_current_density_a_per_mm2_change_pct": -3.1802,
+    "bulk_p99_current_density_a_per_mm2": [
+     8.064905185293636,
+     7.712644734355298
+    ],
+    "bulk_p99_current_density_a_per_mm2_change_pct": -4.3678,
+    "voltage_span_v": [
+     0.010184007514191006,
+     0.010350534670183074
+    ],
+    "voltage_span_v_change_pct": 1.6352
+   },
+   {
+    "name": "vsup_hs_off",
+    "role": "VSUP",
+    "i2r_loss_w": [
+     0.001989143351389103,
+     0.001987956828798116
+    ],
+    "i2r_loss_w_change_pct": -0.0596,
+    "max_current_density_a_per_mm2": [
+     14.01972368635746,
+     13.591204433460552
+    ],
+    "max_current_density_a_per_mm2_change_pct": -3.0565,
+    "bulk_p99_current_density_a_per_mm2": [
+     8.18664625746123,
+     7.807926862303992
+    ],
+    "bulk_p99_current_density_a_per_mm2_change_pct": -4.6261,
+    "voltage_span_v": [
+     0.0101443394085518,
+     0.01031066895279284
+    ],
+    "voltage_span_v_change_pct": 1.6396
+   }
+  ],
+  "change_range_pct": {
+   "i2r_loss_w": [
+    -0.6741,
+    0.2015
+   ],
+   "max_current_density": [
+    -19.432,
+    -1.5367
+   ],
+   "bulk_p99_current_density": [
+    -8.7785,
+    -0.4736
+   ]
+  },
+  "real_fill_maximum_ratio": [
+   3.497457782445739,
+   3.299416064044518
+  ],
+  "source": "/home/hyamada/Kicad_PowerOpt/work/p1/run3/off/evaluation.json, /home/hyamada/Kicad_PowerOpt/work/p1/run3/on/evaluation.json"
+ },
+ "decision": {
+  "adopted": true,
+  "what": "the cost was accepted with the 0.14.0 defaults (edge_strands='auto', faces='auto'); see SHEET_EDGE_STRANDS_DEFAULT_RESULTS.json and SHEET_FACE_COVERAGE_DEFAULT_RESULTS.json",
+  "by": "the user, 2026-11-14",
+  "user_words": [
+   {
+    "utc": "2026-11-14T01:23:45Z",
+    "text": "その順番で進めて",
+    "source": "transcript e7af5d69-a62e-40eb-8669-938a38bc3bdf (Kicad_PowerOpt) L19911 (the proposal included '3. Run the board's 03 real-fill path with them on, to measure time, memory and how the results change')"
+   },
+   {
+    "utc": "2026-11-14T03:14:20Z",
+    "text": "捨てて均一格子ルートで行こうってことになった。会話の履歴を参照して引き継いでほしい。リリースに向けてCUDA経路も含めて確認したい。",
+    "source": "transcript 93d4c06b-e874-4323-b1e5-cf55fcbd3d45 (Kicad_PowerOpt) L92"
+   },
+   {
+    "utc": "2026-11-14T18:32:30Z",
+    "text": "mainに早送りしてリリース公開して",
+    "source": "transcript f7d3f69d-98db-4e5f-8203-7364f4e44d8f (Kicad_PowerOpt) L984"
+   }
+  ],
+  "note": "the assistant's report (L20614, 2026-11-14T02:52:47Z) ended by asking for the adoption decision; no single user message answering it was found, the next user turns moved on to the via FEM check and the release"
+ },
+ "not_measured": [
+  "Where the remaining ~370 s of the 438 s increase went: the stages after the real-fill evaluation (hot loop, parasitics reports) were not profiled.",
+  "VIN real-fill cases: absent from both runs' case lists (the full-domain baseline has them); cause not investigated.",
+  "real_fill.all_case_physics_gate_passed is False in both runs (True in the 2026-11-12 run4); attributed to the plane_opt base, not investigated."
+ ],
+ "unsupported_figures": [],
+ "discrepancies": [
+  {
+   "cited": "'for 30 % more time and twice the memory (17 to 34 GB for the whole evaluation)' (docs/SHEET_PEEC.md 'Staircase')",
+   "supported": "that is the 2026-11-11 faces-only run on older code (3461 -> 4492 s, +29.8 %; 16.7 -> 34.0 GB). With the 0.14.0 defaults on the 2026-11-14 code: 1497 -> 1935 s (+29.2 %), 20.8 -> 20.9 GB",
+   "note": "the memory doubling did not recur; the docs sentence describes the superseded run"
+  },
+  {
+   "cited": "'(214 kHz, ten cases) the loss moved by less than 1 %' (docs/SHEET_PEEC.md)",
+   "supported": "ten cases only in the 2026-11-11 faces-only run: loss -0.67..+0.20 %, peak current density -1.5..-19.4 % (vin_hs_off -1.5 %); the 2026-11-14 run with both defaults has eight cases (VIN missing): loss -0.67..+0.20 %, peak -3.1..-19.4 %",
+   "note": "'peaks by -3 to -19 %' over 'ten cases' mixes the two runs"
+  }
+ ]
+}
