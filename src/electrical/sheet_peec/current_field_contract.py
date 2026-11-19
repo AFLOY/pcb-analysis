@@ -658,10 +658,11 @@ def _sheet_geometry(
         raise ValueError("edge_strands must be 'auto', true or false")
     coverage = _branch_coverage(mesh, problem, filament_of) if problem.copper_faces else None
     if coverage and not near_only:
-        warnings.warn(
-            "face coverage left out: the solve takes the block or diagonal preconditioner, which cannot carry "
-            "cut branches", RuntimeWarning, stacklevel=2,
-        )
+        if preconditioner is None:  # named in the settings; the path's own warning covers its block
+            warnings.warn(
+                "face coverage left out: the solve takes the block or diagonal preconditioner, which cannot carry "
+                "cut branches", RuntimeWarning, stacklevel=2,
+            )
         coverage = None
     if edge or coverage:
         if not isinstance(operator, SheetInductanceOperator):
