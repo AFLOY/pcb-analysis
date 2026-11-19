@@ -758,6 +758,30 @@ SuperLU saddle LU of that size would pass 4 GB and of a filled board's
 conductor would not fit at all.  `block` and `diagonal` otherwise run only
 when named.
 
+**Order of the CPU paths (0.14.1).** The user's order, 2026-11-12 ("MUMPSが無い
+ときだけblockに切り替える逃げ道を残そう") and 2026-11-20 ("MUMPS&near,
+superLU+near, superLU+block(40万未知数以上の大規模), scipy"):
+
+1. `mumps+near`: the core links MUMPS; near at every size, with edge strands
+   and face coverage.
+2. `superlu+near`: no MUMPS, below 400,000 unknowns; near by SuperLU, with
+   both.
+3. `superlu+block`: no MUMPS, from 400,000 unknowns; block cannot carry cut
+   branches, so edge strands and face coverage are left out, with a
+   `RuntimeWarning` naming the MUMPS build.
+4. `scipy`: no C++ core at all; the NumPy/SciPy paths (2 or 3 by size), with a
+   one-time warning.
+
+In 0.14.0 a mesh with edge strands or face coverage always took near, so
+without MUMPS a solve above 400,000 unknowns factored near by SuperLU, the
+path that ran out of 86 GB on a filled board's PGND, and the 0.13 fallback
+held only at DC.  `current_field_contract.solver_path` now decides the path
+once, from the mesh's branches and nodes (an upper bound of the solve's
+unknowns) before the branches are cut, and the solve takes it; the metrics
+record it as `solver_path`.  With `preconditioner="block"` or `"diagonal"`
+named, face coverage is left out with a warning (0.14.0 refused the solve).
+The device chooses for itself (cuDSS or SuperLU near).
+
 **Threads and bits.** MUMPS's OpenMP factorization sums in an order its team
 sets.  With its L0 tree parallelism (`ICNTL(48)`, on by default) the bits
 changed from run to run at a fixed thread count (three runs of the hot loop

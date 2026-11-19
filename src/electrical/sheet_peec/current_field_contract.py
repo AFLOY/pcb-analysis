@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import multiprocessing
+import warnings
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
@@ -17,12 +18,16 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from electrical.matrix_free_mpir_fem.grid import TensorGrid
+from electrical import backend as _backend
 from electrical.threads import set_thread_budget, thread_budget
 
 from .sheet_pfft import PfftSheetInductanceOperator
 from .near_factor import resolve_near_factor_threads, resolve_near_factorization
 from .sheet_operator import SheetInductanceOperator, SheetStackup
-from .sheet_peec import SheetMesh, Terminal, ViaBranch, _available_memory_bytes, memory_share, solve_sheet_cases
+from .sheet_peec import (
+    AUTO_BLOCK_FROM_UNKNOWNS, SheetMesh, Terminal, ViaBranch, _available_memory_bytes, choose_preconditioner,
+    memory_share, solve_sheet_cases,
+)
 from .sheet_results import cell_current_density_phasor, sheet_fields
 from .skin_filaments import filament_links, graded_filaments, skin_depth_m, tube_resistance_ratio
 
@@ -475,6 +480,11 @@ class _SheetGeometry:
     # whether the edge branches were cut into strands, and the faces' coverage applied
     edge_strands: bool = False
     face_coverage: bool = False
+    # The preconditioner the solve takes when the settings leave it ``auto`` on the
+    # CPU (see :func:`solver_path`), and the path's name for the metrics; ``None``
+    # leaves the choice to the solve (the device, or an explicit preconditioner).
+    preconditioner: str | None = None
+    solver_path: str | None = None
 
 
 def _filament_cuts(
@@ -634,18 +644,25 @@ def _sheet_geometry(
     # them within 1.4 % of a 2D FEM).  True asks for them and refuses a
     # setup that cannot have them; False leaves them out.
     strand_frequency = problem.frequency_hz if frequency_hz is None else frequency_hz
+    preconditioner, path = solver_path(mesh, settings)
+    # Strands and face coverage need the near preconditioner (only the near
+    # factor knows the cut branches): with block or diagonal, explicit or the
+    # path's, "auto" leaves both out.
+    near_only = str(preconditioner or settings.get("preconditioner", "auto")) not in ("block", "diagonal")
     requested = settings.get("edge_strands", "auto")
     if requested == "auto":
-        edge = (
-            strand_frequency > 0.0
-            and str(settings.get("preconditioner", "auto")) not in ("block", "diagonal")
-            and isinstance(operator, SheetInductanceOperator)
-        )
+        edge = strand_frequency > 0.0 and near_only and isinstance(operator, SheetInductanceOperator)
     elif isinstance(requested, bool):
         edge = requested and strand_frequency > 0.0
     else:
         raise ValueError("edge_strands must be 'auto', true or false")
     coverage = _branch_coverage(mesh, problem, filament_of) if problem.copper_faces else None
+    if coverage and not near_only:
+        warnings.warn(
+            "face coverage left out: the solve takes the block or diagonal preconditioner, which cannot carry "
+            "cut branches", RuntimeWarning, stacklevel=2,
+        )
+        coverage = None
     if edge or coverage:
         if not isinstance(operator, SheetInductanceOperator):
             raise ValueError("edge strands and face coverage need the uniform convolution operator")
@@ -669,8 +686,55 @@ def _sheet_geometry(
 
     return mesh, operator, _SheetGeometry(
         filament_of=filament_of, layer_by_name=layer_by_name, via_name_by_key=via_name_by_key,
-        edge_strands=bool(edge), face_coverage=bool(coverage),
+        edge_strands=bool(edge), face_coverage=bool(coverage), preconditioner=preconditioner, solver_path=path,
     )
+
+
+def solver_path(mesh: SheetMesh, settings: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    """``(preconditioner, path)`` of a CPU solve whose settings leave the preconditioner ``auto``.
+
+    The paths in order of preference (user decision, 2026-11-12 and 2026-11-20):
+
+    1. ``mumps+near``: the C++ core links MUMPS; near at every size.
+    2. ``superlu+near``: no MUMPS; near factored by SuperLU below
+       :data:`AUTO_BLOCK_FROM_UNKNOWNS` unknowns.
+    3. ``superlu+block``: no MUMPS from that size on, where SuperLU's near
+       factor would not fit; block cannot carry edge strands or face
+       coverage, so both are left out (with a warning).
+    4. ``scipy``: no C++ core at all; the NumPy/SciPy paths, with 2 or 3 by size.
+
+    The size is the mesh's branches and nodes, an upper bound of the solve's
+    unknowns, so the choice is made once, before the branches are cut.
+    ``(None, None)`` on the device or for an explicit preconditioner.
+    """
+    if str(settings.get("execution_backend", "cpu")) == "cuda":
+        return None, None
+    if str(settings.get("preconditioner", "auto")) != "auto":
+        return None, None
+    factorization = resolve_near_factorization(str(settings.get("near_factorization", "auto")))
+    preconditioner = choose_preconditioner(int(mesh.branch_count) + int(mesh.node_count), factorization)
+    if _backend.core() is None:
+        path = "scipy"
+        _warn_once("scipy", "the C++ core is not built: pcb-analysis runs its NumPy/SciPy paths (slower)")
+    else:
+        path = ("mumps+" if factorization == "mumps_quasi_definite" else "superlu+") + preconditioner
+    if preconditioner == "block":
+        warnings.warn(
+            f"no MUMPS and {int(mesh.branch_count) + int(mesh.node_count)} unknowns (from "
+            f"{AUTO_BLOCK_FROM_UNKNOWNS}): solved with SuperLU and the block preconditioner, without edge strands "
+            "or face coverage (build the C++ core with -DPCB_NATIVE_MUMPS=ON for near with both)",
+            RuntimeWarning, stacklevel=3,
+        )
+    return preconditioner, path
+
+
+_WARNED: set[str] = set()
+
+
+def _warn_once(key: str, message: str) -> None:
+    if key not in _WARNED:
+        _WARNED.add(key)
+        warnings.warn(message, RuntimeWarning, stacklevel=3)
 
 
 def _branch_coverage(
@@ -833,7 +897,7 @@ def _solve_conductor(
         "tolerance": float(settings.get("relative_tolerance", 1e-9)),
         "max_iterations": int(settings.get("maximum_iterations", 200)),
         "restart": int(settings.get("restart", 120)),
-        "preconditioner": str(settings.get("preconditioner", "auto")),
+        "preconditioner": geometry.preconditioner or str(settings.get("preconditioner", "auto")),
     }
     if execution_backend == "cuda":
         from .sheet_cuda import solve_sheet_cases_cuda
@@ -868,6 +932,7 @@ def _solve_conductor(
             "conductor_width": width,
             "edge_strands": geometry.edge_strands,
             "face_coverage": geometry.face_coverage,
+            "solver_path": geometry.solver_path,
         }
         with memory_share(1.0 / width):
             solved = [

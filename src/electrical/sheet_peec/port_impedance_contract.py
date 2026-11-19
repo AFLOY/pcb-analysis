@@ -412,7 +412,7 @@ def solve_port_impedance_problem(
 
     warm_start = bool(settings.get("warm_start", True))
     refinement = settings.get("frequency_refinement")
-    built: dict[tuple, tuple[SheetMesh, Any, list[PortPad]]] = {}
+    built: dict[tuple, tuple[SheetMesh, Any, list[PortPad], str | None]] = {}
     solved: dict[float, tuple[SheetPortImpedance, SheetMesh, dict[str, Any]]] = {}
 
     def solve_at(frequency: float) -> SheetPortImpedance:
@@ -421,8 +421,8 @@ def solve_port_impedance_problem(
         reused = key in built
         if not reused:
             mesh, operator, geometry = _sheet_geometry(problem, settings, frequency)
-            built[key] = (mesh, operator, _port_pads(problem, geometry.filament_of))
-        mesh, operator, pads = built[key]
+            built[key] = (mesh, operator, _port_pads(problem, geometry.filament_of), geometry.preconditioner)
+        mesh, operator, pads, preconditioner = built[key]
         prepared = time.perf_counter()
         nearest = None
         if warm_start:
@@ -431,7 +431,8 @@ def solve_port_impedance_problem(
                 nearest = min(same_mesh, key=lambda f: (abs(math.log(f / frequency)), f))
         impedance = solve_port_impedance(
             mesh, operator, pads, ports, frequency_hz=frequency, keep_solutions=keep_solutions or warm_start,
-            initial=None if nearest is None else solved[nearest][0], **solve_arguments
+            initial=None if nearest is None else solved[nearest][0],
+            **dict(solve_arguments, preconditioner=preconditioner or solve_arguments["preconditioner"]),
         )
         solved[frequency] = (impedance, mesh, {
             "frequency_hz": frequency,
