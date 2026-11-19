@@ -4,6 +4,50 @@ Release notes for [pcb-analysis](https://pypi.org/project/pcb-analysis/).
 Each version is published from the `vX.Y.Z` tag by the `Release` workflow.
 Versions before 0.7.0 were not tagged; see the Git history.
 
+## 0.14.1
+
+A CPU sheet solve left on `preconditioner="auto"` takes its path in a fixed
+order, and a large one without MUMPS gives different results than in 0.14.0.
+
+- The CPU path is chosen once per conductor, from the mesh's unknowns, in
+  this order: MUMPS with the near preconditioner at every size; SuperLU with
+  near below 400,000 unknowns (`AUTO_BLOCK_FROM_UNKNOWNS`); SuperLU with the
+  block preconditioner from there, with edge strands and face coverage left
+  out and a `RuntimeWarning` naming the MUMPS build; SciPy when the C++ core
+  is not built (one warning a process).  In 0.14.0 a mesh carrying strands
+  or faces always took near, so without MUMPS a large solve factored near by
+  SuperLU, the path that ran out of memory on a filled board's PGND
+  (docs/SHEET_NEAR_MUMPS_DEFAULT_RESULTS.json).  The metrics record
+  `solver_path`.  The size limit applies without MUMPS only, and the device
+  keeps its own choice.
+- Results change on the SuperLU+block path: the strands and faces are not
+  modelled there (a real fill's VOUT at 0.1 mm, 558,702 unknowns, a GB200's
+  CPU without MUMPS: 541 iterations, 206 s, peak current density 24.5 % off
+  the device's solve with strands and faces).  Build the core with MUMPS for
+  the 0.14.0 model at that size.
+- A named `block` or `diagonal` preconditioner leaves face coverage out with
+  a warning instead of refusing the solve.
+- `rasterize_board(faces="auto")` warns when the coverage is not recorded
+  for want of the native geometry extension; before, a 45-degree edge read
+  as its staircase without notice.
+- CUDA: excitations solved together (`solve_port_impedance` on the device)
+  are taken a restart cycle at a time, as many as a basis of the length their
+  next cycle wants fits, instead of in fixed groups that each read the
+  factors for every planned column (92 ports at 1 MHz on a 23 GB device:
+  363 s before, 305 s of it in triangular solves).  The cuDSS near factor
+  solves as many columns as it is given.  92 ports of a real fill at 1 MHz
+  on a GB200: 4.9 s on the device, 135 s on its CPU, largest relative
+  difference 7.1e-7.
+- Checked on a GB200: the stage-03 replay's nine calls converge on the
+  device (the VOUT call at 0.1 mm: 3 cycles, residual 3e-14, 4.5 s).
+- Records: the 0.13.0 and 0.14.0 notes and docs/SHEET_PEEC.md follow the
+  benchmark records, now added as docs/*_RESULTS.json (near with MUMPS, edge
+  strands, face coverage, via FEM, the cuDSS default, the real fill's edge
+  correction cost).
+- Test: the CUDA and CPU pfft solves of the graded grid are compared at
+  1e-12; at the 1e-9 the test used, cuDSS's factors leave the currents
+  3.4e-8 of their peak off, and it failed on 0.14.0 on a device.
+
 ## 0.14.0
 
 The sheet solve's results above zero frequency change: the uniform grid's
